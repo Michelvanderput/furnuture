@@ -1,0 +1,34 @@
+{
+  "name": "furnuture",
+  "version": "1.0.0",
+  "description": "Richt je nieuwe Funda-huis in terwijl je op de sleutel wacht",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Michelvanderput/furnuture.git"
+  },
+  "author": "",
+  "bugs": {
+    "url": "https://github.com/Michelvanderput/furnuture/issues"
+  },
+  "homepage": "https://github.com/Michelvanderput/furnuture#readme",
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.2"
+  },
+  "dependencies": {
+    "next": "^15.5.26",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "private": true
+}
