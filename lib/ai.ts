@@ -15,24 +15,32 @@ type Classifier = (
   options?: { hypothesis_template?: string },
 ) => Promise<{ label: string; score: number }[]>;
 
-let classifier: Promise<Classifier> | null = null;
-
 export type Progress = (message: string) => void;
 
-function getClassifier(onProgress?: Progress): Promise<Classifier> {
-  classifier ??= import(/* webpackIgnore: true */ TRANSFORMERS_URL).then((t) =>
-    t.pipeline("zero-shot-image-classification", MODEL, {
-      dtype: "q8",
-      progress_callback: (p: { status: string; file?: string; progress?: number }) => {
-        if (p.status === "progress" && p.file?.endsWith(".onnx")) {
-          onProgress?.(`AI-model downloaden… ${Math.round(p.progress ?? 0)}%`);
-        }
-      },
-    }),
-  );
-  classifier.catch(() => (classifier = null));
-  return classifier;
+const pipelines = new Map<string, Promise<unknown>>();
+
+/** Loads (once) a transformers.js pipeline from the CDN. */
+function getPipeline<T>(task: string, model: string, onProgress?: Progress): Promise<T> {
+  const key = `${task}:${model}`;
+  if (!pipelines.has(key)) {
+    const p = import(/* webpackIgnore: true */ TRANSFORMERS_URL).then((t) =>
+      t.pipeline(task, model, {
+        dtype: "q8",
+        progress_callback: (e: { status: string; file?: string; progress?: number }) => {
+          if (e.status === "progress" && e.file?.endsWith(".onnx")) {
+            onProgress?.(`AI-model downloaden… ${Math.round(e.progress ?? 0)}%`);
+          }
+        },
+      }),
+    );
+    p.catch(() => pipelines.delete(key));
+    pipelines.set(key, p);
+  }
+  return pipelines.get(key) as Promise<T>;
 }
+
+const getClassifier = (onProgress?: Progress) =>
+  getPipeline<Classifier>("zero-shot-image-classification", MODEL, onProgress);
 
 const LABELED = ROOMS.filter((r) => r.clip);
 
@@ -53,4 +61,26 @@ export async function classifyRooms(
     onResult(photo.id, room);
   }
   onProgress?.("");
+}
+
+/**
+ * AI background removal (BRIA RMBG-1.4, ~45 MB, free for non-commercial use).
+ * Much better than the colour-based cut-out for light furniture or sfeerfoto's.
+ */
+const RMBG_MODEL = "briaai/RMBG-1.4";
+
+type RawImage = { toCanvas: () => HTMLCanvasElement | OffscreenCanvas };
+type Remover = (image: string) => Promise<RawImage[]>;
+
+export async function removeBackgroundAI(src: string, onProgress?: Progress): Promise<string> {
+  const remove = await getPipeline<Remover>("background-removal", RMBG_MODEL, onProgress);
+  const [out] = await remove(new URL(proxied(src), window.location.href).toString());
+  const canvas = out.toCanvas();
+  if ("toDataURL" in canvas) return canvas.toDataURL("image/png");
+  const blob = await (canvas as OffscreenCanvas).convertToBlob({ type: "image/png" });
+  return await new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsDataURL(blob);
+  });
 }

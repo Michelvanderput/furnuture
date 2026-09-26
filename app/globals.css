@@ -123,27 +123,42 @@ h3.group { margin-top: 28px; padding-bottom: 6px; border-bottom: 1px solid var(-
 .photo-strip span { display: block; padding: 2px 6px; }
 .stage-wrap { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .toolbar .hint { color: var(--muted); }
-.stage { width: 100%; height: auto; border-radius: 8px; background: var(--bg); touch-action: none; user-select: none; }
+.stage { position: relative; width: 100%; overflow: hidden; border-radius: 8px; background: var(--bg); touch-action: none; user-select: none; }
 .stage.loading { aspect-ratio: 3 / 2; display: grid; place-items: center; color: var(--muted); }
-.stage.drawing { cursor: crosshair; }
-.stage .product-layer { cursor: move; }
-.stage polygon { cursor: pointer; }
-.stage polygon.selected { stroke: var(--accent); stroke-width: 3; stroke-dasharray: 10 6; vector-effect: non-scaling-stroke; }
-.stage .outline { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 8 5; vector-effect: non-scaling-stroke; }
-.stage .handle { fill: #fff; stroke: var(--accent); stroke-width: 3; vector-effect: non-scaling-stroke; cursor: nwse-resize; }
-.stage .draft { fill: rgba(233, 96, 31, 0.15); stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
-.layer-controls { padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.stage .canvas { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.stage .layer { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; max-width: none; }
+.stage .surface .fill { position: absolute; inset: 0; background-repeat: repeat; }
+.stage .surface .plane { position: absolute; left: 0; top: 0; transform-origin: 0 0; background-repeat: repeat; }
+.stage .overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+.overlay .hit { fill: transparent; stroke: none; cursor: pointer; }
+.overlay .hit.product { cursor: move; }
+.overlay .hit.erase { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
+.overlay .hit.selected { stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 10 6; vector-effect: non-scaling-stroke; }
+.overlay.drawing { cursor: crosshair; }
+.overlay.drawing .hit, .overlay .draft { pointer-events: none; }
+.overlay .handle { fill: #fff; stroke: var(--accent); stroke-width: 3; vector-effect: non-scaling-stroke; cursor: nwse-resize; }
+.overlay .handle.distort { fill: var(--accent); cursor: crosshair; }
+.overlay .draft { fill: rgba(233, 96, 31, 0.15); stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.overlay .draft.erase { fill: rgba(255, 255, 255, 0.35); stroke-dasharray: 6 4; }
+.layer-controls { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
 .layer-controls select { max-width: 260px; }
 .palette h3 { margin-bottom: 4px; }
 .palette-item { display: flex; gap: 8px; align-items: center; padding: 4px; text-align: left; white-space: normal; font-size: 13px; }
 .palette-item img { width: 52px; height: 52px; object-fit: contain; background: #fff; border-radius: 6px; flex: none; }
 .palette-item small { display: block; color: var(--muted); }
+.palette-item .swatch { width: 52px; height: 52px; border-radius: 6px; flex: none; }
+.palette h3:not(:first-child) { margin-top: 12px; }
+.presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.preset { padding: 0; overflow: hidden; white-space: normal; font-size: 11px; line-height: 1.2; text-align: left; }
+.preset img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
+.preset span { display: block; padding: 3px 4px; }
 
 @media (max-width: 900px) {
   .visualizer { grid-template-columns: 1fr; }
-  .photo-strip, .palette { flex-direction: row; max-height: none; overflow-x: auto; }
+  .photo-strip { flex-direction: row; max-height: none; overflow-x: auto; }
+  .palette { max-height: none; }
+  .presets { grid-template-columns: repeat(4, 1fr); }
   .photo-strip button { flex: 0 0 120px; }
-  .palette-item { flex: 0 0 200px; }
 }
 @media (max-width: 600px) {
   main { padding: 12px; }

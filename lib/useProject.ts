@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { migrateProject } from "./migrate";
 import { loadProject, saveProject } from "./storage";
 import type { Project } from "./types";
 
@@ -15,7 +16,7 @@ export function useProject() {
 
   useEffect(() => {
     loadProject().then((p) => {
-      if (p) setProject({ ...EMPTY, ...p });
+      if (p) setProject(migrateProject({ ...EMPTY, ...p }));
       setLoaded(true);
     });
   }, []);

@@ -61,35 +61,62 @@ export interface Product {
   color?: string;
 }
 
-/** A product image dragged onto a room photo. Coordinates are in photo pixels. */
+export type Pt = [number, number];
+export type Quad = [Pt, Pt, Pt, Pt];
+
+export type CutoutMode = "off" | "simple" | "ai";
+
+/**
+ * A product image placed on a room photo. Coordinates are in photo pixels.
+ * The image is mapped onto four free corners, so it can be put in perspective.
+ */
 export interface ProductLayer {
   kind: "product";
   id: string;
   productId: string;
-  x: number;
-  y: number;
-  width: number;
+  /** top-left, top-right, bottom-right, bottom-left */
+  corners: Quad;
   /** height / width of the product image */
   aspect: number;
   flip: boolean;
-  /** Remove near-white background from the product image (no AI, flood fill). */
-  cutout: boolean;
+  /** How to remove the product photo's background. */
+  cutout: CutoutMode;
+  /** Colour tolerance for the simple (non-AI) cut-out. */
+  tolerance: number;
+  /** Corner handles move individually (perspective) instead of scaling. */
+  distort: boolean;
 }
 
-/** A hand-drawn area (wall, floor) filled with a colour or a product texture. */
+export type SurfaceFill =
+  | { type: "color"; color: string }
+  | { type: "texture"; productId: string }
+  | { type: "preset"; preset: string };
+
+/** A hand-drawn area (wall, floor) filled with a colour or a texture. */
 export interface SurfaceLayer {
   kind: "surface";
   id: string;
-  points: [number, number][];
-  fill: { type: "color"; color: string } | { type: "texture"; productId: string };
+  points: Pt[];
+  fill: SurfaceFill;
   opacity: number;
   /** multiply keeps the shadows of the photo (good for paint), normal covers it (good for floors). */
   blend: "multiply" | "normal";
-  /** Texture tile width in photo pixels. */
+  /** Texture tile size in pixels. */
   scale: number;
+  /** For 4-point areas: lay the texture in perspective onto the four corners. */
+  perspective: boolean;
+  /** Part of a product photo used as texture (1 = whole image, 0.3 = centre 30%). */
+  crop: number;
 }
 
-export type Layer = ProductLayer | SurfaceLayer;
+/** An area of the photo that is painted out (existing furniture removed). */
+export interface EraseLayer {
+  kind: "erase";
+  id: string;
+  points: Pt[];
+}
+
+export type Layer = ProductLayer | SurfaceLayer | EraseLayer;
 
 export interface Scene {
   photoId: string;
