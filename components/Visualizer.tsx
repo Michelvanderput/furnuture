@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { removeBackgroundAI } from "@/lib/ai";
 import { categoryLabel, roomLabel } from "@/lib/categories";
 import { centroid, pointInPolygon, project as projectPoint, quadToMatrix3d, rectQuad } from "@/lib/geometry";
 import { cropCenter, loadImage, NoPlainBackground, proxied, removeBackground } from "@/lib/images";
 import { renderErased } from "@/lib/inpaint";
+import { photoLook, productFilter } from "@/lib/look";
 import {
   cutoutKey,
   fillFor,
@@ -279,6 +280,9 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
       tolerance: 18,
       distort: false,
     };
+    // Match the room's light, and add a soft shadow.
+    const look = await photoLook(photo!.url).catch(() => ({ light: 1, warmth: 0 }));
+    layer = { ...layer, ...look, shadow: 0.5 };
     // With a floor in the room, stand on it: perspective and depth come for free.
     const floor = floors.at(-1);
     if (floor) layer = placeOnFloor(layer, floor, projectPoint(planeToImage(planeOf(floor)!), [PLANE / 2, PLANE * 0.65]));
@@ -578,19 +582,24 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
                   const cut = cutouts[cutoutKey(l)];
                   const src = l.cutout !== "off" && cut && !cut.startsWith("failed") && cut !== "pending" ? cut : proxied(product.image);
                   const h = PRODUCT_W * l.aspect;
+                  const floor = l.floor && scene.layers.find((f) => f.id === l.floor!.planeId);
+                  const floorPlane = floor?.kind === "surface" ? planeOf(floor) : null;
                   return (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      key={l.id}
-                      className="layer product"
-                      src={src}
-                      alt={product.title}
-                      style={{
-                        width: PRODUCT_W,
-                        height: h,
-                        transform: quadToMatrix3d(PRODUCT_W, h, l.corners) + (l.flip ? ` translateX(${PRODUCT_W}px) scaleX(-1)` : ""),
-                      }}
-                    />
+                    <Fragment key={l.id}>
+                      {(l.shadow ?? 0.5) > 0 && <Shadow layer={l} plane={floorPlane} size={size} />}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        className="layer product"
+                        src={src}
+                        alt={product.title}
+                        style={{
+                          width: PRODUCT_W,
+                          height: h,
+                          filter: productFilter(l.light, l.warmth),
+                          transform: quadToMatrix3d(PRODUCT_W, h, l.corners) + (l.flip ? ` translateX(${PRODUCT_W}px) scaleX(-1)` : ""),
+                        }}
+                      />
+                    </Fragment>
                   );
                 })}
             </div>
@@ -808,3 +817,47 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   );
 }
 
+
+/**
+ * Soft contact shadow. On a floor it is drawn in the floor's plane, so it lies
+ * flat in perspective under the product's footprint; otherwise a flat ellipse
+ * under the bottom edge.
+ */
+function Shadow({ layer, plane, size }: { layer: ProductLayer; plane: Quad | null; size: { w: number; h: number } }) {
+  const strength = layer.shadow ?? 0.5;
+  const gradient = `radial-gradient(closest-side, rgba(0,0,0,${0.55 * strength}), rgba(0,0,0,${0.3 * strength}) 55%, transparent)`;
+  if (layer.floor && plane) {
+    const { u, v, width, angle } = layer.floor;
+    const depth = width * 0.45; // footprint behind the front edge
+    return (
+      <div className="layer shadow" style={{ width: size.w, height: size.h }}>
+        <div className="plane" style={{ width: PLANE, height: PLANE, transform: quadToMatrix3d(PLANE, PLANE, plane) }}>
+          <div
+            style={{
+              position: "absolute",
+              left: u - width * 0.6,
+              top: v - depth * 1.1,
+              width: width * 1.2,
+              height: depth * 1.3,
+              background: gradient,
+              transform: `rotate(${angle}deg)`,
+              transformOrigin: `50% ${(depth * 1.1) / (depth * 1.3) * 100}%`,
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+  const [, , br, bl] = layer.corners;
+  const w = Math.hypot(br[0] - bl[0], br[1] - bl[1]) * 1.15;
+  const h = w * 0.14;
+  const cx = (br[0] + bl[0]) / 2;
+  const cy = (br[1] + bl[1]) / 2;
+  const rot = (Math.atan2(br[1] - bl[1], br[0] - bl[0]) * 180) / Math.PI;
+  return (
+    <div
+      className="layer shadow"
+      style={{ left: cx - w / 2, top: cy - h * 0.6, width: w, height: h, background: gradient, transform: `rotate(${rot}deg)`, transformOrigin: "50% 60%" }}
+    />
+  );
+}

@@ -55,13 +55,17 @@ Zo werkt het:
 3. **Nieuwe vloer / verven**: uit het vloer- of muurmasker wordt automatisch een perspectiefvlak berekend. Randen die door meubels verborgen zijn, tellen niet mee. De textuur loopt mee met de diepte; de oranje hoekjes stellen het vlak bij. Een nieuwe vloer of muur bedekt ook de plek waar weggegumde meubels stonden.
 4. **Meubels op de vloer**: staat er een vloer in de foto, dan wordt een nieuw meubel erop gezet. Schuif je het naar achteren, dan wordt het vanzelf kleiner; met "Draaien op de vloer" zet je het schuin, bijvoorbeeld in een hoek.
 
-### Grenzen en de volgende stap
+### Echter zonder betaalde AI
 
-Een productfoto blijft een foto van één kant: schuin zetten vervormt hem, maar laat nooit de zijkant zien, en er komt geen echte schaduw. Daarvoor is **generatieve beeld-AI** nodig die de kamerfoto en de productfoto samen opnieuw tekent (bijvoorbeeld Gemini Image, FLUX Kontext of GPT Image). Die modellen draaien niet in de browser, dus dat wordt een betaalde API (enkele centen per beeld) met een API-sleutel op de server.
+De app blijft volledig gratis: geen API-sleutels, geen proefperiodes. Om meubels toch natuurlijk te laten ogen:
+
+- **Contactschaduw**: een zachte schaduw onder het meubel, op een herkende vloer in perspectief en mee met het draaien.
+- **Licht en warmte**: productfoto's zijn fel en neutraal (studiolicht). Bij het plaatsen wordt het meubel gedimd en opgewarmd op basis van de gemiddelde helderheid en kleur van de kamerfoto; bij te stellen met de schuiven Licht en Warmte.
+
+Wat gratis in de browser niet kan: een productfoto blijft een foto van één kant, dus schuin zetten laat nooit de zijkant zien. Dat vraagt generatieve beeld-AI. Die kan gratis draaien op een eigen pc met een flinke videokaart (bijvoorbeeld ComfyUI met FLUX of Stable Diffusion), maar niet in de browser.
 
 ## Mogelijke volgende stappen
 
-- [ ] Knop "Maak fotorealistisch" met generatieve beeld-AI (licht, schaduw, echte draaiing)
 - [ ] Visualisatie exporteren als afbeelding en een project delen met je partner
 - [ ] Browserextensie of deel-knop op de telefoon ("Delen → furnuture") om producten toe te voegen
 - [ ] Budget per ruimte en afmetingen van producten tegenover de plattegrond

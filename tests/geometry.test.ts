@@ -51,3 +51,16 @@ describe("pushPullFill", () => {
     expect(Math.abs(b - 200)).toBeLessThan(60);
   });
 });
+
+import { lookFromStats } from "@/lib/look";
+
+describe("room look", () => {
+  it("dims products in dark rooms and warms them in warm light", () => {
+    const dark = lookFromStats(70, 0);
+    const bright = lookFromStats(220, 0);
+    expect(dark.light).toBeLessThan(bright.light);
+    expect(bright.light).toBeLessThanOrEqual(1.05);
+    expect(lookFromStats(150, 40).warmth).toBeGreaterThan(0.2);
+    expect(lookFromStats(150, -30).warmth).toBe(0);
+  });
+});

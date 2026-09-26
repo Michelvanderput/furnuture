@@ -87,6 +87,11 @@ export interface ProductLayer {
   distort: boolean;
   /** Standing on a floor: corners follow the floor's perspective and depth. */
   floor?: FloorAnchor;
+  /** Soft contact shadow under the product (0 = none). */
+  shadow?: number;
+  /** Brightness and warmth to match the room's light (CSS brightness / sepia). */
+  light?: number;
+  warmth?: number;
 }
 
 export interface FloorAnchor {

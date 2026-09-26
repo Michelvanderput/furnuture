@@ -128,6 +128,18 @@ export function LayerControls({ layer, products, floors, cutoutState, onChange, 
           </div>
         )}
         <div className="row wrap">
+          <label className="row" title="Zachte schaduw op de vloer">
+            Schaduw
+            <input type="range" min={0} max={1} step={0.05} value={layer.shadow ?? 0.5} onChange={(e) => onChange({ shadow: Number(e.target.value) })} />
+          </label>
+          <label className="row" title="Productfoto's zijn feller dan een kamer: maak hem wat donkerder">
+            Licht
+            <input type="range" min={0.5} max={1.3} step={0.01} value={layer.light ?? 1} onChange={(e) => onChange({ light: Number(e.target.value) })} />
+          </label>
+          <label className="row" title="Warmere kleur, passend bij het licht in de kamer">
+            Warmte
+            <input type="range" min={0} max={0.5} step={0.01} value={layer.warmth ?? 0} onChange={(e) => onChange({ warmth: Number(e.target.value) })} />
+          </label>
           <button onClick={() => onChange({ flip: !layer.flip })}>↔ Spiegelen</button>
           {order}
         </div>
