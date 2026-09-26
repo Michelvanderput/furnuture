@@ -19,7 +19,7 @@ npm run typecheck
 
 | Onderdeel | Techniek | AI? |
 |---|---|---|
-| Funda-foto's ophalen | Server haalt de pagina en `/media/foto/` op en zoekt `cloud.funda.nl/valentina_media/...`-URL's | Nee |
+| Funda-foto's ophalen | 1) De API van de Funda-app (`listing-detail-page.funda.io`, id uit de URL), 2) de website, 3) een bookmarklet die in je eigen browser draait | Nee |
 | Foto's per ruimte | CLIP zero-shot (`Xenova/clip-vit-base-patch32`) via transformers.js in de browser, of handmatig slepen | Optioneel, gratis |
 | Productlinks lezen | JSON-LD `Product`, Open Graph en `product:price`-metatags (bijna elke webshop heeft deze) | Nee |
 | Categorie bepalen | Trefwoorden in titel, breadcrumbs en URL (NL + EN) | Nee |
@@ -30,7 +30,9 @@ npm run typecheck
 
 ### Bekende beperking: Funda blokkeert scrapers
 
-Funda heeft botbescherming, dus automatisch ophalen lukt niet altijd. Daarom zijn er twee alternatieven in de app: de paginabron plakken (Ctrl+U) of foto's uploaden. Voor een publieke app is dit juridisch ook een aandachtspunt: de voorwaarden van Funda staan scrapen niet toe. De veiligste route is dat de gebruiker zelf de foto's of de paginabron aanlevert. Zo werkt de app nu ook als het ophalen mislukt.
+De website van Funda heeft botbescherming, en die blokkeert servers zoals die van Vercel meestal. De app probeert daarom eerst de (niet-officiële) API van de Funda-app, zoals [pyfunda](https://github.com/0xMH/pyfunda) die gebruikt. Werkt dat ook niet, dan is er de knop **"📸 Foto's van Funda halen"**. Dat is een bookmarklet: je sleept hem naar je bladwijzerbalk en klikt erop op een Funda-woning. Hij draait in je eigen browser, dus de botbescherming speelt geen rol, en stuurt de foto's naar de app. Plakken van de paginabron of zelf uploaden kan ook nog.
+
+Let op: de voorwaarden van Funda staan geautomatiseerd ophalen niet toe. Voor persoonlijk gebruik is de bookmarklet de netste route; voor een publieke app is dit een juridisch aandachtspunt.
 
 ## Kan het meubels in de foto's vervangen?
 

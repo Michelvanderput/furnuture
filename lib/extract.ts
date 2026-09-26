@@ -1,5 +1,5 @@
-import { guessCategory } from "./categories";
-import type { FundaResult, ProductInfo } from "./types";
+import { guessCategory, guessRoom } from "./categories";
+import type { FundaResult, ProductInfo, RoomType } from "./types";
 
 /** Minimal HTML helpers: we only need meta tags, JSON-LD and URLs, so no DOM parser. */
 
@@ -121,6 +121,51 @@ export function parseFunda(html: string, pageUrl: string): FundaResult {
   }
   const title = meta.get("og:title")?.[0] ?? extractTitle(html);
   return { title: title.replace(/\s*\|\s*funda\s*$/i, "").trim(), photos };
+}
+
+/** The numeric listing id at the end of a funda.nl detail URL (e.g. .../huis-straat-1/43117443/). */
+export function fundaListingId(u: string): string | null {
+  try {
+    const ids = new URL(u).pathname.match(/\/(\d{7,9})(?=\/|$)/g);
+    return ids ? ids[ids.length - 1].slice(1) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parses the JSON of Funda's mobile-app API (listing-detail-page.funda.io), which,
+ * unlike the website, is not behind a browser challenge. Media groups look like
+ * { MediaBaseUrl: "https://cloud.funda.nl/valentina_media/{id}.jpg", Items: [{ Id, DisplayName }] }.
+ */
+export function parseFundaApi(data: unknown): FundaResult {
+  const d = (data ?? {}) as Json;
+  const media = (d.Media ?? {}) as Json;
+  const photos: string[] = [];
+  const rooms: Record<string, RoomType> = {};
+
+  const collect = (group: unknown, fixedRoom?: RoomType) => {
+    const g = (group ?? {}) as Json;
+    const base = typeof g.MediaBaseUrl === "string" ? g.MediaBaseUrl : "";
+    for (const item of (Array.isArray(g.Items) ? g.Items : []) as Json[]) {
+      const id = item.Id == null ? "" : String(item.Id);
+      if (!base || !id) continue;
+      const url = base.replace("{id}", id).replace(/^http:/, "https:");
+      if (photos.includes(url)) continue;
+      photos.push(url);
+      const room = fixedRoom ?? guessRoom(item.DisplayName as string | undefined);
+      if (room) rooms[url] = room;
+    }
+  };
+  collect(media.Photos);
+  collect(media.FloorPlan ?? media.LegacyFloorPlan, "plattegrond");
+
+  // Unknown shape? Fall back to any photo URL in the JSON.
+  if (photos.length === 0) photos.push(...extractFundaPhotos(JSON.stringify(data)));
+
+  const address = (d.AddressDetails ?? {}) as Json;
+  const title = [address.Title, address.SubTitle].filter((x) => typeof x === "string" && x).join(", ");
+  return { title, photos, rooms };
 }
 
 export function isFundaUrl(u: string): boolean {

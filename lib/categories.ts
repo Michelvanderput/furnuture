@@ -66,3 +66,23 @@ export function guessCategory(...texts: (string | undefined)[]): Category {
   for (const [cat, re] of RULES) if (re.test(haystack)) return cat;
   return "overig";
 }
+
+const ROOM_RULES: [RoomType, RegExp][] = [
+  ["plattegrond", /plattegrond|floor ?plan|indeling/],
+  ["keuken", /keuken|kitchen/],
+  ["badkamer", /badkamer|bathroom|douche/],
+  ["toilet", /toilet|\bwc\b/],
+  ["slaapkamer", /slaapkamer|bedroom/],
+  ["woonkamer", /woonkamer|living|zitkamer|eetkamer/],
+  ["hal", /\bhal\b|entree|trap|overloop|hallway/],
+  ["werkkamer", /werkkamer|kantoor|studeerkamer|office/],
+  ["zolder", /zolder|vliering|attic/],
+  ["tuin", /tuin|balkon|terras|dakterras|garden|balcony/],
+  ["buitenkant", /gevel|voorzijde|achterzijde|exterieur|straat|facade/],
+];
+
+/** Room type from a caption such as Funda's photo DisplayName. */
+export function guessRoom(text: string | undefined): RoomType | undefined {
+  const t = (text ?? "").toLowerCase();
+  return ROOM_RULES.find(([, re]) => re.test(t))?.[0];
+}

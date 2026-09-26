@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { guessCategory } from "@/lib/categories";
-import { extractFundaPhotos, isFundaUrl, parseFunda, parseProduct } from "@/lib/extract";
+import { extractFundaPhotos, fundaListingId, isFundaUrl, parseFunda, parseFundaApi, parseProduct } from "@/lib/extract";
 
 describe("funda", () => {
   const html = `
@@ -94,5 +94,41 @@ describe("guessCategory", () => {
     ["Iets onbekends", "overig"],
   ])("%s -> %s", (title, category) => {
     expect(guessCategory(title)).toBe(category);
+  });
+});
+
+describe("funda app API", () => {
+  it("takes the listing id from the URL", () => {
+    expect(fundaListingId("https://www.funda.nl/detail/koop/verkocht/maastricht/huis-karbindersdreef-49/17284428/")).toBe("17284428");
+    expect(fundaListingId("https://www.funda.nl/detail/koop/amsterdam/huis-a-1/43117443/media/foto/")).toBe("43117443");
+    expect(fundaListingId("https://www.funda.nl/")).toBeNull();
+  });
+
+  it("builds photo URLs from MediaBaseUrl and labels floor plans and rooms", () => {
+    const res = parseFundaApi({
+      AddressDetails: { Title: "Karbindersdreef 49", SubTitle: "6225 XX Maastricht" },
+      Media: {
+        Photos: {
+          MediaBaseUrl: "https://cloud.funda.nl/valentina_media/{id}.jpg",
+          Items: [{ Id: "224/063/577" }, { Id: "224/063/578", DisplayName: "Keuken" }, { Id: "224/063/577" }],
+        },
+        FloorPlan: { MediaBaseUrl: "https://cloud.funda.nl/valentina_media/{id}.png", Items: [{ Id: "224/063/600" }] },
+      },
+    });
+    expect(res.title).toBe("Karbindersdreef 49, 6225 XX Maastricht");
+    expect(res.photos).toEqual([
+      "https://cloud.funda.nl/valentina_media/224/063/577.jpg",
+      "https://cloud.funda.nl/valentina_media/224/063/578.jpg",
+      "https://cloud.funda.nl/valentina_media/224/063/600.png",
+    ]);
+    expect(res.rooms).toEqual({
+      "https://cloud.funda.nl/valentina_media/224/063/578.jpg": "keuken",
+      "https://cloud.funda.nl/valentina_media/224/063/600.png": "plattegrond",
+    });
+  });
+
+  it("falls back to any photo URL in an unknown JSON shape", () => {
+    const res = parseFundaApi({ foo: ["https://cloud.funda.nl/valentina_media/1/2/3.jpg"] });
+    expect(res.photos).toEqual(["https://cloud.funda.nl/valentina_media/1/2/3.jpg?options=width=1440"]);
   });
 });

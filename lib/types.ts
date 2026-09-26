@@ -106,6 +106,8 @@ export interface Project {
 export interface FundaResult {
   title: string;
   photos: string[];
+  /** Room per photo URL, when Funda labels it (e.g. floor plans). */
+  rooms?: Record<string, RoomType>;
 }
 
 /** Response shape of /api/product */

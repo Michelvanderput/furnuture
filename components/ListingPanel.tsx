@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { classifyRooms } from "@/lib/ai";
 import { ROOMS, roomLabel } from "@/lib/categories";
+import { extractFundaPhotos } from "@/lib/extract";
 import { fileToDataUrl, proxied } from "@/lib/images";
 import { newId } from "@/lib/useProject";
 import type { FundaResult, Photo, Project, RoomType } from "@/lib/types";
@@ -32,6 +33,34 @@ export function ListingPanel({ project, update, onDecorate }: Props) {
       },
     }));
 
+  const loadResult = (listingUrl: string, data: FundaResult) =>
+    update((p) => ({
+      ...p,
+      listing: {
+        url: listingUrl,
+        title: data.title || "Mijn nieuwe huis",
+        photos: data.photos.map((u) => ({ id: newId(), url: u, room: data.rooms?.[u] ?? ("overig" as RoomType) })),
+      },
+      scenes: {},
+    }));
+
+  // Photos sent by the bookmarklet arrive as #import={u,t,p} (see FundaBookmarklet).
+  useEffect(() => {
+    if (!window.location.hash.startsWith("#import=")) return;
+    try {
+      const data = JSON.parse(decodeURIComponent(window.location.hash.slice(8))) as { u: string; t: string; p: string[] };
+      const photos = extractFundaPhotos(data.p.join(" "));
+      if (photos.length) {
+        setUrl(data.u);
+        loadResult(data.u, { title: data.t.replace(/\s*[|\-[]\s*funda.*$/i, "").replace(/^[^:]{0,30}:\s*/, "").trim(), photos });
+      }
+    } catch {
+      setError("Importeren vanaf Funda mislukt.");
+    }
+    history.replaceState(null, "", window.location.pathname);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function importListing(withHtml: boolean) {
     setBusy(true);
     setError("");
@@ -44,15 +73,7 @@ export function ListingPanel({ project, update, onDecorate }: Props) {
       const data = (await res.json()) as FundaResult & { error?: string };
       if (!res.ok) throw new Error(data.error ?? "Ophalen mislukt");
       if (data.photos.length === 0) throw new Error("Geen foto's gevonden in deze pagina.");
-      update((p) => ({
-        ...p,
-        listing: {
-          url,
-          title: data.title || "Mijn nieuwe huis",
-          photos: data.photos.map((u) => ({ id: newId(), url: u, room: "overig" as RoomType })),
-        },
-        scenes: {},
-      }));
+      loadResult(url, data);
       setHtml("");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -107,8 +128,13 @@ export function ListingPanel({ project, update, onDecorate }: Props) {
         {error && <p className="error">{error}</p>}
 
         <details open={!!error}>
-          <summary>Lukt ophalen niet? Twee alternatieven</summary>
+          <summary>Lukt ophalen niet? Drie alternatieven</summary>
           <ol className="fallback">
+            <li>
+              <strong>Via je browser (aanrader op de computer):</strong> sleep deze knop naar je bladwijzerbalk{" "}
+              <FundaBookmarklet /> . Open daarna de woning op Funda en klik op de bladwijzer: de foto&apos;s komen
+              vanzelf hierheen.
+            </li>
             <li>
               Open de woning op Funda, druk op <kbd>Ctrl</kbd>+<kbd>U</kbd> (bron weergeven), selecteer alles en plak het
               hier:
@@ -217,5 +243,24 @@ export function ListingPanel({ project, update, onDecorate }: Props) {
           </div>
         ))}
     </section>
+  );
+}
+
+/**
+ * A bookmarklet runs on funda.nl in the user's own browser, so Funda's bot protection
+ * does not apply. It collects the photo URLs (also from the /media/foto/ page) and
+ * opens this app with them in the URL hash.
+ */
+function FundaBookmarklet() {
+  const ref = useRef<HTMLAnchorElement>(null);
+  useEffect(() => {
+    const code = `(async()=>{const A=${JSON.stringify(window.location.origin)};const re=/https?:\\/\\/cloud\\.funda\\.nl\\/valentina_media\\/[0-9\\/_x]+\\.(?:jpe?g|png|webp)/g;let h=document.documentElement.innerHTML;try{const u=location.href.split(/[?#]/)[0].replace(/\\/?$/,"/").replace(/media\\/foto\\/$/,"")+"media/foto/";h+=await(await fetch(u)).text()}catch(e){}const p=[...new Set(h.replace(/\\\\\\//g,"/").match(re)||[])];if(!p.length){alert("Geen foto's gevonden. Open eerst een woning op funda.nl.");return}location.href=A+"/#import="+encodeURIComponent(JSON.stringify({u:location.href,t:document.title,p}))})()`;
+    // React refuses javascript: URLs in JSX, so set it directly.
+    ref.current?.setAttribute("href", `javascript:${encodeURIComponent(code)}`);
+  }, []);
+  return (
+    <a ref={ref} className="button bookmarklet" onClick={(e) => { e.preventDefault(); alert("Sleep deze knop naar je bladwijzerbalk en klik erop als je op een Funda-woning bent."); }}>
+      📸 Foto&apos;s van Funda halen
+    </a>
   );
 }
