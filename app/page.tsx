@@ -16,8 +16,12 @@ const Visualizer = dynamic(() => import("@/components/Visualizer").then((m) => m
   loading: () => <p className="empty">Laden…</p>,
 });
 
-type Tab = "woning" | "producten" | "visualiseren";
-const TABS: Tab[] = ["woning", "producten", "visualiseren"];
+const FloorPlanPanel = dynamic(() => import("@/components/FloorPlanPanel").then((m) => m.FloorPlanPanel), {
+  loading: () => <p className="empty">Laden…</p>,
+});
+
+type Tab = "woning" | "producten" | "plattegrond" | "visualiseren";
+const TABS: Tab[] = ["woning", "producten", "plattegrond", "visualiseren"];
 
 /** Per-device convenience only (which tab/photo was open); never required. */
 function remember(key: string, value: string | null) {
@@ -63,6 +67,7 @@ export default function Home() {
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: "woning", label: "🏠 Woning", count: project.listing?.photos.length },
     { id: "producten", label: "🛋️ Producten", count: project.products.length },
+    { id: "plattegrond", label: "🗺️ Plattegrond", count: project.plans?.reduce((n, p) => n + p.items.length, 0) },
     { id: "visualiseren", label: "🪄 Inrichten" },
   ];
 
@@ -154,6 +159,15 @@ export default function Home() {
         />
       ) : tab === "producten" ? (
         <ProductsPanel project={project} update={update} />
+      ) : tab === "plattegrond" ? (
+        <FloorPlanPanel
+          project={project}
+          update={update}
+          onOpenPhoto={(id) => {
+            setPhotoId(id);
+            setTab("visualiseren");
+          }}
+        />
       ) : (
         <Visualizer project={project} update={update} photoId={photoId} setPhotoId={setPhotoId} />
       )}

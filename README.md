@@ -66,6 +66,23 @@ De app blijft volledig gratis: geen API-sleutels, geen proefperiodes. Om meubels
 
 Wat gratis in de browser niet kan: een productfoto blijft een foto van één kant, dus schuin zetten laat nooit de zijkant zien. Dat vraagt generatieve beeld-AI. Die kan gratis draaien op een eigen pc met een flinke videokaart (bijvoorbeeld ComfyUI met FLUX of Stable Diffusion), maar niet in de browser.
 
+## Plattegrond: één model voor het hele huis
+
+De plattegrond is het centrale model. Meubels staan op de plattegrond op ware grootte, en elke gekoppelde foto laat ze in zijn eigen perspectief zien.
+
+1. **Plattegrond kiezen** (tab 🗺️ Plattegrond): een foto die bij Woning op "Plattegrond" staat. Meerdere verdiepingen kunnen.
+2. **Schaal**: tik een bekende maat aan (bijvoorbeeld "5,00 m" bij de woonkamer). Is een gekoppelde foto al gemeten, dan volgt de schaal daaruit, en omgekeerd krijgt een gekoppelde foto automatisch een meetlat.
+3. **Kamers**: tik in een kamer. Plattegronden zijn lijntekeningen, dus een vulling over de lichte pixels stopt bij de muren (geen AI nodig). Loopt de vulling over (een open doorgang), dan tik je de hoeken aan. Hoekpunten zijn te verslepen.
+4. **Foto koppelen** (Inrichten → 🗺️ Koppelen): de app zoekt de vloer in de foto en markeert de twee verre hoeken met **L** en **R**. Tik waar die op de plattegrond liggen (kamerhoeken snappen). Daaruit volgt de volledige camera:
+   - de homografie plattegrond → foto via de vier vloerhoeken, met de diepte uit de echte vloerverhouding (`linkFromPoints`);
+   - de brandpuntsafstand uit de homografie (Zhang: `r1 ⟂ r2`, `|r1| = |r2|`), daarna `R` en `t`;
+   - de camera en het kijkveld worden op de plattegrond getekend. Klopt het niet, dan versleep je de punten.
+   Getest met een nagebootste camera: de positie van de fotograaf klopt tot op enkele centimeters en 3D-punten tot op ± 1,5 pixel.
+5. **Meubels plaatsen**: op de plattegrond (B × D × H in cm, draaien, dupliceren) of in een gekoppelde foto. In elke gekoppelde foto wordt de voorkant van het meubel op de juiste plek, hoogte en hoek geprojecteerd, met de voetafdruk als schaduw en de verste meubels eerst. Zie je het meubel van achteren, dan wordt de voorkant gespiegeld getoond. Slepen in een foto verplaatst het meubel op de plattegrond.
+6. **Wat er nu staat**: herkende meubels in een gekoppelde foto (waar ze de vloer raken) verschijnen als grijze contouren op de plattegrond.
+
+Grenzen: een productfoto laat één kant zien, dus de zijkant van een meubel wordt niet getekend. Welke foto bij welke kamer hoort en vanuit welke hoek hij genomen is, kost één handeling per foto (L en R aantikken). Volledig automatisch kan dat niet betrouwbaar met gratis AI in de browser.
+
 ## Afmetingen: meten en ware grootte
 
 - **Productmaten** (breedte × diepte × hoogte) worden uit de webshoppagina gehaald: JSON-LD (`width`/`depth`/`height`), specificaties ("Breedte: 220 cm") of de titel ("220x95x80 cm", "160 x 200"). Aan te passen op de productkaart.

@@ -10,6 +10,14 @@ import type { ProductLayer, Quad } from "@/lib/types";
 export function Shadow({ layer, plane, size }: { layer: ProductLayer; plane: Quad | null; size: { w: number; h: number } }) {
   const strength = layer.shadow ?? 0.5;
   const gradient = `radial-gradient(closest-side, rgba(0,0,0,${0.55 * strength}), rgba(0,0,0,${0.3 * strength}) 55%, transparent)`;
+  // Furniture from the floor plan: its footprint, already projected onto the floor.
+  if (layer.shadowQuad) {
+    return (
+      <div className="layer shadow" style={{ width: size.w, height: size.h }}>
+        <div className="plane" style={{ width: PLANE, height: PLANE, background: gradient, transform: quadToMatrix3d(PLANE, PLANE, layer.shadowQuad) }} />
+      </div>
+    );
+  }
   if (layer.floor && plane) {
     const { u, v, width, angle } = layer.floor;
     const depth = width * 0.45; // footprint behind the front edge

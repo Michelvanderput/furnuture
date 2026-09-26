@@ -174,7 +174,18 @@ export async function renderDesign(input: DesignInput): Promise<Blob> {
     if (strength > 0) {
       ctx.save();
       ctx.globalCompositeOperation = "multiply";
-      if (l.floor && floorPlane) {
+      if (l.shadowQuad) {
+        const p = canvasOf(PLANE, PLANE);
+        const pctx = p.getContext("2d")!;
+        pctx.translate(PLANE / 2, PLANE / 2);
+        pctx.scale(PLANE / 2, PLANE / 2);
+        pctx.fillStyle = shadowGradient(pctx, strength);
+        pctx.fillRect(-1, -1, 2, 2);
+        const flat = canvasOf(W, H);
+        drawWarped(flat.getContext("2d")!, p, l.shadowQuad, 12);
+        ctx.drawImage(flat, 0, 0);
+        free(p, flat);
+      } else if (l.floor && floorPlane) {
         const p = canvasOf(PLANE, PLANE);
         const pctx = p.getContext("2d")!;
         const { u, v, width, angle } = l.floor;

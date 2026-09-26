@@ -237,3 +237,36 @@ h3.group { margin-top: 28px; padding-bottom: 6px; border-bottom: 1px solid var(-
 .dims input { width: 0; flex: 1; min-width: 0; padding: 4px 6px; text-align: center; }
 .banner { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; padding: 10px 12px; border-radius: 8px; background: #fff4d6; color: #5a4300; }
 @media (prefers-color-scheme: dark) { .banner { background: #3a3220; color: #f1dfa7; } }
+
+/* --- floor plan --- */
+.plan-panel { display: grid; grid-template-columns: 1fr 240px; gap: 16px; }
+.plan-main { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.plan-stage { background: #fff; }
+.plan-stage .plan-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
+.plan-stage.mini { max-height: 55vh; }
+.plan-choice { padding: 0; overflow: hidden; display: flex; flex-direction: column; text-align: center; }
+.plan-choice img { width: 100%; aspect-ratio: 3 / 2; object-fit: contain; background: #fff; }
+.plan-choice span { padding: 6px; font-weight: 600; }
+.overlay .plan-room polygon, .overlay polygon.plan-room { fill: rgba(233, 96, 31, 0.08); stroke: rgba(233, 96, 31, 0.6); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.overlay .plan-room.selected polygon { fill: rgba(233, 96, 31, 0.18); stroke-width: 3; }
+.overlay .plan-room text, .overlay .plan-scanned text, .overlay .plan-camera text { fill: #1f1d1a; font-weight: 600; font-family: system-ui, sans-serif; paint-order: stroke; stroke: #fff; stroke-width: 4px; }
+.overlay .plan-room, .overlay .plan-scanned { pointer-events: none; }
+.overlay .plan-scanned polygon { fill: rgba(0, 0, 0, 0.08); stroke: #777; stroke-width: 1.5; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
+.overlay .plan-item { cursor: move; }
+.overlay .plan-item rect { fill: rgba(255, 255, 255, 0.85); stroke: #2f3e52; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.overlay .plan-item.selected rect { stroke: var(--accent); stroke-width: 3; }
+.overlay .plan-item image { pointer-events: none; }
+.overlay .plan-item .front { stroke: var(--accent); stroke-width: 5; vector-effect: non-scaling-stroke; }
+.overlay .plan-camera { cursor: pointer; }
+.overlay .plan-camera polygon { fill: rgba(47, 62, 82, 0.18); stroke: #2f3e52; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.overlay .plan-camera circle { fill: #2f3e52; stroke: #fff; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.overlay .link-quad { fill: rgba(233, 96, 31, 0.12); stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; pointer-events: none; }
+.overlay .corner-label { fill: var(--accent); font-weight: 700; paint-order: stroke; stroke: #fff; stroke-width: 4px; }
+.overlay .link-marker circle { fill: var(--accent); stroke: #fff; stroke-width: 3; vector-effect: non-scaling-stroke; }
+.overlay .link-marker { pointer-events: none; }
+.link-panel { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 2px solid var(--accent); border-radius: 8px; background: var(--surface); }
+.link-panel p { margin: 0; }
+.chip.warn { border-color: #d9a400; background: #fff4d6; color: #5a4300; }
+button.on { background: var(--accent-soft); border-color: var(--accent); }
+.room-name { width: 180px; }
+@media (max-width: 900px) { .plan-panel { grid-template-columns: 1fr; } }

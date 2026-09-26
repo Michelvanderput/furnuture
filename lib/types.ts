@@ -102,6 +102,10 @@ export interface ProductLayer {
   /** Brightness and warmth to match the room's light (CSS brightness / sepia). */
   light?: number;
   warmth?: number;
+  /** Floor shadow as a quad in the photo (products coming from the floor plan). */
+  shadowQuad?: Quad;
+  /** Set for products that live on the floor plan (id of the plan item). */
+  planItem?: string;
 }
 
 export interface FloorAnchor {
@@ -188,6 +192,68 @@ export interface Project {
   listing: Listing | null;
   products: Product[];
   scenes: Record<string, Scene>;
+  /** Floor plans (one per storey), with rooms, furniture and linked photos. */
+  plans?: FloorPlan[];
+}
+
+/**
+ * A floor plan is the 3D model of the house: rooms and furniture are placed on
+ * it in real size, and linked photos show that furniture in perspective.
+ * All coordinates are pixels of the plan image; `cmPerPx` gives real size.
+ */
+export interface FloorPlan {
+  id: string;
+  name: string;
+  /** Listing photo with the drawing (or an uploaded one). */
+  photoId: string;
+  imageW: number;
+  imageH: number;
+  /** Scale: from a measured line on the plan, or derived from a measured photo. */
+  cmPerPx?: number;
+  ruler?: { a: Pt; b: Pt; cm: number };
+  rooms: PlanRoom[];
+  items: PlanItem[];
+  /** Photo id -> how that photo's floor lies on the plan. */
+  links: Record<string, PhotoLink>;
+  /** Furniture found in linked photos, projected onto the plan (what is there now). */
+  scanned?: { photoId: string; label: string; polygon: Pt[] }[];
+}
+
+export interface PlanRoom {
+  id: string;
+  name: string;
+  type?: RoomType;
+  polygon: Pt[];
+}
+
+/** A product standing somewhere in the house (plan pixels, real size in cm). */
+export interface PlanItem {
+  id: string;
+  productId: string;
+  x: number;
+  y: number;
+  /** Rotation on the plan in degrees; 0 = the product's front faces down the drawing. */
+  angle: number;
+  w: number;
+  d: number;
+  h?: number;
+  flip: boolean;
+  cutout: CutoutMode;
+  tolerance: number;
+  shadow?: number;
+  light?: number;
+  warmth?: number;
+}
+
+/** Four floor points in a photo (the floor surface's plane) and the same points on the plan. */
+export interface PhotoLink {
+  /** Surface layer in that photo whose plane is the floor. */
+  floorId: string;
+  plan: Quad;
+  roomId?: string;
+  /** Size of the photo (to rebuild its camera outside the photo editor). */
+  imageW: number;
+  imageH: number;
 }
 
 /** Response shape of /api/funda */
