@@ -149,6 +149,7 @@ h3.group { margin-top: 28px; padding-bottom: 6px; border-bottom: 1px solid var(-
 .chip.floor { border-color: #b98b5a; }
 .chip.wall, .chip.ceiling { border-color: #8fae9a; }
 .layer-controls { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.layer-controls.row { flex-direction: row; align-items: center; }
 .layer-controls select { max-width: 260px; }
 .palette h3 { margin-bottom: 4px; }
 .palette-item { display: flex; gap: 8px; align-items: center; padding: 4px; text-align: left; white-space: normal; font-size: 13px; }

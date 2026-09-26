@@ -19,11 +19,20 @@ export type Progress = (message: string) => void;
 
 const pipelines = new Map<string, Promise<unknown>>();
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+let transformers: Promise<any> | null = null;
+/** The transformers.js module, loaded once from the CDN. */
+export function loadTransformers(): Promise<any> {
+  transformers ??= import(/* webpackIgnore: true */ TRANSFORMERS_URL);
+  transformers.catch(() => (transformers = null));
+  return transformers;
+}
+
 /** Loads (once) a transformers.js pipeline from the CDN. */
 export function getPipeline<T>(task: string, model: string, onProgress?: Progress): Promise<T> {
   const key = `${task}:${model}`;
   if (!pipelines.has(key)) {
-    const p = import(/* webpackIgnore: true */ TRANSFORMERS_URL).then((t) =>
+    const p = loadTransformers().then((t) =>
       t.pipeline(task, model, {
         dtype: "q8",
         progress_callback: (e: { status: string; file?: string; progress?: number }) => {
