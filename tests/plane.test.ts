@@ -118,3 +118,40 @@ describe("masks", () => {
     expect(components(d, w, h).sizes.length).toBe(3);
   });
 });
+
+import { dropSpecks, extendDown, fillHoles, interiorPoints, paintCircle } from "@/lib/masks";
+
+describe("mask clean-up", () => {
+  const w = 40, h = 30;
+  const box = () => {
+    const m = new Uint8Array(w * h);
+    for (let y = 5; y < 25; y++) for (let x = 5; x < 35; x++) m[y * w + x] = 1;
+    return m;
+  };
+
+  it("fills holes, drops specks, extends shadows down", () => {
+    const m = box();
+    m[15 * w + 20] = 0; // hole
+    m[1 * w + 1] = 1; // speck
+    const clean = dropSpecks(fillHoles(m, w, h), w, h);
+    expect(clean[15 * w + 20]).toBe(1);
+    expect(clean[1 * w + 1]).toBe(0);
+    const down = extendDown(clean, w, h, 3);
+    expect(down[27 * w + 10]).toBe(1);
+    expect(down[28 * w + 10]).toBe(0);
+  });
+
+  it("spreads prompt points over the object", () => {
+    const pts = interiorPoints(box(), w, h, 3, [6, 6]);
+    expect(pts).toHaveLength(3);
+    // The first extra point is far from the tap (the other end of the sofa).
+    expect(pts[0][0] + pts[0][1]).toBeGreaterThan(40);
+  });
+
+  it("paints with a brush", () => {
+    const m = new Uint8Array(w * h);
+    paintCircle(m, w, h, 10, 10, 2, 1);
+    expect(m[10 * w + 10]).toBe(1);
+    expect(m[10 * w + 13]).toBe(0);
+  });
+});

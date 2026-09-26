@@ -10,6 +10,8 @@ import { labelsFromLogits, samMaskToPhoto } from "./labels";
 const TRANSFORMERS_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js";
 const ORT_DIST = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/";
 const MIGAN_URL = "https://huggingface.co/andraniksargsyan/migan/resolve/main/migan_pipeline_v2.onnx";
+/** LaMa (big-lama, Apache-2.0): ~200 MB, better on large areas. Computers only. */
+const LAMA_URL = "https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx";
 
 export type Img = { data: Uint8ClampedArray; width: number; height: number };
 
@@ -17,7 +19,7 @@ export type Task =
   | { task: "segment"; image: Img; model: string; outW: number; outH: number }
   | { task: "classify"; images: Img[]; labels: string[] }
   | { task: "removeBackground"; image: Img }
-  | { task: "inpaint"; image: Img; mask: Uint8Array }
+  | { task: "inpaint"; image: Img; mask: Uint8Array; model?: "migan" | "lama" }
   | { task: "samEmbed"; image: Img; model: string }
   | { task: "samMask"; points: [number, number][]; labels: number[]; outW: number; outH: number };
 
@@ -102,7 +104,56 @@ async function modelBytes(url: string, label: string): Promise<ArrayBuffer> {
 }
 
 /** MI-GAN (27 MB, made for phones): uint8 image [1,3,H,W] + mask [1,1,H,W] (0 = remove) -> uint8 image. */
-async function inpaint({ image, mask }: Extract<Task, { task: "inpaint" }>) {
+/**
+ * LaMa: float image [1,3,512,512] in 0..1 and mask [1,1,512,512] (1 = remove);
+ * returns 0..255 (this export). The page sends a 512×512 crop.
+ */
+async function inpaintLama({ image, mask }: Extract<Task, { task: "inpaint" }>) {
+  const ort: any = await import(/* webpackIgnore: true */ `${ORT_DIST}ort.webgpu.min.mjs`);
+  ort.env.wasm.wasmPaths = ORT_DIST;
+  const bytes = await modelBytes(LAMA_URL, "Beste AI-gum");
+  progress("AI-gum starten…");
+  let session: any = null;
+  for (const ep of "gpu" in navigator ? ["webgpu", "wasm"] : ["wasm"]) {
+    try {
+      session = await ort.InferenceSession.create(bytes, { executionProviders: [ep] });
+      break;
+    } catch (e) {
+      if (ep === "wasm") throw e;
+    }
+  }
+  const { width: w, height: h, data } = image;
+  const n = w * h;
+  const img = new Float32Array(3 * n);
+  const m = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    for (let c = 0; c < 3; c++) img[c * n + i] = data[i * 4 + c] / 255;
+    m[i] = mask[i] ? 0 : 1; // page mask: 255 keep / 0 remove
+  }
+  progress("AI gumt weg…");
+  const [imageName, maskName] = session.inputNames.includes("mask")
+    ? [session.inputNames.find((x: string) => x !== "mask"), "mask"]
+    : session.inputNames;
+  const out = await session.run({
+    [imageName]: new ort.Tensor("float32", img, [1, 3, h, w]),
+    [maskName]: new ort.Tensor("float32", m, [1, 1, h, w]),
+  });
+  const res = out[session.outputNames[0]].data as Float32Array;
+  let max = 0;
+  for (let i = 0; i < res.length; i += 97) max = Math.max(max, res[i]);
+  const k = max <= 1.5 ? 255 : 1;
+  const rgba = new Uint8ClampedArray(n * 4);
+  for (let i = 0; i < n; i++) {
+    for (let c = 0; c < 3; c++) rgba[i * 4 + c] = res[c * n + i] * k;
+    rgba[i * 4 + 3] = 255;
+  }
+  await session.release?.();
+  return { result: { data: rgba, width: w, height: h }, transfer: [rgba.buffer] };
+}
+
+async function inpaint(job: Extract<Task, { task: "inpaint" }>) {
+  if (job.model === "lama") return inpaintLama(job);
+  const { image, mask } = job;
   const ort: any = await import(/* webpackIgnore: true */ `${ORT_DIST}ort.wasm.min.mjs`);
   ort.env.wasm.wasmPaths = ORT_DIST;
   ort.env.wasm.numThreads = 1;
@@ -164,10 +215,19 @@ async function samMask({ points, labels, outW, outH }: Extract<Task, { task: "sa
   const input_labels = processor.add_input_labels([labels], input_points);
   const out = await model({ ...emb, input_points, input_labels });
   const scores = out.iou_scores.data as Float32Array;
-  let best = 0;
-  for (let i = 1; i < scores.length; i++) if (scores[i] > scores[best]) best = i;
   const [lh, lw] = (out.pred_masks.dims as number[]).slice(-2);
-  const logits = (out.pred_masks.data as Float32Array).subarray(best * lh * lw, (best + 1) * lh * lw);
+  const all = out.pred_masks.data as Float32Array;
+  // SAM offers a part, a bigger part and the whole object. The most "certain" one is
+  // often just a cushion; take the largest mask among the good ones: the whole sofa.
+  const top = Math.max(...scores);
+  let best = 0, bestArea = -1;
+  for (let i = 0; i < scores.length; i++) {
+    if (scores[i] < top * 0.85) continue;
+    let area = 0;
+    for (let k = i * lh * lw; k < (i + 1) * lh * lw; k++) if (all[k] > 0) area++;
+    if (area > bestArea) (bestArea = area), (best = i);
+  }
+  const logits = all.subarray(best * lh * lw, (best + 1) * lh * lw);
   const [rh, rw] = sizes.reshaped_input_sizes[0] as [number, number];
   const mask = samMaskToPhoto(logits, rw, rh, outW, outH, lh, 1024);
   return { result: { mask, score: scores[best] }, transfer: [mask.buffer] };

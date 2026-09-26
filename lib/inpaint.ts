@@ -1,7 +1,7 @@
 import type { Progress } from "./ai";
 import { loadImage, proxied } from "./images";
 import { aiInpaint } from "./aiInpaint";
-import { dilate, ensureMask, polygonMask } from "./masks";
+import { dilate, ensureMask, extendDown, polygonMask } from "./masks";
 import type { EraseLayer } from "./types";
 
 /**
@@ -111,8 +111,8 @@ export async function renderErased(
 
   for (const layer of layers) {
     const area = layer.mask ? await ensureMask(layer.mask, w, h) : polygonMask(layer.points, w, h);
-    // Grow the area a little so outlines and contact shadows go too.
-    const mask = dilate(area, w, h, Math.round(Math.max(3, w / 200)));
+    // Generous margin: the model must not see any rim of the old object, nor its contact shadow below it.
+    const mask = dilate(extendDown(area, w, h, Math.round(h * 0.02)), w, h, Math.round(Math.max(4, w * 0.008)));
     if (layer.method === "ai") {
       try {
         await aiInpaint(canvas, mask, onProgress);

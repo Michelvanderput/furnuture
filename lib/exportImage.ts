@@ -2,7 +2,7 @@ import { homography, project, rectQuad } from "./geometry";
 import { loadImage } from "./images";
 import { planeOf } from "./layers";
 import { productFilter } from "./look";
-import { PLANE } from "./plane";
+import { extendedPlane, PLANE } from "./plane";
 import type { Layer, MeasureLayer, ProductLayer, Pt, Quad, SurfaceLayer } from "./types";
 
 /**
@@ -74,13 +74,15 @@ const canvasOf = (w: number, h: number) => {
 };
 const free = (...cs: HTMLCanvasElement[]) => cs.forEach((c) => (c.width = c.height = 0));
 
-function tiled(tile: HTMLImageElement, tileWidth: number, w: number, h: number): HTMLCanvasElement {
+function tiled(tile: HTMLImageElement, tileWidth: number, w: number, h: number, ox = 0, oy = 0): HTMLCanvasElement {
   const t = canvasOf(tileWidth, (tileWidth * tile.naturalHeight) / tile.naturalWidth);
   t.getContext("2d")!.drawImage(tile, 0, 0, t.width, t.height);
   const out = canvasOf(w, h);
   const ctx = out.getContext("2d")!;
   ctx.fillStyle = ctx.createPattern(t, "repeat")!;
-  ctx.fillRect(0, 0, w, h);
+  // Tiles start at (ox, oy), like CSS background-position: the plane's own origin.
+  ctx.translate(ox, oy);
+  ctx.fillRect(-ox, -oy, w, h);
   free(t);
   return out;
 }
@@ -129,8 +131,9 @@ export async function renderDesign(input: DesignInput): Promise<Blob> {
       const layer = canvasOf(W, H);
       const lctx = layer.getContext("2d")!;
       const plane = planeOf(l);
+      const ext = l.mask && plane ? extendedPlane(plane, l.role) : null;
       lctx.save();
-      pathOf(lctx, l.mask ? (plane ?? rectQuad(0, 0, W, H)) : l.points);
+      pathOf(lctx, l.mask ? (ext?.quad ?? plane ?? rectQuad(0, 0, W, H)) : l.points);
       lctx.clip();
       const tex = l.fill.type === "color" ? null : input.textureSrc(l);
       if (l.fill.type === "color" || !tex) {
@@ -138,7 +141,11 @@ export async function renderDesign(input: DesignInput): Promise<Blob> {
         lctx.fillRect(0, 0, W, H);
       } else {
         const tile = await loadImage(tex);
-        if (l.perspective && plane) {
+        if (l.perspective && plane && ext) {
+          const flat = tiled(tile, l.scale, ext.w, ext.h, -ext.u0, -ext.v0);
+          drawWarped(lctx, flat, ext.quad, 32);
+          free(flat);
+        } else if (l.perspective && plane) {
           const flat = tiled(tile, l.scale, PLANE, PLANE);
           drawWarped(lctx, flat, plane, 24);
           free(flat);

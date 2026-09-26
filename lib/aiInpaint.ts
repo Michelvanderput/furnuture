@@ -1,7 +1,13 @@
-import { isLightMode, runAi, type Img, type Progress } from "./worker";
+import { isLightMode, isLowMemoryDevice, runAi, type Img, type Progress } from "./worker";
 
 /** Largest crop sent to the AI: MI-GAN works at 512 px internally, more only costs memory. */
 const maxCrop = () => (isLightMode() ? 640 : 1024);
+
+/**
+ * LaMa (~200 MB) gives clearly better fills on big areas like a sofa, but needs
+ * more memory than an iPad tab has: computers get LaMa, iPad/iPhone MI-GAN (27 MB).
+ */
+export const inpaintModel = (): "lama" | "migan" => (isLightMode() || isLowMemoryDevice() ? "migan" : "lama");
 
 /**
  * Removes the masked area from the canvas (in place) with MI-GAN in a worker.
@@ -22,15 +28,17 @@ export async function aiInpaint(canvas: HTMLCanvasElement, mask: Uint8Array, onP
   }
   if (x1 < 0) return;
 
-  // Crop with context around the object, clamped to the photo.
+  const model = inpaintModel();
+  // Crop with context around the object, clamped to the photo. LaMa needs a square 512×512 input.
   const side = Math.max(x1 - x0, y1 - y0) * 2;
-  const cw = Math.min(W, Math.max(256, side));
-  const ch = Math.min(H, Math.max(256, side));
+  let cw = Math.min(W, Math.max(256, side));
+  let ch = Math.min(H, Math.max(256, side));
+  if (model === "lama") cw = ch = Math.min(W, H, Math.max(cw, ch));
   const cx = Math.round(Math.min(Math.max(0, (x0 + x1) / 2 - cw / 2), W - cw));
   const cy = Math.round(Math.min(Math.max(0, (y0 + y1) / 2 - ch / 2), H - ch));
-  const f = Math.min(1, maxCrop() / Math.max(cw, ch));
-  const sw = Math.round(cw * f);
-  const sh = Math.round(ch * f);
+  const f = model === "lama" ? 512 / Math.max(cw, ch) : Math.min(1, maxCrop() / Math.max(cw, ch));
+  const sw = model === "lama" ? 512 : Math.round(cw * f);
+  const sh = model === "lama" ? 512 : Math.round(ch * f);
 
   const work = document.createElement("canvas");
   work.width = sw;
@@ -48,7 +56,16 @@ export async function aiInpaint(canvas: HTMLCanvasElement, mask: Uint8Array, onP
     }
   }
 
-  const out = await runAi<Img>({ task: "inpaint", image, mask: m }, onProgress, [image.data.buffer, m.buffer]);
+  let out: Img;
+  try {
+    out = await runAi<Img>({ task: "inpaint", image, mask: m, model }, onProgress, [image.data.buffer, m.buffer]);
+  } catch (e) {
+    if (model !== "lama") throw e;
+    // LaMa could not run (download, memory): the light model on a fresh copy of the crop.
+    const again: Img = { data: wctx.getImageData(0, 0, sw, sh).data, width: sw, height: sh };
+    const m2 = m.slice();
+    out = await runAi<Img>({ task: "inpaint", image: again, mask: m2, model: "migan" }, onProgress, [again.data.buffer, m2.buffer]);
+  }
   wctx.putImageData(new ImageData(new Uint8ClampedArray(out.data), out.width, out.height), 0, 0);
 
   // Blend back only inside the (softened) mask.

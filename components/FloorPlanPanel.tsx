@@ -457,7 +457,7 @@ function PlanEditor({
         <p className="muted small">Tik om op de plattegrond te zetten{selRoom ? ` (in ${selRoom.name})` : ""}.</p>
         {furniture.map((p) => (
           <button key={p.id} className="palette-item" onClick={() => addItem(p)}>
-            <Img src={p.image} alt="" loading="lazy" />
+            <Img src={p.thumb ?? p.image} alt="" loading="lazy" />
             <span>
               {p.title}
               <small>{p.dims ? formatDims(p.dims) : "maten onbekend"}</small>

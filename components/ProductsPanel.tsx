@@ -1,10 +1,11 @@
 "use client";
 
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import { CATEGORIES, ROOMS } from "@/lib/categories";
 import { shareOrDownload } from "@/lib/exportImage";
 import { euro, extractLinks, parsePrice, shoppingListCsv, shoppingListText, totalsPerRoom } from "@/lib/shopping";
 import type { Category, Dims, Product, ProductInfo, ProductStatus, Project, RoomType } from "@/lib/types";
+import { firstWorkingThumb } from "@/lib/images";
 import { newId } from "@/lib/useProject";
 import { Img } from "./Img";
 import { PasteButton } from "./PasteButton";
@@ -217,13 +218,32 @@ const ProductCard = memo(function ProductCard({
   const imgIndex = p.images.indexOf(p.image);
   const cycle = (dir: number) => {
     if (p.images.length < 2) return;
-    set({ image: p.images[(imgIndex + dir + p.images.length) % p.images.length] });
+    set({ image: p.images[(imgIndex + dir + p.images.length) % p.images.length], thumb: undefined });
   };
+  // A trimmed thumbnail kept with the product; if the chosen image does not load, the next one that does is taken.
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!p.image || p.thumb) return;
+    let live = true;
+    const order = [p.image, ...p.images.slice(imgIndex + 1), ...p.images.slice(0, Math.max(0, imgIndex))].filter((u, i, a) => u && a.indexOf(u) === i);
+    firstWorkingThumb(order).then((r) => {
+      if (!live) return;
+      if (r) set(r);
+      else setFailed(true);
+    });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.image, p.thumb]);
 
   return (
     <article className={`card ${p.status}`}>
       <div className="thumb">
-        {p.image ? (
+        {p.thumb ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={p.thumb} alt={p.title} decoding="async" />
+        ) : p.image && !failed ? (
           <Img src={p.image} alt={p.title} loading="lazy" />
         ) : p.color ? (
           <div className="swatch" style={{ background: p.color }} />
@@ -231,7 +251,7 @@ const ProductCard = memo(function ProductCard({
           <input
             className="image-url"
             placeholder="Plak afbeeldingslink…"
-            onBlur={(e) => e.target.value && set({ image: e.target.value, images: [e.target.value] })}
+            onBlur={(e) => e.target.value && (setFailed(false), set({ image: e.target.value, images: [e.target.value, ...p.images], thumb: undefined }))}
           />
         )}
         {p.images.length > 1 && (

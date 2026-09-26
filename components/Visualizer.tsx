@@ -5,7 +5,7 @@ import { removeBackgroundAI } from "@/lib/ai";
 import { exportFileName } from "@/lib/backup";
 import { renderDesign, shareOrDownload } from "@/lib/exportImage";
 import { centroid, pointInPolygon, project as projectPoint, quadToMatrix3d, rectQuad } from "@/lib/geometry";
-import { cropCenter, loadImage, NoPlainBackground, proxied, removeBackground } from "@/lib/images";
+import { cropCenter, loadImage, NoPlainBackground, proxied, removeBackground, rotateQuarter } from "@/lib/images";
 import { renderErased } from "@/lib/inpaint";
 import {
   cutoutKey,
@@ -23,8 +23,8 @@ import { Selector } from "@/lib/sam";
 import { linkedView, linkFromPoints, photoToPlan, planLayersFor, scanFurniture } from "@/lib/floorplan";
 import { defaultSize, planForPhoto, plansOf, updateItem, updatePlan } from "@/lib/plans";
 import { photoLook, productFilter } from "@/lib/look";
-import { ensureMask, maskToDataUrl, polygonMask, readyMask, rememberMask } from "@/lib/masks";
-import { fitFloorQuad, fitWallQuad, imageToPlane, PLANE, planeToImage } from "@/lib/plane";
+import { dropSpecks, ensureMask, fillHoles, interiorPoints, maskToDataUrl, paintCircle, polygonMask, readyMask, rememberMask } from "@/lib/masks";
+import { extendedPlane, fitFloorQuad, fitWallQuad, fitWallQuads, imageToPlane, PLANE, planeToImage } from "@/lib/plane";
 import { furnitureMask, segmentMask, segmentRoom, type RoomSegmentation, type Segment, type SegmentKind } from "@/lib/segment";
 import { presetTexture } from "@/lib/textures";
 import type { EraseLayer, FloorAnchor, Layer, MeasureLayer, Product, ProductLayer, Project, Pt, Quad, SurfaceFill, SurfaceLayer } from "@/lib/types";
@@ -115,11 +115,16 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   const [notice, setNotice] = useState("");
   const [segmentation, setSegmentation] = useState<RoomSegmentation | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
-  const [refine, setRefine] = useState<"add" | "remove" | null>(null);
+  const [refine, setRefine] = useState<"add" | "remove" | "brush-add" | "brush-remove" | null>(null);
+  const [brushSize, setBrushSize] = useState(3);
+  const [brushAt, setBrushAt] = useState<Pt | null>(null);
+  const brush = useRef<{ mask: Uint8Array; w: number; h: number; value: 0 | 1; last: Pt | null } | null>(null);
+  const brushFrame = useRef(0);
   const [rulerFor, setRulerFor] = useState<string | null>(null);
   const selector = useRef<Selector | null>(null);
   const [linking, setLinking] = useState(false);
   const [aspects, setAspects] = useState<Record<string, number>>({});
+  const baseTextureRef = useRef<(l: SurfaceLayer) => string | null>(() => null);
   const selectRun = useRef(0);
   const [exporting, setExporting] = useState(false);
   const drag = useRef<Drag | null>(null);
@@ -164,6 +169,20 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     for (const l of layers) if ((l.kind === "surface" || l.kind === "erase") && l.mask) ensureMask(l.mask, size.w, size.h).catch(() => undefined);
   }, [layers, size]);
 
+
+  // Textures turned a quarter (planks running the other way).
+  useEffect(() => {
+    for (const layer of layers) {
+      if (layer.kind !== "surface" || !layer.turn) continue;
+      const key = `turn:${textureKey(layer)}`;
+      const base = baseTextureRef.current(layer);
+      if (textures[key] || !base) continue;
+      setTextures((t) => ({ ...t, [key]: "pending" }));
+      rotateQuarter(base)
+        .then((url) => setTextures((t) => ({ ...t, [key]: url })))
+        .catch(() => setTextures((t) => ({ ...t, [key]: base })));
+    }
+  }, [layers, textures]);
 
   // Product photos used as texture, cropped to their centre.
   useEffect(() => {
@@ -375,6 +394,11 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   /**
    * Tap on the photo: floors and walls come from the recognition; furniture (or
    * anything, when the room was not recognised) is traced exactly with tap-to-select.
+   *
+   * For furniture the recognised segment helps SAM: a few extra taps spread over
+   * the segment make it take the whole sofa rather than one cushion, and the
+   * result is joined with the segment, holes filled and loose specks dropped.
+   * "Add"/"remove" taps change the current selection by the piece that was tapped.
    */
   async function selectAt(p: Pt, mode: "new" | "add" | "remove" = "new") {
     if (!photo || !size) return;
@@ -384,30 +408,73 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
       return;
     }
     const at: [number, number] = [p[0] / size.w, p[1] / size.h];
-    const points = mode === "new" || !selection ? [{ at, positive: true }] : [...selection.points, { at, positive: mode === "add" }];
     const { w, h } = maskSize();
+    const tap: [number, number] = [Math.min(w - 1, at[0] * w), Math.min(h - 1, at[1] * h)];
+    const segMask = seg?.kind === "furniture" && segmentation && segmentation.w === w && segmentation.h === h ? segmentMask(segmentation, seg.id) : null;
+    const extra = segMask && mode !== "remove" ? interiorPoints(segMask, w, h, 3, tap).map(([x, y]) => ({ at: [x / w, y / h] as [number, number], positive: true })) : [];
+    const points = [{ at, positive: true }, ...extra];
     const run = ++selectRun.current;
     selector.current ??= new Selector();
     try {
-      const mask = await selector.current.select(photo.url, points, w, h, setStatus);
+      let piece = await selector.current.select(photo.url, points, w, h, setStatus);
       if (run !== selectRun.current) return; // a newer tap won
-      if (!mask.some(Boolean)) throw new Error("niets gevonden");
-      const base = mode === "new" ? seg : undefined;
+      if (segMask && mode !== "remove") for (let i = 0; i < piece.length; i++) piece[i] |= segMask[i];
+      if (!piece.some(Boolean)) throw new Error("niets gevonden");
+      piece = dropSpecks(fillHoles(piece, w, h), w, h, tap);
+      const prev = mode !== "new" && selection && selection.w === w && selection.h === h ? selection.mask : null;
+      let mask = piece;
+      if (prev && mode === "add") mask = fillHoles(prev.map((v, i) => v | piece[i]), w, h);
+      if (prev && mode === "remove") mask = prev.map((v, i) => (piece[i] ? 0 : v));
       setSelection({
         kind: mode === "new" ? (seg ? "furniture" : "object") : (selection?.kind ?? "object"),
-        label: mode === "new" ? (base?.label ?? "Voorwerp") : (selection?.label ?? "Voorwerp"),
+        label: mode === "new" ? (seg?.label ?? "Voorwerp") : (selection?.label ?? "Voorwerp"),
         mask,
         w,
         h,
         url: maskUrl(mask, w, h),
-        points,
+        points: [...(mode === "new" ? [] : (selection?.points ?? [])), { at, positive: mode !== "remove" }],
       });
     } catch (e) {
       if (run !== selectRun.current) return;
       setStatus("");
-      if (seg) setSelection(selectionFromSegment(seg));
+      if (mode !== "new") setNotice(`Aanpassen lukte niet (${e instanceof Error ? e.message : e}). Gebruik de kwast.`);
+      else if (seg) setSelection(selectionFromSegment(seg));
       else setNotice(`Selecteren lukte niet (${e instanceof Error ? e.message : e}). Probeer ✨ Herken of 🧽 Zelf gummen.`);
     }
+  }
+
+  /** Brush on the selection: paint a stroke into its mask (work resolution), redrawn once per frame. */
+  function brushTo(p: Pt) {
+    const b = brush.current;
+    if (!b || !size) return;
+    const sx = b.w / size.w, sy = b.h / size.h;
+    const q: Pt = [p[0] * sx, p[1] * sy];
+    const r = Math.max(1, (brushSize / 100) * b.w);
+    const from = b.last ?? q;
+    const steps = Math.max(1, Math.ceil(Math.hypot(q[0] - from[0], q[1] - from[1]) / (r / 2)));
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      paintCircle(b.mask, b.w, b.h, from[0] + (q[0] - from[0]) * t, from[1] + (q[1] - from[1]) * t, r, b.value);
+    }
+    b.last = q;
+    setBrushAt(p);
+    if (brushFrame.current) return;
+    brushFrame.current = requestAnimationFrame(() => {
+      brushFrame.current = 0;
+      const c = brush.current;
+      if (c) setSelection((s) => (s ? { ...s, mask: c.mask, url: maskToDataUrl(c.mask, c.w, c.h) } : s));
+    });
+  }
+
+  function endBrush() {
+    const b = brush.current;
+    if (!b) return;
+    cancelAnimationFrame(brushFrame.current);
+    brushFrame.current = 0;
+    brush.current = null;
+    setBrushAt(null);
+    const mask = b.mask.slice();
+    setSelection((s) => (s ? { ...s, mask, url: maskUrl(mask, b.w, b.h) } : s));
   }
 
   function eraseSelection(sel: Selection, method: "ai" | "simple") {
@@ -425,11 +492,33 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   ): string {
     // Furniture hides floor and wall edges: leave those out when fitting the perspective.
     const occluder = from && from.w === sel.w && from.h === sel.h ? furnitureMask(from) : undefined;
-    const fitted = role === "floor" ? fitFloorQuad(sel.mask, sel.w, sel.h, occluder) : fitWallQuad(sel.mask, sel.w, sel.h, occluder);
-    // Masks are at a lower resolution than the photo: scale the plane up.
+    // Masks are at a lower resolution than the photo: scale planes up.
     const sx = (size?.w ?? sel.w) / sel.w;
     const sy = (size?.h ?? sel.h) / sel.h;
-    const plane = fitted && (fitted.map(([x, y]) => [x * sx, y * sy]) as Quad);
+    const up = (q: Quad) => q.map(([x, y]) => [x * sx, y * sy]) as Quad;
+    const textured = fill.type === "preset" || fill.type === "texture";
+    // Wood, tiles or wallpaper on walls that meet in a corner: one layer per wall, each with its own perspective.
+    if (role === "wall" && textured) {
+      const parts = fitWallQuads(sel.mask, sel.w, sel.h, occluder);
+      if (parts.length > 1) {
+        const ids = parts.map((part) => {
+          const m = new Uint8Array(sel.mask.length);
+          for (let y = 0; y < sel.h; y++) for (let x = part.x0; x <= part.x1; x++) m[y * sel.w + x] = sel.mask[y * sel.w + x];
+          const id = newId();
+          insertSurface({
+            kind: "surface", id, points: [], mask: maskUrl(m, sel.w, sel.h), plane: up(part.quad), role, fill,
+            ...surfaceDefaults(fill), scale: 350, perspective: true, crop: 1,
+          });
+          return id;
+        });
+        setSelection(null);
+        setRefine(null);
+        setSelected(ids[0]);
+        return ids[0];
+      }
+    }
+    const fitted = role === "floor" ? fitFloorQuad(sel.mask, sel.w, sel.h, occluder) : fitWallQuad(sel.mask, sel.w, sel.h, occluder);
+    const plane = fitted && up(fitted);
     const id = newId();
     insertSurface({
       kind: "surface",
@@ -684,7 +773,11 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     }
     if (e.target !== e.currentTarget) return; // handles
     if (refine && selection) {
-      selectAt(p, refine);
+      if (refine === "brush-add" || refine === "brush-remove") {
+        brush.current = { mask: selection.mask.slice(), w: selection.w, h: selection.h, value: refine === "brush-add" ? 1 : 0, last: null };
+        svgRef.current?.setPointerCapture?.(e.pointerId);
+        brushTo(p);
+      } else selectAt(p, refine);
       return;
     }
     const hit = hitLayer(p);
@@ -796,6 +889,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
 
   // At most one update per screen frame, however fast the pointer events come in.
   const onPointerMove = (e: React.PointerEvent) => {
+    if (brush.current) return brushTo(toPhoto(e));
     if (!drag.current) return;
     pending.current = toPhoto(e);
     if (frame.current) return;
@@ -837,12 +931,18 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     const cut = cutouts[cutoutKey(l)];
     return l.cutout !== "off" && cut && !cut.startsWith("failed") && cut !== "pending" ? cut : null;
   };
-  const textureSrc = (l: SurfaceLayer): string | null => {
+  const baseTexture = (l: SurfaceLayer): string | null => {
     if (l.fill.type === "preset") return presetTexture(l.fill.preset);
     if (l.fill.type !== "texture") return null;
     const t = textures[`${l.fill.productId}:${l.crop}`];
     const product = productById.get(l.fill.productId);
     return t && t !== "pending" ? t : product?.image ? proxied(product.image) : null;
+  };
+  baseTextureRef.current = baseTexture;
+  const textureSrc = (l: SurfaceLayer): string | null => {
+    if (!l.turn) return baseTexture(l);
+    const turned = textures[`turn:${textureKey(l)}`];
+    return turned && turned !== "pending" ? turned : baseTexture(l);
   };
 
   // Erased areas as masks: a new floor or wall also covers the spot where old furniture stood.
@@ -861,7 +961,11 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     if (l.mask) {
       const masks = [l.mask, ...eraseMaskUrls].map((u) => `url("${u}")`).join(",");
       Object.assign(style, { maskImage: masks, WebkitMaskImage: masks, maskSize: "100% 100%", WebkitMaskSize: "100% 100%" });
-      if (plane) style.clipPath = `polygon(${plane.map(([x, y]) => `${x}px ${y}px`).join(",")})`;
+      // The mask decides what is visible; the (extended) plane only keeps a new floor from
+      // running up the wall where erased furniture stood.
+      const ext = plane && extendedPlane(plane, l.role);
+      const clip = ext?.quad ?? plane;
+      if (clip) style.clipPath = `polygon(${clip.map(([x, y]) => `${x}px ${y}px`).join(",")})`;
     } else {
       style.clipPath = `polygon(${l.points.map(([x, y]) => `${x}px ${y}px`).join(",")})`;
     }
@@ -1044,16 +1148,24 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
                         {l.fill.type === "color" || !tex ? (
                           <div className="fill" style={{ background: l.fill.type === "color" ? l.fill.color : "#999" }} />
                         ) : l.perspective && plane ? (
-                          <div
-                            className="plane"
-                            style={{
-                              width: PLANE,
-                              height: PLANE,
-                              backgroundImage: `url("${tex}")`,
-                              backgroundSize: `${l.scale}px auto`,
-                              transform: quadToMatrix3d(PLANE, PLANE, plane),
-                            }}
-                          />
+                          (() => {
+                            // Detected floors and walls: draw the texture on a larger part of the same plane,
+                            // so nothing next to the fitted area is left bare.
+                            const ext = l.mask ? extendedPlane(plane, l.role) : null;
+                            return (
+                              <div
+                                className="plane"
+                                style={{
+                                  width: ext?.w ?? PLANE,
+                                  height: ext?.h ?? PLANE,
+                                  backgroundImage: `url("${tex}")`,
+                                  backgroundSize: `${l.scale}px auto`,
+                                  backgroundPosition: ext ? `${-ext.u0}px ${-ext.v0}px` : undefined,
+                                  transform: ext ? quadToMatrix3d(ext.w, ext.h, ext.quad) : quadToMatrix3d(PLANE, PLANE, plane),
+                                }}
+                              />
+                            );
+                          })()
                         ) : (
                           <div className="fill" style={{ backgroundImage: `url("${tex}")`, backgroundSize: `${l.scale}px auto` }} />
                         )}
@@ -1094,11 +1206,12 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
               preserveAspectRatio="none"
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
-              onPointerUp={endDrag}
-              onPointerCancel={endDrag}
-              onLostPointerCapture={endDrag}
+              onPointerUp={() => (endBrush(), endDrag())}
+              onPointerCancel={() => (endBrush(), endDrag())}
+              onLostPointerCapture={() => (endBrush(), endDrag())}
             >
               {selection && <image className="highlight" href={selection.url} width={size.w} height={size.h} preserveAspectRatio="none" />}
+              {brushAt && <circle className="brush" cx={brushAt[0]} cy={brushAt[1]} r={(brushSize / 100) * size.w} />}
               {showLayers &&
                 selectedLayer &&
                 selectedLayer.kind !== "measure" &&
@@ -1283,14 +1396,29 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
               <div className="row wrap">
                 <span className="muted small">Niet helemaal goed?</span>
                 <div className="segmented" role="group" aria-label="Selectie aanpassen">
-                  <button className={refine === "add" ? "on" : ""} onClick={() => setRefine((r) => (r === "add" ? null : "add"))}>
-                    ➕ Stuk erbij
-                  </button>
-                  <button className={refine === "remove" ? "on" : ""} onClick={() => setRefine((r) => (r === "remove" ? null : "remove"))}>
-                    ➖ Stuk eraf
-                  </button>
+                  {([
+                    ["add", "➕ Tik erbij"],
+                    ["remove", "➖ Tik eraf"],
+                    ["brush-add", "🖌️ Kwast +"],
+                    ["brush-remove", "🧽 Kwast −"],
+                  ] as const).map(([m, label]) => (
+                    <button key={m} className={refine === m ? "on" : ""} onClick={() => setRefine((r) => (r === m ? null : m))}>
+                      {label}
+                    </button>
+                  ))}
                 </div>
-                {refine && <span className="small">Tik nu op het stuk dat {refine === "add" ? "erbij moet" : "eraf moet"}.</span>}
+                {(refine === "brush-add" || refine === "brush-remove") && (
+                  <label className="row small">
+                    Kwast
+                    <input type="range" min={0.5} max={8} step={0.5} value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} aria-label="Kwastgrootte" />
+                  </label>
+                )}
+                {(refine === "add" || refine === "remove") && (
+                  <span className="small">Tik nu op het stuk dat {refine === "add" ? "erbij moet" : "eraf moet"}.</span>
+                )}
+                {(refine === "brush-add" || refine === "brush-remove") && (
+                  <span className="small">Veeg over de randen die {refine === "brush-add" ? "erbij moeten" : "eraf moeten"}.</span>
+                )}
               </div>
             )}
           </div>
@@ -1369,3 +1497,8 @@ function distanceToSegment(p: Pt, a: Pt, b: Pt): number {
   return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
 }
 
+
+/** Stable key of a surface's texture (for caching turned versions). */
+function textureKey(l: SurfaceLayer): string {
+  return l.fill.type === "preset" ? `preset:${l.fill.preset}` : l.fill.type === "texture" ? `tex:${l.fill.productId}:${l.crop}` : "none";
+}

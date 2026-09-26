@@ -51,6 +51,8 @@ export interface Product {
   title: string;
   image: string;
   images: string[];
+  /** Small trimmed copy of `image` (data URL) for the product list: loads instantly and survives expired shop links. */
+  thumb?: string;
   price?: string;
   priceValue?: number;
   shop: string;
@@ -150,6 +152,8 @@ export interface SurfaceLayer {
   role?: "floor" | "wall";
   /** Preset textures follow the measured floor's real size unless the user set a size. */
   autoScale?: boolean;
+  /** Texture turned a quarter (planks running the other way). */
+  turn?: boolean;
 }
 
 /** An area of the photo that is painted out (existing furniture removed). */

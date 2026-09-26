@@ -38,7 +38,7 @@ export const Palette = memo(function Palette({ furniture, surfaces, onAddProduct
       {sorted.length === 0 && <p className="muted small">Voeg bij Producten meubels toe via een link.</p>}
       {sorted.map((p) => (
         <button key={p.id} className="palette-item" onClick={() => onAddProduct(p)} title={`${p.title} in de kamer zetten`}>
-          <Img src={p.image} alt="" loading="lazy" />
+          <Img src={p.thumb ?? p.image} alt="" loading="lazy" />
           <span>
             {p.status === "favoriet" && "❤️ "}
             {p.title}
@@ -51,7 +51,7 @@ export const Palette = memo(function Palette({ furniture, surfaces, onAddProduct
       <p className="muted small">Tik eerst op een vloer of muur in de foto, dan hier.</p>
       {surfaces.map((p) => (
         <button key={p.id} className="palette-item" onClick={() => onFill(fillFor(p))}>
-          {p.image ? <Img src={p.image} alt="" loading="lazy" /> : <i className="swatch" style={{ background: p.color }} />}
+          {p.image ? <Img src={p.thumb ?? p.image} alt="" loading="lazy" /> : <i className="swatch" style={{ background: p.color }} />}
           <span>
             {p.title}
             <small>{categoryLabel(p.category)}</small>

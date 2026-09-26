@@ -226,6 +226,74 @@ function extractColor(html: string, product: Json | undefined): string | undefin
   return m ? `#${m[1].replace("#", "")}` : undefined;
 }
 
+/** Logos, icons, placeholders and tracking pixels: never the product photo. */
+const JUNK_IMAGE = /(logo|favicon|sprite|icon|placeholder|no[-_]?image|blank|spacer|pixel|badge|banner|payment|social|share[-_]?default)/i;
+
+/**
+ * Many shops put a thumbnail URL in their meta tags. Ask their image CDN for a
+ * large version instead: Shopify (_200x.jpg), IKEA (?f=xs), and the common
+ * width/height query parameters.
+ */
+export function largeImageUrl(u: string): string {
+  let out = u;
+  try {
+    let url = new URL(out);
+    if (/(^|\.)shopify\.com$/i.test(url.hostname) || url.pathname.includes("/cdn/shop/")) {
+      url = new URL(u.replace(/_(\d{2,4}x\d{0,4}|x\d{2,4})(?=(@2x)?\.(jpe?g|png|webp)(\?|$))/i, ""));
+    }
+    // Signed URLs (imgix, Cloudinary tokens) break when a parameter changes.
+    if (["s", "sig", "signature", "token"].some((k) => url.searchParams.has(k))) return u;
+    if (/ikea\.com$/i.test(url.hostname) && url.searchParams.has("f")) url.searchParams.set("f", "xl");
+    for (const k of ["width", "w", "wid", "imwidth"]) {
+      const v = Number(url.searchParams.get(k));
+      if (v && v < 1000) url.searchParams.set(k, "1200");
+    }
+    for (const k of ["height", "h", "hei"]) {
+      const v = Number(url.searchParams.get(k));
+      if (v && v < 1000) url.searchParams.delete(k);
+    }
+    out = url.toString();
+  } catch {
+    // keep as is
+  }
+  return out;
+}
+
+/** Candidate image URLs cleaned up: absolute, no logos/SVGs/GIFs, large versions, deduplicated. */
+export function productImages(candidates: string[], pageUrl: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  // The original (smaller) URLs go last: a fallback should the large version not exist.
+  const originals: string[] = [];
+  for (const raw of candidates) {
+    const abs = absolutize(decodeEntities(raw.trim()), pageUrl);
+    if (!abs) continue;
+    const path = new URL(abs).pathname;
+    if (/\.(svg|gif|ico)$/i.test(path) || JUNK_IMAGE.test(path)) continue;
+    const big = largeImageUrl(abs);
+    // The same photo in another size counts once.
+    const key = big.replace(/[?#].*$/, "");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(big);
+    if (big !== abs) originals.push(abs);
+  }
+  return [...out, ...originals];
+}
+
+/** <link rel="image_src"> and <img itemprop="image"> (older shop templates). */
+function linkImages(html: string): string[] {
+  const out: string[] = [];
+  for (const [tag] of html.matchAll(/<link\b[^>]*>/gi)) if (/image_src/i.test(attr(tag, "rel") ?? "")) out.push(attr(tag, "href") ?? "");
+  for (const [tag] of html.matchAll(/<img\b[^>]*>/gi)) {
+    if (!/^image$/i.test(attr(tag, "itemprop") ?? "")) continue;
+    const srcset = attr(tag, "srcset") ?? attr(tag, "data-srcset");
+    const largest = srcset?.split(",").map((s) => s.trim().split(/\s+/)[0]).at(-1);
+    out.push(largest || attr(tag, "data-src") || attr(tag, "src") || "");
+  }
+  return out.filter(Boolean);
+}
+
 export function parseProduct(html: string, pageUrl: string): ProductInfo {
   const meta = extractMeta(html);
   const ld = extractJsonLd(html);
@@ -237,15 +305,19 @@ export function parseProduct(html: string, pageUrl: string): ProductInfo {
     meta.get("twitter:title")?.[0] ??
     extractTitle(html);
 
-  const images = unique(
+  const variants = Array.isArray(product?.hasVariant) ? (product!.hasVariant as Json[]) : [];
+  const images = productImages(
     [
       ...asImageList(product?.image),
+      ...variants.flatMap((v) => asImageList(v.image)),
       ...(meta.get("og:image") ?? []),
       ...(meta.get("og:image:secure_url") ?? []),
       ...(meta.get("twitter:image") ?? []),
-    ]
-      .map((u) => absolutize(u.trim(), pageUrl))
-      .filter((u): u is string => !!u),
+      ...(meta.get("twitter:image:src") ?? []),
+      ...(meta.get("image") ?? []),
+      ...linkImages(html),
+    ],
+    pageUrl,
   );
 
   const price =

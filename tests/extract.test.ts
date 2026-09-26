@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { guessCategory } from "@/lib/categories";
-import { extractFundaPhotos, fundaListingId, isFundaUrl, parseFunda, parseFundaApi, parseProduct } from "@/lib/extract";
+import { extractFundaPhotos, fundaListingId, largeImageUrl, isFundaUrl, parseFunda, parseFundaApi, parseProduct, productImages } from "@/lib/extract";
 
 describe("funda", () => {
   const html = `
@@ -130,5 +130,24 @@ describe("funda app API", () => {
   it("falls back to any photo URL in an unknown JSON shape", () => {
     const res = parseFundaApi({ foo: ["https://cloud.funda.nl/valentina_media/1/2/3.jpg"] });
     expect(res.photos).toEqual(["https://cloud.funda.nl/valentina_media/1/2/3.jpg?options=width=1440"]);
+  });
+});
+
+
+describe("product images", () => {
+  it("asks shop CDNs for a large version", () => {
+    expect(largeImageUrl("https://cdn.shopify.com/s/files/1/bank_200x.jpg?v=1")).toBe("https://cdn.shopify.com/s/files/1/bank.jpg?v=1");
+    expect(largeImageUrl("https://www.ikea.com/nl/nl/images/products/bank.jpg?f=xs")).toBe("https://www.ikea.com/nl/nl/images/products/bank.jpg?f=xl");
+    expect(largeImageUrl("https://img.shop.nl/a.jpg?width=300&height=300")).toBe("https://img.shop.nl/a.jpg?width=1200");
+    expect(largeImageUrl("https://x.imgix.net/a.jpg?w=200&s=abc")).toBe("https://x.imgix.net/a.jpg?w=200&s=abc");
+    expect(largeImageUrl("https://other.nl/photo_1200x800.jpg")).toBe("https://other.nl/photo_1200x800.jpg");
+  });
+
+  it("drops logos and svgs, dedupes sizes, keeps originals as fallback", () => {
+    const out = productImages(
+      ["/logo.png", "https://s.nl/icon.svg", "https://s.nl/bank.jpg?width=300", "https://s.nl/bank.jpg?width=600", "//s.nl/stoel.jpg"],
+      "https://s.nl/p/bank",
+    );
+    expect(out).toEqual(["https://s.nl/bank.jpg?width=1200", "https://s.nl/stoel.jpg", "https://s.nl/bank.jpg?width=300"]);
   });
 });

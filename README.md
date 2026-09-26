@@ -44,7 +44,7 @@ Alles hieronder draait gratis in de browser van de gebruiker (geen server, geen 
 | Functie | Model | Download | Licentie |
 |---|---|---|---|
 | Meubels, muren en vloer herkennen | SegFormer-B2 (ADE20K) via transformers.js; op iPad/iPhone SegFormer-B0 | ± 30 MB (B0: ± 4 MB) | NVIDIA SegFormer-licentie (onderzoek/niet-commercieel) |
-| Meubels weggummen | MI-GAN (gemaakt voor telefoons) via onnxruntime-web | ± 27 MB | MIT |
+| Meubels weggummen | LaMa op een computer (beste kwaliteit), MI-GAN op iPad/telefoon of in de lichte modus, via onnxruntime-web | ± 200 MB / ± 27 MB | Apache-2.0 / MIT |
 | Achtergrond van productfoto weghalen | RMBG-1.4 via transformers.js (niet op iPad: te zwaar) | ± 45 MB | Niet-commercieel |
 | Foto's per ruimte sorteren | CLIP ViT-B/32 via transformers.js | ± 90 MB | MIT |
 
@@ -53,8 +53,8 @@ Alles hieronder draait gratis in de browser van de gebruiker (geen server, geen 
 Zo werkt het:
 
 1. **✨ Herken meubels, muren & vloer**: elke pixel krijgt een klasse (bank, stoel, muur, vloer…). Meubels en muren worden losse objecten die je aanklikt.
-2. **Weghalen met AI**: MI-GAN vult het object op met wat erachter hoort. Omdat het werkt op een uitsnede rond het object, blijft de kwaliteit hoog. Lukt de AI niet (download geblokkeerd, te weinig geheugen), dan valt hij terug op de snelle gum.
-3. **Nieuwe vloer / verven**: uit het vloer- of muurmasker wordt automatisch een perspectiefvlak berekend. Randen die door meubels verborgen zijn, tellen niet mee. De textuur loopt mee met de diepte; de oranje hoekjes stellen het vlak bij. Een nieuwe vloer of muur bedekt ook de plek waar weggegumde meubels stonden.
+2. **Weghalen met AI**: LaMa (computer) of MI-GAN (iPad) vult het object op met wat erachter hoort. Het masker wordt ruim genomen (≈ 0,8 % van de breedte rondom, plus 2 % naar onderen voor de contactschaduw), zodat er geen rand of schaduw van het oude meubel blijft staan. Omdat het werkt op een uitsnede rond het object, blijft de kwaliteit hoog. Mislukt LaMa, dan probeert hij MI-GAN. Lukt de AI niet (download geblokkeerd, te weinig geheugen), dan valt hij terug op de snelle gum.
+3. **Nieuwe vloer / verven**: uit het vloer- of muurmasker wordt automatisch een perspectiefvlak berekend. Voor de vloer: de zijranden (lijnen), de achterrand (RANSAC, robuust tegen meubels ervoor) en de verdwijnpunten/horizon — ook als de zijmuren niet in beeld zijn. Muren die om een hoek gaan worden opgesplitst in losse vlakken, elk met een eigen perspectief. Het textuurvlak loopt door tot buiten de hoekpunten, zodat planken tot in de hoeken en onder de rand lopen; met ⤾ Richting 90° draai je de planken. Randen die door meubels verborgen zijn, tellen niet mee. De textuur loopt mee met de diepte; de oranje hoekjes stellen het vlak bij. Een nieuwe vloer of muur bedekt ook de plek waar weggegumde meubels stonden.
 4. **Meubels op de vloer**: staat er een vloer in de foto, dan wordt een nieuw meubel erop gezet. Schuif je het naar achteren, dan wordt het vanzelf kleiner; met "Draaien op de vloer" zet je het schuin, bijvoorbeeld in een hoek.
 
 ### Echter zonder betaalde AI
@@ -96,7 +96,7 @@ Grenzen: een productfoto laat één kant zien, dus de zijkant van een meubel wor
 
 ## Selecteren en stabiliteit
 
-- **Tik op een meubel**: SlimSAM (een lichte "Segment Anything", ± 15 MB) omlijnt precies wat je aantikt; met ➕/➖ tik je stukken erbij of eraf. De foto wordt één keer geanalyseerd, daarna is elke tik snel. Het werkproces sluit zichzelf na 90 seconden zonder gebruik.
+- **Tik op een meubel**: SlimSAM (een lichte "Segment Anything", ± 15 MB) omlijnt precies wat je aantikt. Is de kamer herkend, dan krijgt SAM extra tikpunten verspreid over het herkende meubel en wordt het resultaat samengevoegd met de herkenning, gaten gevuld en losse vlekjes weggehaald — zo wordt de hele bank geselecteerd en niet één kussen. Met ➕/➖ tik je stukken erbij of eraf; met de 🖌️/🧽 kwast (instelbare grootte) veeg je randen precies bij. De foto wordt één keer geanalyseerd, daarna is elke tik snel. Het werkproces sluit zichzelf na 90 seconden zonder gebruik.
 - **Betere herkenning**: overal SegFormer-B2; kussens en plaids worden bij de bank of het bed gevoegd, stukken van één meubel samengevoegd en gaten gedicht.
 - **Crash-vangnet**: loopt een tabblad vast op een AI-taak (iPad met te weinig geheugen), dan meldt de app dat bij de volgende start en zet hij de **lichte AI-modus** aan (kleinere modellen en beelden). In het Project-menu aan en uit te zetten.
 
@@ -105,6 +105,7 @@ Grenzen: een productfoto laat één kant zien, dus de zijkant van een meubel wor
 - **Ongedaan maken / opnieuw** (↶ ↷, ⌘/Ctrl+Z, ⌘/Ctrl+Shift+Z) per foto; slepen en schuifjes tellen als één stap.
 - **Sneltoetsen**: Delete verwijdert, ⌘/Ctrl+D dupliceert, pijltjes verschuiven (Shift = grotere stap), Esc annuleert, Enter maakt een vlak af.
 - **📷 Opslaan / delen**: het ontwerp als foto, op iPad/iPhone via het deelmenu (Foto's, AirDrop, WhatsApp). Perspectief, maskers, schaduwen en licht worden in een canvas nagetekend, identiek aan het scherm.
+- **Productfoto's**: de server kiest de beste foto (productfoto uit JSON-LD, geen logo's of iconen) en vraagt bij bekende shop-CDN's (Shopify, IKEA, `?width=`) de grote versie op. De app bewaart per product een kleine, bijgesneden miniatuur (witte randen eraf) in het project: de lijst laadt meteen, ook als de shop de link later verandert. Laadt een foto niet, dan wordt automatisch de volgende genomen.
 - **Verfkleuren en vloersoorten** direct in de zijbalk, zonder eerst een link te plakken.
 - **Budget per ruimte** en een **boodschappenlijst** (kopiëren of als Excel/CSV), filter op favorieten, prijs zelf invullen als een shop die niet meegeeft, dubbele links worden herkend.
 - **Plakknoppen** voor links (handig op iPad), **back-up** downloaden/terugzetten via het Project-menu, installeerbaar als app (**Zet op beginscherm**).

@@ -307,6 +307,11 @@ export function LayerControls({
         {layer.fill.type === "color" && (
           <input type="color" value={layer.fill.color} onChange={(e) => onChange({ fill: { type: "color", color: e.target.value } })} />
         )}
+        {isTexture && (
+          <button onClick={() => onChange({ turn: !layer.turn })} title="Planken of tegels een kwartslag draaien" className={layer.turn ? "on" : ""}>
+            ⤾ Richting 90°
+          </button>
+        )}
         {(layer.plane || layer.points.length === 4) && isTexture && (
           <label className="row" title="Leg de textuur in perspectief; versleep de vierkante hoeken om de diepte bij te stellen">
             <input type="checkbox" checked={layer.perspective} onChange={(e) => onChange({ perspective: e.target.checked })} />

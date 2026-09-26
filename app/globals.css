@@ -136,6 +136,7 @@ h3.group { margin-top: 28px; padding-bottom: 6px; border-bottom: 1px solid var(-
 .overlay.pickable { cursor: pointer; }
 .overlay.drawing { cursor: crosshair; }
 .overlay .highlight { opacity: 0.4; pointer-events: none; }
+.overlay .brush { fill: rgba(255,255,255,0.15); stroke: #fff; stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
 /* A selected floor/wall: just a hint, so its new colour stays visible. */
 .overlay .highlight.selected-area { opacity: 0.14; }
 .overlay .outline { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 10 6; vector-effect: non-scaling-stroke; pointer-events: none; }
