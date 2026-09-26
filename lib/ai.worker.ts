@@ -27,7 +27,7 @@ export type Task = { gpu?: boolean; gpuModels?: string[] } & (
   | { task: "removeBackground"; image: Img; models: string[] }
   | { task: "inpaint"; image: Img; mask: Uint8Array; model?: "migan" | "lama" }
   | { task: "samEmbed"; image: Img; models: string[] }
-  | { task: "samMask"; points: [number, number][]; labels: number[]; outW: number; outH: number }
+  | { task: "samMask"; points: [number, number][]; labels: number[]; outW: number; outH: number; box?: [number, number, number, number] }
 );
 
 /** How models run: WebGPU (fast, weights in GPU memory) or WebAssembly on the CPU (int8, works everywhere). */
@@ -115,16 +115,45 @@ async function segment({ image, models, outW, outH }: Extract<Task, { task: "seg
   return { result: { classMap, id2label: net.config.id2label, model }, transfer: [classMap.buffer] };
 }
 
+/**
+ * CLIP zero-shot: the descriptions are encoded once, then each photo only runs the
+ * image half of the model and is compared with all of them (the pipeline would
+ * encode every description again for every photo).
+ */
 async function classify({ images, labels, models }: Extract<Task, { task: "classify" }>, run: Run) {
   const t = await transformers();
-  const clip = await keep(`classify:${models}:${run.device}:${run.dtype}`, () =>
-    firstModel(models, (model) => t.pipeline("zero-shot-image-classification", model, { ...run, progress_callback: onDownload("AI-model") })),
+  const [tokenizer, textModel, processor, visionModel] = await keep(`classify:${models}:${run.device}:${run.dtype}`, () =>
+    firstModel(models, (model) =>
+      Promise.all([
+        t.AutoTokenizer.from_pretrained(model),
+        t.CLIPTextModelWithProjection.from_pretrained(model, { ...run, progress_callback: onDownload("AI-model") }),
+        t.AutoProcessor.from_pretrained(model),
+        t.CLIPVisionModelWithProjection.from_pretrained(model, { ...run, progress_callback: onDownload("AI-model") }),
+      ]),
+    ),
   );
+  const unit = (v: Float32Array) => {
+    let n = 0;
+    for (const x of v) n += x * x;
+    n = Math.sqrt(n) || 1;
+    return v.map((x) => x / n);
+  };
+  const { text_embeds } = await textModel(tokenizer(labels.map((l) => `a photo of ${l}`), { padding: true, truncation: true }));
+  const [, dim] = text_embeds.dims as number[];
+  const all = toFloat32(text_embeds);
+  const texts = labels.map((_, i) => unit(all.slice(i * dim, (i + 1) * dim)));
   const out: string[] = [];
   for (const [i, img] of images.entries()) {
     progress(`Foto ${i + 1} van ${images.length} herkennen…`);
-    const [best] = await clip(rawImage(t, img), labels, { hypothesis_template: "a photo of {}" });
-    out.push(best.label);
+    const { image_embeds } = await visionModel(await processor(rawImage(t, img)));
+    const v = unit(toFloat32(image_embeds));
+    let best = 0, bestScore = -Infinity;
+    texts.forEach((tv, k) => {
+      let s = 0;
+      for (let d = 0; d < dim; d++) s += tv[d] * v[d];
+      if (s > bestScore) (bestScore = s), (best = k);
+    });
+    out.push(labels[best]);
   }
   return { result: out, transfer: [] };
 }
@@ -269,7 +298,7 @@ async function samEmbed({ image, models }: Extract<Task, { task: "samEmbed" }>, 
       }),
     ]),
   );
-  progress("Foto analyseren…");
+  progress("Foto analyseren… (eenmalig per foto)");
   const inputs = await processor(rawImage(t, image));
   const emb = await net.get_image_embeddings(inputs);
   inputs.pixel_values?.dispose?.();
@@ -277,12 +306,25 @@ async function samEmbed({ image, models }: Extract<Task, { task: "samEmbed" }>, 
   return { result: { ok: true }, transfer: [] };
 }
 
-async function samMask({ points, labels, outW, outH }: Extract<Task, { task: "samMask" }>) {
+async function samMask({ points, labels, outW, outH, box }: Extract<Task, { task: "samMask" }>) {
   if (!sam) throw new Error("Selecteer-AI is niet voorbereid");
   const { processor, model, sizes, emb } = sam;
+  // A box around the object (from the room recognition) makes SAM take the whole
+  // object instead of the part under the finger. Scaled like the points; built by
+  // hand because reshape_input_points does not scale a single box.
+  let input_boxes: unknown;
+  // The browser's SlimSAM export has no box input (only the AI server's SAM does).
+  const decoder = (model as { sessions?: Record<string, { inputNames?: string[] }> }).sessions?.prompt_encoder_mask_decoder;
+  if (box && decoder?.inputNames?.includes("input_boxes")) {
+    const t = await transformers();
+    const [oh, ow] = sizes.original_sizes[0] as [number, number];
+    const [rh, rw] = sizes.reshaped_input_sizes[0] as [number, number];
+    input_boxes = new t.Tensor("float32", Float32Array.from([box[0] * (rw / ow), box[1] * (rh / oh), box[2] * (rw / ow), box[3] * (rh / oh)]), [1, 1, 4]);
+  }
   const input_points = processor.reshape_input_points([points], sizes.original_sizes, sizes.reshaped_input_sizes);
-  const input_labels = processor.add_input_labels([labels], input_points);
-  const out = await model({ ...emb, input_points, input_labels });
+  // SamProcessor only forwards reshape_input_points; add_input_labels lives on its image processor.
+  const input_labels = (processor.image_processor ?? processor).add_input_labels([labels], input_points);
+  const out = await model({ ...emb, input_points, input_labels, ...(input_boxes ? { input_boxes } : {}) });
   const scores = toFloat32(out.iou_scores);
   const [lh, lw] = (out.pred_masks.dims as number[]).slice(-2);
   const all = toFloat32(out.pred_masks);

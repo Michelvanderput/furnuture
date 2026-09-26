@@ -151,3 +151,15 @@ describe("product images", () => {
     expect(out).toEqual(["https://s.nl/bank.jpg?width=1200", "https://s.nl/stoel.jpg", "https://s.nl/bank.jpg?width=300"]);
   });
 });
+
+describe("shop quirks", () => {
+  it("the title decides the category over the shop menu", () => {
+    expect(guessCategory("Baseline laminaat - wild eiken - 6mm", undefined, "Tegels & vloeren Laminaat", "tegels vloeren laminaat")).toBe("vloeren");
+    expect(guessCategory("Wandtegel wit 20x25", undefined, "Tegels & vloeren")).toBe("tegels");
+  });
+  it("asks CloudFront image folders for a large size", () => {
+    expect(largeImageUrl("https://d2fb1ew6v6wv87.cloudfront.net/products/10063742/s01/424x424/origin.webp")).toBe(
+      "https://d2fb1ew6v6wv87.cloudfront.net/products/10063742/s01/1400x1400/origin.webp",
+    );
+  });
+});

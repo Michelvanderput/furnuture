@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { labelsFromLogits } from "@/lib/labels";
-import { buildSegments } from "@/lib/segment";
+import { buildSegments, mergeSeatParts, type Segment } from "@/lib/segment";
 
 describe("labelsFromLogits", () => {
   it("picks the best class per pixel and scales up to the photo size", () => {
@@ -104,5 +104,42 @@ describe("samMaskToPhoto", () => {
     expect(m[50 * 200 + 20]).toBe(0);
     expect(m[50 * 200 + 180]).toBe(1);
     expect(m[99 * 200 + 180]).toBe(1); // bottom row still inside the photo part, not the padding
+  });
+});
+
+
+describe("corner sofa", () => {
+  it("joins an 'armchair' lying against the sofa, keeps a separate armchair apart", () => {
+    const w = 60, h = 20;
+    const ids = new Int32Array(w * h);
+    const fill = (id: number, x0: number, x1: number, y0 = 5, y1 = 15) => {
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) ids[y * w + x] = id;
+    };
+    fill(1, 20, 39); // sofa
+    fill(2, 40, 47); // its chaise, recognised as an armchair
+    fill(3, 2, 10); // a real armchair, well apart
+    const seg = (id: number, className: string, x0: number, x1: number): Segment => ({
+      id, kind: "furniture", label: className, className, area: (x1 - x0 + 1) * 11, box: [x0, 5, x1, 15],
+    });
+    const segments = [seg(1, "sofa", 20, 39), seg(2, "armchair", 40, 47), seg(3, "armchair", 2, 10)];
+    mergeSeatParts(segments, ids, w, h);
+    expect(segments.map((s) => s.id)).toEqual([1, 3]);
+    expect(ids[10 * w + 45]).toBe(1);
+    expect(segments[0].box).toEqual([20, 5, 47, 15]);
+  });
+});
+
+describe("sofa in two pieces", () => {
+  it("joins two sofa segments that lie against each other", () => {
+    const w = 40, h = 10;
+    const ids = new Int32Array(w * h);
+    for (let y = 2; y <= 8; y++) for (let x = 5; x <= 34; x++) ids[y * w + x] = x < 20 ? 1 : 2;
+    const segments: Segment[] = [
+      { id: 1, kind: "furniture", label: "Bank", className: "sofa", area: 105, box: [5, 2, 19, 8] },
+      { id: 2, kind: "furniture", label: "Bank", className: "sofa", area: 105, box: [20, 2, 34, 8] },
+    ];
+    mergeSeatParts(segments, ids, w, h);
+    expect(segments).toHaveLength(1);
+    expect(new Set(ids.filter(Boolean))).toEqual(new Set([segments[0].id]));
   });
 });

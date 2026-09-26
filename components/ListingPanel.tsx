@@ -24,6 +24,8 @@ export function ListingPanel({ project, update, onDecorate }: Props) {
   const [error, setError] = useState("");
   const [aiStatus, setAiStatus] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
+  /** A freshly loaded house is sorted per room right away: one step less. */
+  const [sortSoon, setSortSoon] = useState(false);
 
   const setPhotos = (fn: (photos: Photo[]) => Photo[], title?: string) =>
     update((p) => ({
@@ -35,7 +37,8 @@ export function ListingPanel({ project, update, onDecorate }: Props) {
       },
     }));
 
-  const loadResult = (listingUrl: string, data: FundaResult) =>
+  const loadResult = (listingUrl: string, data: FundaResult) => {
+    if (data.photos.some((u) => !data.rooms?.[u])) setSortSoon(true);
     update((p) => ({
       ...p,
       listing: {
@@ -45,6 +48,14 @@ export function ListingPanel({ project, update, onDecorate }: Props) {
       },
       scenes: {},
     }));
+  };
+
+  useEffect(() => {
+    if (!sortSoon || !listing?.photos.length) return;
+    setSortSoon(false);
+    autoSort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortSoon, listing]);
 
   // Photos sent by the bookmarklet arrive as #import={u,t,p} (see FundaBookmarklet).
   useEffect(() => {
@@ -173,9 +184,14 @@ export function ListingPanel({ project, update, onDecorate }: Props) {
           </p>
         </div>
         <div className="row wrap">
-          <button className="primary" onClick={autoSort} disabled={!!aiStatus}>
-            {aiStatus || "✨ Sorteer per ruimte met AI"}
-          </button>
+          {(() => {
+            const sorted = listing.photos.every((p) => p.room !== "overig");
+            return (
+              <button className={sorted && !aiStatus ? "" : "primary"} onClick={autoSort} disabled={!!aiStatus}>
+                {aiStatus || (sorted ? "✨ Opnieuw sorteren" : "✨ Sorteer per ruimte met AI")}
+              </button>
+            );
+          })()}
           <label className="button">
             Foto&apos;s toevoegen
             <input type="file" accept="image/*" multiple hidden onChange={(e) => upload(e.target.files)} />
@@ -192,7 +208,8 @@ export function ListingPanel({ project, update, onDecorate }: Props) {
         </div>
       </header>
       <p className="muted small">
-        Tip: sleep foto&apos;s naar de juiste ruimte. De AI draait gratis in je eigen browser (CLIP-model, eenmalig ±90 MB).
+        De foto&apos;s worden vanzelf per ruimte gesorteerd. Klopt er een niet? Kies de ruimte onder de foto of sleep hem naar de juiste
+        groep.
       </p>
       {error && <p className="error">{error}</p>}
 

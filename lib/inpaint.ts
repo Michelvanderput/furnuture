@@ -137,10 +137,14 @@ function simpleFill(ctx: CanvasRenderingContext2D, mask: Uint8Array, w: number, 
   ctx.putImageData(part, cx, cy);
 }
 
+/** Share of the photo above which an object is filled from its surroundings rather than by the AI. */
+const BIG_HOLE = 0.04;
+
 /**
  * Returns the photo with every erase layer painted out, as an object URL (the
- * caller revokes it). AI layers use MI-GAN; "quick" layers, and AI layers when
- * the AI cannot run (download blocked, too little memory), use content-aware fill.
+ * caller revokes it). AI layers use the AI for small objects and content-aware
+ * fill for big ones; "quick" layers, and AI layers when the AI cannot run
+ * (download blocked, too little memory), use content-aware fill.
  * `layers` is newest first, as in the scene.
  */
 export async function renderErased(
@@ -152,7 +156,7 @@ export async function renderErased(
 ): Promise<{ url: string; aiFailed: boolean }> {
   const ordered = [...layers].reverse(); // oldest first
   const keys = ordered.map(eraseLayerId);
-  const cacheKey = `erased3:${fingerprint(photoUrl)}:${keys.join(".")}`;
+  const cacheKey = `erased4:${fingerprint(photoUrl)}:${keys.join(".")}`;
   if (last && last.photoUrl === photoUrl && last.keys.join(".") === keys.join(".")) return { url: URL.createObjectURL(last.blob), aiFailed: false };
   const stored = await getCached<Blob>(cacheKey);
   if (stored instanceof Blob) {
@@ -181,7 +185,12 @@ export async function renderErased(
     const area = layer.mask ? (await decodeMask(layer.mask, w, h)).mask : polygonMask(layer.points.map(([x, y]) => [x * f, y * f]), w, h);
     // Generous margin: the fill must not see any rim of the old object, nor its contact shadow below it.
     const mask = dilate(extendDown(area, w, h, Math.round(h * 0.02)), w, h, Math.round(Math.max(4, w * 0.008)));
-    if (layer.method === "ai") {
+    // Big objects (a sofa, a cabinet) come out far better with content-aware fill: it
+    // continues the real wall, floor and rug around them, where the AI models (which
+    // see the photo at 512 px) smear or invent things. The AI does the small objects.
+    let holeSize = 0;
+    for (let i = 0; i < mask.length; i++) holeSize += mask[i];
+    if (layer.method === "ai" && holeSize / mask.length < BIG_HOLE) {
       try {
         await aiInpaint(canvas, mask, onProgress);
         continue;

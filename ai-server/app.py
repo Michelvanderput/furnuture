@@ -108,6 +108,7 @@ class MaskRequest(BaseModel):
     labels: list[int]
     out_w: int
     out_h: int
+    box: list[float] | None = None
 
 
 @app.post("/sam/mask")
@@ -115,7 +116,7 @@ async def sam_mask(req: MaskRequest):
     if not req.points or len(req.points) != len(req.labels):
         raise HTTPException(400, "Punten ontbreken")
     try:
-        mask, score = await _run(models.sam_mask, req.id, req.points, req.labels, req.out_w, req.out_h)
+        mask, score = await _run(models.sam_mask, req.id, req.points, req.labels, req.out_w, req.out_h, req.box)
     except KeyError as e:
         # Analysis no longer here (server restarted, or too many photos): the app analyses again.
         raise HTTPException(404, "Analyse verlopen") from e

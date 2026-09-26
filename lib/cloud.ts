@@ -178,7 +178,7 @@ export async function cloudRun<T>(job: Task, onProgress?: (m: string) => void, s
       const res = await call("/sam/mask", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id: session.id, points: job.points, labels: job.labels, out_w: job.outW, out_h: job.outH }),
+        body: JSON.stringify({ id: session.id, points: job.points, labels: job.labels, out_w: job.outW, out_h: job.outH, box: job.box ?? null }),
       }).catch((e) => {
         session.id = null; // analysis gone (server restarted): the caller analyses again
         throw e;

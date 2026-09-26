@@ -48,14 +48,42 @@ const LABELS: [keyof Dims, RegExp][] = [
   ["h", /\b(?:hoogte|height|h)\s*[:=]?\s*([\d.,]+)\s*(mm|cm|m)\b/i],
 ];
 
-/** "Breedte: 220 cm", "Diepte 95cm", "Hoogte: 0,8 m" in specification text. */
+/** Sizes of the box, not of the product: "Verpakking … Hoogte: 19 cm". */
+const PACKAGING = /verpakking|pakket|package|packaging|doos\b|colli/i;
+
+/** "Breedte: 220 cm", "Diepte 95cm", "Hoogte: 0,8 m" in specification text (packaging sizes skipped). */
 export function dimsFromLabels(text: string): Dims {
   const out: Dims = {};
   for (const [key, re] of LABELS) {
-    const m = text.match(re);
-    if (m) out[key] = sane(toCm(num(m[1]), m[2]));
+    for (const m of text.matchAll(new RegExp(re.source, "gi"))) {
+      if (PACKAGING.test(text.slice(Math.max(0, m.index - 160), m.index))) continue;
+      out[key] = sane(toCm(num(m[1]), m[2]));
+      break;
+    }
   }
   return out;
+}
+
+/**
+ * Named measurements in a shop's page data, as IKEA has them:
+ * [{"measure":"78 cm","name":"Diepte"}, {"measure":"68 cm","name":"Hoogte rugleuning"}, …].
+ * A sofa has no plain "Hoogte": its height is the back (or arm) rest's.
+ */
+export function dimsFromNamedMeasures(html: string): Dims {
+  const block = html.match(/"measurements":\[\{"measure":[\s\S]{0,3000}?\]/);
+  if (!block) return {};
+  const byName = new Map<string, number>();
+  for (const m of block[0].matchAll(/"measure":"([\d.,]+)\s*(mm|cm|m)?","name":"([^"]+)"/g)) {
+    const v = sane(toCm(num(m[1]), m[2]));
+    if (v !== undefined) byName.set(m[3].toLowerCase(), v);
+  }
+  const pick = (...names: string[]) => names.map((n) => byName.get(n)).find((v) => v !== undefined);
+  const heights = [...byName].filter(([n]) => /^(hoogte|height)\b/.test(n) && !/vrije|zit|seat|under/.test(n)).map(([, v]) => v);
+  return {
+    w: pick("breedte", "width"),
+    d: pick("diepte", "depth", "lengte", "length"),
+    h: pick("hoogte", "height") ?? (heights.length ? Math.max(...heights) : undefined),
+  };
 }
 
 /** "220x95x80 cm", "B220 x D95 x H80", "160 x 200" (bed: width × length). */

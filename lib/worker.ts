@@ -110,6 +110,10 @@ export function takeCrashReport(): { label: string; switchedOff: boolean } | nul
   }
 }
 
+// Leaving or reloading the page mid-job is no crash: a tab killed for memory never
+// fires pagehide, a normal close or reload does. Forget the job note then.
+if (typeof window !== "undefined") window.addEventListener("pagehide", () => store(JOB_KEY, null));
+
 let running = 0;
 const jobStarted = (task: string) => {
   running++;

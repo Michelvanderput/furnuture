@@ -1,5 +1,5 @@
 import { guessCategory, guessRoom } from "./categories";
-import { dimsFromJsonLd, dimsFromLabels, dimsFromTitle, mergeDims, pageText } from "./dimensions";
+import { dimsFromJsonLd, dimsFromLabels, dimsFromNamedMeasures, dimsFromTitle, mergeDims, pageText } from "./dimensions";
 import type { FundaResult, ProductInfo, RoomType } from "./types";
 
 /** Minimal HTML helpers: we only need meta tags, JSON-LD and URLs, so no DOM parser. */
@@ -244,6 +244,8 @@ export function largeImageUrl(u: string): string {
     // Signed URLs (imgix, Cloudinary tokens) break when a parameter changes.
     if (["s", "sig", "signature", "token"].some((k) => url.searchParams.has(k))) return u;
     if (/ikea\.com$/i.test(url.hostname) && url.searchParams.has("f")) url.searchParams.set("f", "xl");
+    // Size in a folder name (Praxis and others on CloudFront): /products/1/s01/424x424/origin.webp
+    if (/cloudfront\.net$/i.test(url.hostname)) url.pathname = url.pathname.replace(/\/(\d{2,3})x(\d{2,3})\//, (all, a, b) => (Number(a) < 1000 && Number(b) < 1000 ? "/1400x1400/" : all));
     for (const k of ["width", "w", "wid", "imwidth"]) {
       const v = Number(url.searchParams.get(k));
       if (v && v < 1000) url.searchParams.set(k, "1200");
@@ -341,6 +343,7 @@ export function parseProduct(html: string, pageUrl: string): ProductInfo {
   const cleanTitle = decodeEntities(String(title)).replace(/\s+/g, " ").trim();
   const dims = mergeDims(
     dimsFromJsonLd(product),
+    dimsFromNamedMeasures(html),
     dimsFromLabels(pageText(html)),
     dimsFromTitle(cleanTitle),
     dimsFromTitle(String(product?.description ?? meta.get("og:description")?.[0] ?? "")),

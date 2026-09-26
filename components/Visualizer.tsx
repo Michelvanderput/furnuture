@@ -24,7 +24,7 @@ import { Selector } from "@/lib/sam";
 import { linkedView, linkFromPoints, photoToPlan, planLayersFor, scanFurniture } from "@/lib/floorplan";
 import { defaultSize, planForPhoto, plansOf, updateItem, updatePlan } from "@/lib/plans";
 import { photoLightSide, photoLook, productFilter, sideShade } from "@/lib/look";
-import { dropSpecks, fillHoles, interiorPoints, loadHitMask, maskHit, maskToDataUrl, paintCircle, polygonMask, rememberMask } from "@/lib/masks";
+import { dilate, dropSpecks, fillHoles, interiorPoints, loadHitMask, maskHit, maskToDataUrl, paintCircle, polygonMask, rememberMask } from "@/lib/masks";
 import { extendedPlane, fitFloorQuad, fitWallQuad, fitWallQuads, imageToPlane, PLANE, planeToImage } from "@/lib/plane";
 import { cachedSegmentation, furnitureMask, segmentMask, segmentRoom, type RoomSegmentation, type Segment, type SegmentKind } from "@/lib/segment";
 import { presetTexture } from "@/lib/textures";
@@ -562,12 +562,31 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     const segMask = seg?.kind === "furniture" && segmentation && segmentation.w === w && segmentation.h === h ? segmentMask(segmentation, seg.id) : null;
     const extra = segMask && mode !== "remove" ? interiorPoints(segMask, w, h, 3, tap).map(([x, y]) => ({ at: [x / w, y / h] as [number, number], positive: true })) : [];
     const points = [{ at, positive: true }, ...extra];
+    // The recognised piece's outline, a little wider, as a box for SAM (not when cutting a piece off).
+    let box: [number, number, number, number] | undefined;
+    if (segMask && mode !== "remove") {
+      let x0 = w, y0 = h, x1 = -1, y1 = -1;
+      for (let i = 0; i < segMask.length; i++) {
+        if (!segMask[i]) continue;
+        const x = i % w, y = (i / w) | 0;
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+      const px = (x1 - x0) * 0.08, py = (y1 - y0) * 0.08;
+      if (x1 > x0) box = [Math.max(0, x0 - px) / w, Math.max(0, y0 - py) / h, Math.min(w, x1 + px) / w, Math.min(h, y1 + py) / h];
+    }
     const run = ++selectRun.current;
     selector.current ??= new Selector();
     try {
-      let piece = await selector.current.select(photo.url, points, w, h, setStatus);
+      let piece = await selector.current.select(photo.url, points, w, h, setStatus, box);
       if (run !== selectRun.current) return; // a newer tap won
-      if (segMask && mode !== "remove") for (let i = 0; i < piece.length; i++) piece[i] |= segMask[i];
+      // Join the recognised piece where it touches SAM's outline (fills gaps, but no stray blobs elsewhere).
+      if (segMask && mode !== "remove") {
+        const near = dilate(piece, w, h, Math.max(2, Math.round(w * 0.02)));
+        for (let i = 0; i < piece.length; i++) if (segMask[i] && near[i]) piece[i] = 1;
+      }
       if (!piece.some(Boolean)) throw new Error("niets gevonden");
       piece = dropSpecks(fillHoles(piece, w, h), w, h, tap);
       const prev = mode !== "new" && selection && selection.w === w && selection.h === h ? selection.mask : null;
@@ -1293,8 +1312,73 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
           />
         )}
 
-        {found.length > 0 && !drawing && (
-          <div className="found row wrap">
+        {selection && !selectedLayer && (
+          <div className="layer-controls selection-bar">
+            <div className="row wrap">
+              <strong>{selection.label}</strong>
+              {selection.kind === "furniture" || selection.kind === "object" ? (
+                <>
+                  <button className="primary" onClick={() => eraseSelection(selection, "ai")}>
+                    🧽 Weghalen met AI
+                  </button>
+                  <button onClick={() => eraseSelection(selection, "simple")}>Snel weghalen</button>
+                </>
+              ) : selection.kind === "floor" ? (
+                <>
+                  <button className="primary" onClick={() => surfaceFromSelection(selection, { type: "preset", preset: "eiken-naturel" }, "floor")}>
+                    🪵 Nieuwe vloer leggen
+                  </button>
+                  <span className="muted small">of kies rechts een vloer</span>
+                </>
+              ) : (
+                <>
+                  <button
+                    className="primary"
+                    onClick={() => surfaceFromSelection(selection, { type: "color", color: products.find((p) => p.color)?.color ?? "#d8cfc4" }, "wall")}
+                  >
+                    🎨 Verven
+                  </button>
+                  <span className="muted small">of kies rechts een kleur, behang of tegels</span>
+                </>
+              )}
+              <button className="ghost" onClick={() => (setSelection(null), setRefine(null))}>
+                Sluiten
+              </button>
+            </div>
+            {(selection.kind === "furniture" || selection.kind === "object") && (
+              <div className="row wrap">
+                <span className="muted small">Niet helemaal goed?</span>
+                <div className="segmented" role="group" aria-label="Selectie aanpassen">
+                  {([
+                    ["add", "➕ Tik erbij"],
+                    ["remove", "➖ Tik eraf"],
+                    ["brush-add", "🖌️ Kwast +"],
+                    ["brush-remove", "🧽 Kwast −"],
+                  ] as const).map(([m, label]) => (
+                    <button key={m} className={refine === m ? "on" : ""} onClick={() => setRefine((r) => (r === m ? null : m))}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {(refine === "brush-add" || refine === "brush-remove") && (
+                  <label className="row small">
+                    Kwast
+                    <input type="range" min={0.5} max={8} step={0.5} value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} aria-label="Kwastgrootte" />
+                  </label>
+                )}
+                {(refine === "add" || refine === "remove") && (
+                  <span className="small">Tik nu op het stuk dat {refine === "add" ? "erbij moet" : "eraf moet"}.</span>
+                )}
+                {(refine === "brush-add" || refine === "brush-remove") && (
+                  <span className="small">Veeg over de randen die {refine === "brush-add" ? "erbij moeten" : "eraf moeten"}.</span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {found.length > 0 && !drawing && !(selection && !selectedLayer) && (
+          <div className="found row">
             <span className="muted small">Gevonden:</span>
             {found.map((s) => (
               <button
@@ -1563,70 +1647,6 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
           <div className="stage loading">Foto laden…</div>
         )}
 
-        {selection && !selectedLayer && (
-          <div className="layer-controls selection-bar">
-            <div className="row wrap">
-              <strong>{selection.label}</strong>
-              {selection.kind === "furniture" || selection.kind === "object" ? (
-                <>
-                  <button className="primary" onClick={() => eraseSelection(selection, "ai")}>
-                    🧽 Weghalen met AI
-                  </button>
-                  <button onClick={() => eraseSelection(selection, "simple")}>Snel weghalen</button>
-                </>
-              ) : selection.kind === "floor" ? (
-                <>
-                  <button className="primary" onClick={() => surfaceFromSelection(selection, { type: "preset", preset: "eiken-naturel" }, "floor")}>
-                    🪵 Nieuwe vloer leggen
-                  </button>
-                  <span className="muted small">of kies rechts een vloer</span>
-                </>
-              ) : (
-                <>
-                  <button
-                    className="primary"
-                    onClick={() => surfaceFromSelection(selection, { type: "color", color: products.find((p) => p.color)?.color ?? "#d8cfc4" }, "wall")}
-                  >
-                    🎨 Verven
-                  </button>
-                  <span className="muted small">of kies rechts een kleur, behang of tegels</span>
-                </>
-              )}
-              <button className="ghost" onClick={() => (setSelection(null), setRefine(null))}>
-                Sluiten
-              </button>
-            </div>
-            {(selection.kind === "furniture" || selection.kind === "object") && (
-              <div className="row wrap">
-                <span className="muted small">Niet helemaal goed?</span>
-                <div className="segmented" role="group" aria-label="Selectie aanpassen">
-                  {([
-                    ["add", "➕ Tik erbij"],
-                    ["remove", "➖ Tik eraf"],
-                    ["brush-add", "🖌️ Kwast +"],
-                    ["brush-remove", "🧽 Kwast −"],
-                  ] as const).map(([m, label]) => (
-                    <button key={m} className={refine === m ? "on" : ""} onClick={() => setRefine((r) => (r === m ? null : m))}>
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {(refine === "brush-add" || refine === "brush-remove") && (
-                  <label className="row small">
-                    Kwast
-                    <input type="range" min={0.5} max={8} step={0.5} value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} aria-label="Kwastgrootte" />
-                  </label>
-                )}
-                {(refine === "add" || refine === "remove") && (
-                  <span className="small">Tik nu op het stuk dat {refine === "add" ? "erbij moet" : "eraf moet"}.</span>
-                )}
-                {(refine === "brush-add" || refine === "brush-remove") && (
-                  <span className="small">Veeg over de randen die {refine === "brush-add" ? "erbij moeten" : "eraf moeten"}.</span>
-                )}
-              </div>
-            )}
-          </div>
-        )}
 
         {selectedLayer?.kind === "product" && selectedLayer.planItem && linkedPlan && (() => {
           const item = linkedPlan.items.find((i) => i.id === selectedLayer.planItem);

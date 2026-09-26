@@ -143,7 +143,7 @@ def sam_embed(img: Image.Image) -> str:
     return sid
 
 
-def sam_mask(sid: str, points, labels, out_w: int, out_h: int):
+def sam_mask(sid: str, points, labels, out_w: int, out_h: int, box=None):
     """Mask (out_w × out_h, 1 byte per pixel) of the object at the points (pixels of the analysed photo)."""
     torch = _torch()
     with _lock:
@@ -157,8 +157,12 @@ def sam_mask(sid: str, points, labels, out_w: int, out_h: int):
     rh, rw = [int(v) for v in s["reshaped_input_sizes"][0]]
     pts = torch.tensor([[[[x * rw / ow, y * rh / oh] for x, y in points]]], dtype=torch.float32)
     lbl = torch.tensor([[labels]], dtype=torch.int64)
+    extra = {}
+    if box:
+        # A box around the object makes SAM take all of it, not just the part that was tapped.
+        extra["input_boxes"] = torch.tensor([[[box[0] * rw / ow, box[1] * rh / oh, box[2] * rw / ow, box[3] * rh / oh]]], dtype=torch.float32)
     with torch.inference_mode():
-        out = model(image_embeddings=s["emb"], input_points=pts, input_labels=lbl, multimask_output=True)
+        out = model(image_embeddings=s["emb"], input_points=pts, input_labels=lbl, multimask_output=True, **extra)
         masks = proc.image_processor.post_process_masks(
             out.pred_masks, s["original_sizes"], s["reshaped_input_sizes"], binarize=False
         )[0][0]  # (3, H, W) logits at photo size

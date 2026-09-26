@@ -9,9 +9,32 @@ import { imagePixels, isLightMode, pixelsToCanvas, runAi, type Img, type Progres
  */
 export type { Progress };
 
-const LABELED = ROOMS.filter((r) => r.clip);
+/** Every description with the room it stands for. */
+const PROMPTS = ROOMS.flatMap((r) => r.clip.map((text) => ({ text, room: r.id })));
 
-/** Guesses the room type of each photo with CLIP. Calls onResult per photo. */
+/**
+ * Floor plans are drawings: mostly pure white paper and hard lines, with none of
+ * the soft gradients of a photo. Recognised from the pixels (no AI), which is
+ * both faster and more reliable than CLIP (that confused a bright dining room
+ * with a floor plan).
+ */
+export function looksLikeFloorPlan({ data, width, height }: Img): boolean {
+  let white = 0, soft = 0;
+  const n = width * height;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      if (Math.min(data[i], data[i + 1], data[i + 2]) > 242) white++;
+      if (x + 1 < width) {
+        const d = Math.abs((data[i] + data[i + 1] + data[i + 2] - data[i + 4] - data[i + 5] - data[i + 6]) / 3);
+        if (d > 1.5 && d < 12) soft++;
+      }
+    }
+  }
+  return white / n > 0.3 && soft / n < 0.12;
+}
+
+/** Guesses the room type of each photo (floor plans from the pixels, the rest with CLIP). Calls onResult per photo. */
 export async function classifyRooms(
   photos: { id: string; url: string }[],
   onResult: (id: string, room: RoomType) => void,
@@ -20,15 +43,27 @@ export async function classifyRooms(
   onProgress?.("Foto's voorbereiden…");
   // CLIP looks at 224×224 pixels; sending more only costs memory.
   const images: Img[] = [];
-  for (const p of photos) images.push(await imagePixels(p.url, 256));
+  const rest: string[] = [];
+  for (const [i, p] of photos.entries()) {
+    onProgress?.(`Foto's voorbereiden… ${i + 1}/${photos.length}`);
+    const img = await imagePixels(p.url, 256);
+    if (looksLikeFloorPlan(img)) onResult(p.id, "plattegrond");
+    else images.push(img), rest.push(p.id);
+  }
+  if (!images.length) return;
+  const photoPrompts = PROMPTS.filter((p) => p.room !== "plattegrond");
   const best = await runAi<string[]>(
-    // ViT-B/16 looks at 4× more patches than B/32 (same download size): noticeably better at telling rooms apart.
     // Light mode (iPad): B/32 only, which needs a quarter of the memory while running.
-    { task: "classify", images, labels: LABELED.map((r) => r.clip), models: isLightMode() ? ["Xenova/clip-vit-base-patch32"] : ["Xenova/clip-vit-base-patch16", "Xenova/clip-vit-base-patch32"] },
+    {
+      task: "classify",
+      images,
+      labels: photoPrompts.map((p) => p.text),
+      models: isLightMode() ? ["Xenova/clip-vit-base-patch32"] : ["Xenova/clip-vit-base-patch16", "Xenova/clip-vit-base-patch32"],
+    },
     onProgress,
     images.map((i) => i.data.buffer),
   );
-  best.forEach((label, i) => onResult(photos[i].id, LABELED.find((r) => r.clip === label)?.id ?? "overig"));
+  best.forEach((label, i) => onResult(rest[i], photoPrompts.find((p) => p.text === label)?.room ?? "overig"));
 }
 
 /**

@@ -96,8 +96,10 @@ export const Palette = memo(function Palette({ furniture, surfaces, onAddProduct
         <button key={p.id} className="palette-item" onClick={() => onAddProduct(p)} title={`${p.title} in de kamer zetten`}>
           <Img src={p.thumb ?? p.image} alt="" loading="lazy" />
           <span>
-            {p.status === "favoriet" && "❤️ "}
-            {p.title}
+            <b className="name">
+              {p.status === "favoriet" && "❤️ "}
+              {p.title}
+            </b>
             <small>
               {categoryLabel(p.category)}
               {p.price && ` · ${p.price}`}
@@ -112,7 +114,7 @@ export const Palette = memo(function Palette({ furniture, surfaces, onAddProduct
         <button key={p.id} className="palette-item" onClick={() => onFill(fillFor(p))}>
           {p.image ? <Img src={p.thumb ?? p.image} alt="" loading="lazy" /> : <i className="swatch" style={{ background: p.color }} />}
           <span>
-            {p.title}
+            <b className="name">{p.title}</b>
             <small>{categoryLabel(p.category)}</small>
           </span>
         </button>

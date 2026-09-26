@@ -35,6 +35,8 @@ export class Selector {
     outW: number,
     outH: number,
     onProgress?: Progress,
+    /** Box around the object (fractions of the photo: x0, y0, x1, y1), e.g. from the room recognition. */
+    box?: [number, number, number, number],
   ): Promise<Uint8Array> {
     const ask = () =>
       this.session.run<{ mask: Uint8Array; score: number }>(
@@ -44,6 +46,7 @@ export class Selector {
           labels: points.map((p) => (p.positive ? 1 : 0)),
           outW,
           outH,
+          box: box && [box[0] * this.dims.w, box[1] * this.dims.h, box[2] * this.dims.w, box[3] * this.dims.h],
         },
         onProgress,
       );
@@ -51,8 +54,10 @@ export class Selector {
     let mask: Uint8Array;
     try {
       ({ mask } = await ask());
-    } catch {
-      // The worker was closed in between (to free memory for another AI job): analyse again.
+    } catch (e) {
+      // Only when the analysis is gone (worker closed to free memory for another AI job):
+      // analyse again. Any other error would only fail again, a slow second time.
+      if (this.session.active && !/niet voorbereid|Analyse verlopen|Geen analyse/.test(String(e))) throw e;
       this.photo = null;
       await this.prepare(photoUrl, onProgress);
       ({ mask } = await ask());

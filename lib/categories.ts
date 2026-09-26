@@ -1,18 +1,36 @@
 import type { Category, RoomType } from "./types";
 
-export const ROOMS: { id: RoomType; label: string; clip: string }[] = [
-  { id: "woonkamer", label: "Woonkamer", clip: "a living room with a sofa" },
-  { id: "keuken", label: "Keuken", clip: "a kitchen" },
-  { id: "slaapkamer", label: "Slaapkamer", clip: "a bedroom" },
-  { id: "badkamer", label: "Badkamer", clip: "a bathroom with a shower or bathtub" },
-  { id: "toilet", label: "Toilet", clip: "a small toilet room" },
-  { id: "hal", label: "Hal & trap", clip: "a hallway or staircase" },
-  { id: "werkkamer", label: "Werkkamer", clip: "a home office or empty small room" },
-  { id: "zolder", label: "Zolder", clip: "an attic room with a sloped roof" },
-  { id: "tuin", label: "Tuin & balkon", clip: "a garden, balcony or terrace" },
-  { id: "buitenkant", label: "Buitenkant", clip: "the exterior facade of a house" },
-  { id: "plattegrond", label: "Plattegrond", clip: "an architectural floor plan drawing" },
-  { id: "overig", label: "Overig", clip: "" },
+/**
+ * `clip`: descriptions for the photo-sorting AI (CLIP). Several per room: a room
+ * wins when any of its descriptions fits best, which is much more reliable than a
+ * single description (a dining corner is a living room too, a bedroom may be in
+ * the attic). Floor plans are recognised without AI (see ai.ts).
+ */
+export const ROOMS: { id: RoomType; label: string; clip: string[] }[] = [
+  {
+    id: "woonkamer",
+    label: "Woonkamer",
+    clip: ["a living room with a sofa", "a dining room with a dining table and chairs", "an open-plan living and dining room", "a living room with a fireplace"],
+  },
+  { id: "keuken", label: "Keuken", clip: ["a kitchen", "a kitchen counter with a sink and a stove", "an open kitchen with cabinets"] },
+  { id: "slaapkamer", label: "Slaapkamer", clip: ["a bedroom with a bed", "a bedroom", "a small bedroom with a bed under a window"] },
+  { id: "badkamer", label: "Badkamer", clip: ["a bathroom with a shower or bathtub", "a bathroom with a sink and a mirror"] },
+  { id: "toilet", label: "Toilet", clip: ["a small toilet room", "a toilet with a small hand basin"] },
+  {
+    id: "hal",
+    label: "Hal & trap",
+    clip: ["a hallway with a staircase", "an entrance hall with a front door", "a narrow corridor with doors", "an indoor landing at the top of the stairs"],
+  },
+  { id: "werkkamer", label: "Werkkamer", clip: ["a home office with a desk", "a study room with a desk and a chair", "a small room with a desk under the window"] },
+  { id: "zolder", label: "Zolder", clip: ["an attic room with a sloped roof", "an attic with a sloping wooden ceiling"] },
+  { id: "tuin", label: "Tuin & balkon", clip: ["a back garden with a fence", "a garden with plants and a patio", "a backyard with grass and the back of the house", "a balcony", "a roof terrace"] },
+  {
+    id: "buitenkant",
+    label: "Buitenkant",
+    clip: ["the front facade of a house", "a street with houses", "the outside of a building", "a public playground or park near houses"],
+  },
+  { id: "plattegrond", label: "Plattegrond", clip: ["an architectural floor plan drawing"] },
+  { id: "overig", label: "Overig", clip: [] },
 ];
 
 export const CATEGORIES: { id: Category; label: string; group: "meubels" | "afwerking" | "accessoires" }[] = [
@@ -61,9 +79,16 @@ const RULES: [Category, RegExp][] = [
   ["decoratie", /\bvaas|kussen|plaid|spiegel|mirror|poster|schilderij|\bdecor|kaars|kandelaar|lijst|cushion|vase|wall art|klok/],
 ];
 
+/**
+ * The most specific text decides: the title first, then the shop's category, the
+ * breadcrumb, … ("Baseline laminaat" in the menu "Tegels & vloeren" is a floor).
+ */
 export function guessCategory(...texts: (string | undefined)[]): Category {
-  const haystack = texts.filter(Boolean).join(" ").toLowerCase();
-  for (const [cat, re] of RULES) if (re.test(haystack)) return cat;
+  for (const text of texts) {
+    const t = (text ?? "").toLowerCase();
+    if (!t) continue;
+    for (const [cat, re] of RULES) if (re.test(t)) return cat;
+  }
   return "overig";
 }
 

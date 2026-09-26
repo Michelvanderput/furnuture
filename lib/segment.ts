@@ -1,4 +1,5 @@
 import { fingerprint, getCached, putCached } from "./aiCache";
+import { cloudUrl } from "./cloud";
 import { components, dilate } from "./masks";
 import { imagePixels, isLightMode, runAi, gpuEnabled, type Progress } from "./worker";
 
@@ -114,8 +115,8 @@ const TIERS = [MODEL_GPU, MODEL, MODEL_LIGHT];
 const cacheKey = (photoUrl: string, model: string) => `seg:${model.split("/").pop()}:${fingerprint(photoUrl)}`;
 
 /** A recognition made before for this photo (no AI), or null. */
-export async function cachedSegmentation(photoUrl: string): Promise<RoomSegmentation | null> {
-  for (const model of TIERS) {
+export async function cachedSegmentation(photoUrl: string, atLeast = MODEL_LIGHT): Promise<RoomSegmentation | null> {
+  for (const model of TIERS.slice(0, TIERS.indexOf(atLeast) + 1)) {
     const hit = await getCached<Stored>(cacheKey(photoUrl, model));
     if (hit?.classMap) return buildSegments(hit.classMap, hit.w, hit.h, hit.id2label);
   }
@@ -123,11 +124,12 @@ export async function cachedSegmentation(photoUrl: string): Promise<RoomSegmenta
 }
 
 export async function segmentRoom(photoUrl: string, onProgress?: Progress): Promise<RoomSegmentation> {
-  const cached = await cachedSegmentation(photoUrl);
+  const gpu = gpuEnabled();
+  // A result from earlier is reused only when it is at least as good as what this device can do now.
+  const cached = await cachedSegmentation(photoUrl, cloudUrl() ? MODEL_GPU : isLightMode() ? MODEL_LIGHT : MODEL);
   if (cached) return cached;
   onProgress?.("Foto voorbereiden…");
   // The model looks at 512×512 pixels (B5: 640); a larger photo only costs memory.
-  const gpu = gpuEnabled();
   const image = await imagePixels(photoUrl, gpu ? 640 : 512);
   const f = WORK_SIDE / Math.max(image.width, image.height);
   const outW = Math.round(image.width * f);
@@ -190,7 +192,9 @@ export function buildSegments(
     for (let i = 0; i < w * h; i++) if (labels[i] && idOf[labels[i]] && !ids[i]) ids[i] = idOf[labels[i]];
   }
 
+  // Cushions and plaids first: a plaid over a sofa splits it in two until it is part of it.
   mergeAccessories(segments, ids, w, h);
+  mergeSeatParts(segments, ids, w, h);
   for (const seg of segments) if (seg.kind === "furniture") fillHoles(seg, segments, ids, w);
   // Recount: filling holes can swallow small pieces completely.
   const areas = new Map<number, number>();
@@ -264,6 +268,63 @@ function mergeAccessories(segments: Segment[], ids: Int32Array, w: number, h: nu
     target.box = [Math.min(target.box[0], x0), Math.min(target.box[1], y0), Math.max(target.box[2], x1), Math.max(target.box[3], y1)];
     segments.splice(segments.indexOf(acc), 1);
     byId.delete(acc.id);
+  }
+}
+
+/**
+ * Seating the model easily mistakes for one another: the arm or chaise of a corner
+ * sofa comes out as "armchair", or the sofa as two sofas.
+ */
+const SEAT_PARTS = new Set(["armchair", "swivel chair", "ottoman", "chair"]);
+/** How much of a piece's outline must lie against the sofa ("chair" is often a real chair next to it). */
+const seatContact = (className: string | undefined) => (className === "chair" ? 0.3 : 0.15);
+
+/**
+ * A "seat" piece that lies against a sofa along a good part of its outline is part
+ * of that sofa (a corner sofa's end, its arm). Without this, selecting the sofa left
+ * those parts standing, and erasing it left half a sofa behind. A separate armchair
+ * does not touch the sofa, or only at a corner, and stays on its own.
+ */
+export function mergeSeatParts(segments: Segment[], ids: Int32Array, w: number, h: number) {
+  const byId = new Map(segments.map((s) => [s.id, s]));
+  let self = 0;
+  const isSofa = (id: number) => id !== self && byId.get(id)?.className === "sofa";
+  // Smaller pieces first, so two halves of one sofa become one before an arm is added.
+  const parts = segments.filter((s) => SEAT_PARTS.has(s.className ?? "") || s.className === "sofa").sort((a, b) => a.area - b.area);
+  for (const part of parts) {
+    if (!byId.has(part.id)) continue;
+    self = part.id;
+    const [x0, y0, x1, y1] = part.box;
+    let edge = 0;
+    const touching = new Map<number, number>();
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        if (ids[y * w + x] !== part.id) continue;
+        // Outline pixel: a 4-neighbour outside the part. Next to a sofa within 2 px?
+        let outline = false, sofa = 0;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h || ids[ny * w + nx] !== part.id) outline = true;
+        }
+        if (!outline) continue;
+        edge++;
+        for (let r = 1; r <= 2 && !sofa; r++) {
+          for (const [dx, dy] of [[r, 0], [-r, 0], [0, r], [0, -r]]) {
+            const nx = x + dx, ny = y + dy;
+            if (nx >= 0 && ny >= 0 && nx < w && ny < h && isSofa(ids[ny * w + nx])) sofa = ids[ny * w + nx];
+          }
+        }
+        if (sofa) touching.set(sofa, (touching.get(sofa) ?? 0) + 1);
+      }
+    }
+    const best = [...touching.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (!best || best[1] < Math.max(6, edge * seatContact(part.className))) continue;
+    const target = byId.get(best[0])!;
+    for (let i = 0; i < ids.length; i++) if (ids[i] === part.id) ids[i] = target.id;
+    target.area += part.area;
+    target.box = [Math.min(target.box[0], x0), Math.min(target.box[1], y0), Math.max(target.box[2], x1), Math.max(target.box[3], y1)];
+    segments.splice(segments.indexOf(part), 1);
+    byId.delete(part.id);
   }
 }
 
