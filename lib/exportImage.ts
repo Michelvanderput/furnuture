@@ -91,10 +91,11 @@ function pathOf(ctx: CanvasRenderingContext2D, pts: Pt[]) {
   ctx.closePath();
 }
 
-function shadowGradient(ctx: CanvasRenderingContext2D, strength: number) {
+function shadowGradient(ctx: CanvasRenderingContext2D, strength: number, contact = false) {
   const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
-  g.addColorStop(0, `rgba(0,0,0,${0.55 * strength})`);
-  g.addColorStop(0.55, `rgba(0,0,0,${0.3 * strength})`);
+  // Same stops as components/visualizer/Shadow.tsx (soft shadow, and the darker contact core).
+  g.addColorStop(0, `rgba(0,0,0,${(contact ? 0.45 : 0.55) * strength})`);
+  g.addColorStop(contact ? 0.6 : 0.55, `rgba(0,0,0,${(contact ? 0.2 : 0.3) * strength})`);
   g.addColorStop(1, "rgba(0,0,0,0)");
   return g;
 }
@@ -109,6 +110,10 @@ export interface DesignInput {
   productSrc: (l: ProductLayer) => string | null;
   textureSrc: (l: SurfaceLayer) => string | null;
   eraseMasks: string[];
+  /** Room light maps for textured surfaces (lib/shading.ts), drawn like on the stage. */
+  shading?: (l: SurfaceLayer) => { multiply: string; screen: string } | undefined;
+  /** Light direction of the photo (lib/look.ts), for the side shade on products. */
+  lightSide?: number;
   /** Label for a measuring line ("3,42 m"). */
   measureText?: (l: MeasureLayer) => string;
 }
@@ -146,6 +151,14 @@ export async function renderDesign(input: DesignInput): Promise<Blob> {
           const flat = tiled(tile, l.scale, W, H);
           lctx.drawImage(flat, 0, 0);
           free(flat);
+        }
+        const maps = input.shading?.(l);
+        if (maps) {
+          lctx.globalCompositeOperation = "multiply";
+          lctx.drawImage(await loadImage(maps.multiply), 0, 0, W, H);
+          lctx.globalCompositeOperation = "screen";
+          lctx.drawImage(await loadImage(maps.screen), 0, 0, W, H);
+          lctx.globalCompositeOperation = "source-over";
         }
       }
       lctx.restore();
@@ -192,9 +205,15 @@ export async function renderDesign(input: DesignInput): Promise<Blob> {
         const depth = width * 0.45;
         pctx.translate(u, v);
         pctx.rotate((angle * Math.PI) / 180);
+        pctx.save();
         pctx.translate(0, -0.45 * depth);
         pctx.scale(width * 0.6, depth * 0.65);
         pctx.fillStyle = shadowGradient(pctx, strength);
+        pctx.fillRect(-1, -1, 2, 2);
+        pctx.restore();
+        pctx.translate(0, -0.45 * depth);
+        pctx.scale(width * 0.52, depth * 0.5);
+        pctx.fillStyle = shadowGradient(pctx, strength, true);
         pctx.fillRect(-1, -1, 2, 2);
         // Warp into a separate layer first: overlapping triangle edges would darken twice under multiply.
         const flat = canvasOf(W, H);
@@ -208,8 +227,14 @@ export async function renderDesign(input: DesignInput): Promise<Blob> {
         ctx.translate((br[0] + bl[0]) / 2, (br[1] + bl[1]) / 2);
         ctx.rotate(Math.atan2(br[1] - bl[1], br[0] - bl[0]));
         ctx.translate(0, -h * 0.1);
+        ctx.save();
         ctx.scale(w / 2, h / 2);
         ctx.fillStyle = shadowGradient(ctx, strength);
+        ctx.fillRect(-1, -1, 2, 2);
+        ctx.restore();
+        ctx.translate(0, h * 0.1 - h * 0.05);
+        ctx.scale(w * 0.44, h * 0.25);
+        ctx.fillStyle = shadowGradient(ctx, strength, true);
         ctx.fillRect(-1, -1, 2, 2);
       }
       ctx.restore();
@@ -226,6 +251,21 @@ export async function renderDesign(input: DesignInput): Promise<Blob> {
       pctx.scale(-1, 1);
     }
     pctx.drawImage(img, 0, 0, prepared.width, prepared.height);
+    // Side light, as on the stage: a gradient over the product only (source-atop keeps its shape).
+    const a = Math.abs(input.lightSide ?? 0) * (l.sideLight ?? 0.8) * 0.42;
+    if (a >= 0.02) {
+      pctx.setTransform(1, 0, 0, 1, 0, 0);
+      pctx.filter = "none";
+      pctx.globalCompositeOperation = "source-atop";
+      // The stage gradient is in the (possibly mirrored) image's orientation; here we draw on the result.
+      const darkRight = (input.lightSide ?? 0) < 0;
+      const g = pctx.createLinearGradient(darkRight ? 0 : prepared.width, 0, darkRight ? prepared.width : 0, 0);
+      g.addColorStop(0, `rgba(255,250,240,${a * 0.25})`);
+      g.addColorStop(0.45, "rgba(0,0,0,0)");
+      g.addColorStop(1, `rgba(0,0,0,${a})`);
+      pctx.fillStyle = g;
+      pctx.fillRect(0, 0, prepared.width, prepared.height);
+    }
     drawWarped(ctx, prepared, l.corners, 12);
     free(prepared);
   }

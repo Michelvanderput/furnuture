@@ -282,3 +282,5 @@ button.on { background: var(--accent-soft); border-color: var(--accent); }
 .design-list button { margin-top: 6px; }
 .card .thumb-actions { position: absolute; top: 6px; right: 6px; }
 label.button.small { padding: 3px 8px; font-size: 13px; }
+.overlay.preview > * { display: none; }
+.overlay.preview { cursor: zoom-out; }

@@ -1,9 +1,9 @@
 import type { Progress } from "./ai";
 import { loadImage, proxied } from "./images";
-import { aiInpaint } from "./aiInpaint";
+import { aiInpaint, patchInpaint } from "./aiInpaint";
 import { decodeMask, dilate, polygonMask } from "./masks";
 import { fingerprint, getCached, putCached } from "./aiCache";
-import type { EraseLayer } from "./types";
+import type { EraseLayer, Pt } from "./types";
 
 /**
  * Fills a masked area from its surroundings with a push-pull pyramid (no AI):
@@ -139,18 +139,20 @@ function simpleFill(ctx: CanvasRenderingContext2D, mask: Uint8Array, w: number, 
 
 /**
  * Returns the photo with every erase layer painted out, as an object URL (the
- * caller revokes it). AI layers use MI-GAN; if that cannot run (download
- * blocked, too little memory) they fall back to the push-pull fill.
+ * caller revokes it). AI layers use MI-GAN; "quick" layers, and AI layers when
+ * the AI cannot run (download blocked, too little memory), use content-aware fill.
  * `layers` is newest first, as in the scene.
  */
 export async function renderErased(
   photoUrl: string,
   layers: EraseLayer[],
   onProgress?: Progress,
+  /** The floor's outline in photo pixels, if known: floor and wall are then filled separately. */
+  floor?: Pt[],
 ): Promise<{ url: string; aiFailed: boolean }> {
   const ordered = [...layers].reverse(); // oldest first
   const keys = ordered.map(eraseLayerId);
-  const cacheKey = `erased:${fingerprint(photoUrl)}:${keys.join(".")}`;
+  const cacheKey = `erased2:${fingerprint(photoUrl)}:${keys.join(".")}`;
   if (last && last.photoUrl === photoUrl && last.keys.join(".") === keys.join(".")) return { url: URL.createObjectURL(last.blob), aiFailed: false };
   const stored = await getCached<Blob>(cacheKey);
   if (stored instanceof Blob) {
@@ -188,7 +190,12 @@ export async function renderErased(
         aiFailed = true;
       }
     }
-    simpleFill(ctx, mask, w, h);
+    try {
+      await patchInpaint(canvas, mask, floor?.map(([x, y]) => [x * f, y * f] as Pt), onProgress);
+    } catch (e) {
+      console.warn("Content-aware fill failed, using the smooth fill", e);
+      simpleFill(ctx, mask, w, h);
+    }
   }
   onProgress?.("");
   const blob = await new Promise<Blob>((resolve, reject) =>

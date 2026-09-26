@@ -109,9 +109,38 @@ export async function removeBackground(src: string, tolerance = 18): Promise<str
     }
   }
 
+  // Packshots usually have a soft grey floor shadow under the product. Left as it
+  // is, it becomes a grey slab on the room's floor. Neutral pixels darker than the
+  // background, reached smoothly from it, are that shadow: they become black with
+  // matching transparency, so the product casts the same soft shadow in the room.
+  const refLum = 0.299 * ref[0] + 0.587 * ref[1] + 0.114 * ref[2];
+  const lum = (i: number) => 0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2];
+  const neutral = (i: number) =>
+    Math.max(px[i * 4], px[i * 4 + 1], px[i * 4 + 2]) - Math.min(px[i * 4], px[i * 4 + 1], px[i * 4 + 2]) <= 14;
+  const shadow = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) if (background[i]) stack.push(i);
+  while (stack.length) {
+    const i = stack.pop()!;
+    const x = i % w;
+    for (const n of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i - w, i + w]) {
+      if (n < 0 || n >= w * h || background[n] || shadow[n]) continue;
+      const l = lum(n);
+      if (neutral(n) && l < refLum && l > refLum * 0.3 && diff(i, n) <= edgeTolerance * 1.5) {
+        shadow[n] = 1;
+        stack.push(n);
+      }
+    }
+  }
+
   for (let i = 0; i < w * h; i++) {
     if (background[i]) {
       px[i * 4 + 3] = 0;
+      continue;
+    }
+    if (shadow[i]) {
+      const dark = Math.min(1, ((refLum - lum(i)) / refLum) * 1.3);
+      px[i * 4] = px[i * 4 + 1] = px[i * 4 + 2] = 0;
+      px[i * 4 + 3] = Math.round(dark * 255);
       continue;
     }
     // Soften pixels that touch the background.
@@ -141,4 +170,31 @@ export async function cropCenter(src: string, fraction: number, maxSide = 800): 
     .getContext("2d")!
     .drawImage(img, (img.naturalWidth - sw) / 2, (img.naturalHeight - sh) / 2, sw, sh, 0, 0, canvas.width, canvas.height);
   return canvasToUrl(canvas, "image/jpeg", 0.9);
+}
+
+const rotations = new Map<string, Promise<string>>();
+
+/** A texture turned 90°, e.g. floor planks running the other way (cached). */
+export function rotatedTexture(src: string): Promise<string> {
+  let hit = rotations.get(src);
+  if (!hit) {
+    hit = loadImage(proxied(src)).then((img) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalHeight;
+      canvas.height = img.naturalWidth;
+      const ctx = canvas.getContext("2d")!;
+      ctx.translate(canvas.width, 0);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(img, 0, 0);
+      return canvasToUrl(canvas, "image/jpeg", 0.92);
+    });
+    rotations.set(src, hit);
+    hit.catch(() => rotations.delete(src));
+    while (rotations.size > 20) {
+      const [k, old] = rotations.entries().next().value!;
+      rotations.delete(k);
+      old.then(releaseUrl).catch(() => undefined);
+    }
+  }
+  return hit;
 }

@@ -10,6 +10,8 @@ import type { ProductLayer, Quad } from "@/lib/types";
 export function Shadow({ layer, plane, size }: { layer: ProductLayer; plane: Quad | null; size: { w: number; h: number } }) {
   const strength = layer.shadow ?? 0.5;
   const gradient = `radial-gradient(closest-side, rgba(0,0,0,${0.55 * strength}), rgba(0,0,0,${0.3 * strength}) 55%, transparent)`;
+  // Where the product touches the floor, light is blocked most: a tighter, darker core.
+  const contact = `radial-gradient(closest-side, rgba(0,0,0,${0.45 * strength}), rgba(0,0,0,${0.2 * strength}) 60%, transparent)`;
   // Furniture from the floor plan: its footprint, already projected onto the floor.
   if (layer.shadowQuad) {
     return (
@@ -36,6 +38,18 @@ export function Shadow({ layer, plane, size }: { layer: ProductLayer; plane: Qua
               transformOrigin: `50% ${((depth * 1.1) / (depth * 1.3)) * 100}%`,
             }}
           />
+          <div
+            style={{
+              position: "absolute",
+              left: u - width * 0.52,
+              top: v - depth * 0.95,
+              width: width * 1.04,
+              height: depth,
+              background: contact,
+              transform: `rotate(${angle}deg)`,
+              transformOrigin: `50% 95%`,
+            }}
+          />
         </div>
       </div>
     );
@@ -47,9 +61,15 @@ export function Shadow({ layer, plane, size }: { layer: ProductLayer; plane: Qua
   const cy = (br[1] + bl[1]) / 2;
   const rot = (Math.atan2(br[1] - bl[1], br[0] - bl[0]) * 180) / Math.PI;
   return (
-    <div
-      className="layer shadow"
-      style={{ left: cx - w / 2, top: cy - h * 0.6, width: w, height: h, background: gradient, transform: `rotate(${rot}deg)`, transformOrigin: "50% 60%" }}
-    />
+    <>
+      <div
+        className="layer shadow"
+        style={{ left: cx - w / 2, top: cy - h * 0.6, width: w, height: h, background: gradient, transform: `rotate(${rot}deg)`, transformOrigin: "50% 60%" }}
+      />
+      <div
+        className="layer shadow"
+        style={{ left: cx - w * 0.44, top: cy - h * 0.3, width: w * 0.88, height: h * 0.5, background: contact, transform: `rotate(${rot}deg)`, transformOrigin: "50% 60%" }}
+      />
+    </>
   );
 }
