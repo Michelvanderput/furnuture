@@ -66,6 +66,16 @@ De app blijft volledig gratis: geen API-sleutels, geen proefperiodes. Om meubels
 
 Wat gratis in de browser niet kan: een productfoto blijft een foto van één kant, dus schuin zetten laat nooit de zijkant zien. Dat vraagt generatieve beeld-AI. Die kan gratis draaien op een eigen pc met een flinke videokaart (bijvoorbeeld ComfyUI met FLUX of Stable Diffusion), maar niet in de browser.
 
+## Gebruiksgemak en snelheid
+
+- **Ongedaan maken / opnieuw** (↶ ↷, ⌘/Ctrl+Z, ⌘/Ctrl+Shift+Z) per foto; slepen en schuifjes tellen als één stap.
+- **Sneltoetsen**: Delete verwijdert, ⌘/Ctrl+D dupliceert, pijltjes verschuiven (Shift = grotere stap), Esc annuleert, Enter maakt een vlak af.
+- **📷 Opslaan / delen**: het ontwerp als foto, op iPad/iPhone via het deelmenu (Foto's, AirDrop, WhatsApp). Perspectief, maskers, schaduwen en licht worden in een canvas nagetekend, identiek aan het scherm.
+- **Verfkleuren en vloersoorten** direct in de zijbalk, zonder eerst een link te plakken.
+- **Budget per ruimte** en een **boodschappenlijst** (kopiëren of als Excel/CSV), filter op favorieten, prijs zelf invullen als een shop die niet meegeeft, dubbele links worden herkend.
+- **Plakknoppen** voor links (handig op iPad), **back-up** downloaden/terugzetten via het Project-menu, installeerbaar als app (**Zet op beginscherm**).
+- **Snelheid**: tijdens slepen wordt alleen de visualizer bijgewerkt (één keer per schermverversing) en pas bij loslaten opgeslagen; foto's komen direct van Funda/de shop (de server is alleen reserve) en in overzichten in kleinere maten; beelden via de server worden door Vercel's CDN bewaard; vloertexturen worden gemaakt als de browser niets te doen heeft; de tabbladen Producten en Inrichten laden pas als je ze opent; opslaan gebeurt ook direct als je de app verlaat, en de app vraagt de browser om de gegevens te bewaren.
+
 ## Mogelijke volgende stappen
 
 - [ ] Visualisatie exporteren als afbeelding en een project delen met je partner

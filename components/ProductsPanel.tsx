@@ -1,10 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { CATEGORIES } from "@/lib/categories";
-import { proxied } from "@/lib/images";
+import { memo, useCallback, useState } from "react";
+import { CATEGORIES, ROOMS } from "@/lib/categories";
+import { shareOrDownload } from "@/lib/exportImage";
+import { euro, extractLinks, parsePrice, shoppingListCsv, shoppingListText, totalsPerRoom } from "@/lib/shopping";
+import type { Category, Product, ProductInfo, ProductStatus, Project, RoomType } from "@/lib/types";
 import { newId } from "@/lib/useProject";
-import type { Category, Product, ProductInfo, ProductStatus, Project } from "@/lib/types";
+import { Img } from "./Img";
+import { PasteButton } from "./PasteButton";
 
 interface Props {
   project: Project;
@@ -17,22 +20,35 @@ const GROUPS = [
   { id: "accessoires", label: "Verlichting & accessoires" },
 ] as const;
 
-const euro = (n: number) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(n);
+/** Rooms you can buy for (exterior and floor plan are not rooms). */
+const BUY_ROOMS = ROOMS.filter((r) => !["buitenkant", "plattegrond", "overig"].includes(r.id));
+
+type Filter = "alles" | "favorieten" | "zonder-afgewezen";
+
+const sameLink = (a: string, b: string) => a.replace(/[?#].*$/, "").replace(/\/$/, "") === b.replace(/[?#].*$/, "").replace(/\/$/, "");
 
 export function ProductsPanel({ project, update }: Props) {
   const [links, setLinks] = useState("");
   const [pending, setPending] = useState(0);
-  const [errors, setErrors] = useState<string[]>([]);
-  const [hideRejected, setHideRejected] = useState(false);
+  const [messages, setMessages] = useState<string[]>([]);
+  const [filter, setFilter] = useState<Filter>("zonder-afgewezen");
+  const [copied, setCopied] = useState(false);
 
-  const setProduct = (id: string, patch: Partial<Product>) =>
-    update((p) => ({ ...p, products: p.products.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
+  const setProduct = useCallback(
+    (id: string, patch: Partial<Product>) =>
+      update((p) => ({ ...p, products: p.products.map((x) => (x.id === id ? { ...x, ...patch } : x)) })),
+    [update],
+  );
+  const removeProduct = useCallback((id: string) => update((p) => ({ ...p, products: p.products.filter((x) => x.id !== id) })), [update]);
 
-  async function addLinks() {
-    const urls = [...new Set(links.split(/\s+/).filter((u) => /^https?:\/\//i.test(u)))];
-    if (!urls.length) return;
+  async function addLinks(text = links) {
+    const found = extractLinks(text);
+    if (!found.length) return;
+    const known = found.filter((u) => project.products.some((p) => sameLink(p.url, u)));
+    const urls = found.filter((u) => !known.includes(u));
     setLinks("");
-    setErrors([]);
+    setMessages(known.length ? [`${known.length} link(s) stonden er al in.`] : []);
+    if (!urls.length) return;
     setPending((n) => n + urls.length);
     await Promise.all(
       urls.map(async (url) => {
@@ -55,7 +71,7 @@ export function ProductsPanel({ project, update }: Props) {
               { id: newId(), url, title: host, image: "", images: [], shop: host, category: "overig", status: "optie", note: "" },
             ],
           }));
-          setErrors((errs) => [...errs, `${host}: ${e instanceof Error ? e.message : e}`]);
+          setMessages((m) => [...m, `${host}: ${e instanceof Error ? e.message : e} — plak bij die kaart zelf een afbeeldingslink.`]);
         } finally {
           setPending((n) => n - 1);
         }
@@ -65,20 +81,32 @@ export function ProductsPanel({ project, update }: Props) {
 
   const favorites = project.products.filter((p) => p.status === "favoriet");
   const total = favorites.reduce((sum, p) => sum + (p.priceValue ?? 0), 0);
-  const visible = project.products.filter((p) => !(hideRejected && p.status === "afgewezen"));
+  const perRoom = totalsPerRoom(project.products);
+  const visible = project.products.filter((p) =>
+    filter === "favorieten" ? p.status === "favoriet" : filter === "zonder-afgewezen" ? p.status !== "afgewezen" : true,
+  );
+
+  async function copyList() {
+    try {
+      await navigator.clipboard.writeText(shoppingListText(project.products));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      await shareOrDownload(new Blob([shoppingListText(project.products)], { type: "text/plain" }), "boodschappenlijst.txt");
+    }
+  }
 
   return (
     <section className="panel">
-      <h2>2. Verzamel meubels, vloeren, verf…</h2>
-      <p className="muted">
-        Plak links van webshops (IKEA, Kwantum, Leen Bakker, Praxis, Flexa, vtwonen, bol…). Eén of meerdere tegelijk.
-      </p>
+      <h2>Verzamel meubels, vloeren, verf…</h2>
+      <p className="muted">Plak links van webshops (IKEA, Kwantum, Leen Bakker, Praxis, Flexa, vtwonen, bol…), één of meerdere tegelijk.</p>
       <div className="row">
         <textarea
           rows={2}
           value={links}
           onChange={(e) => setLinks(e.target.value)}
           placeholder="https://www.ikea.com/nl/nl/p/..."
+          enterKeyHint="done"
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -86,30 +114,66 @@ export function ProductsPanel({ project, update }: Props) {
             }
           }}
         />
-        <button className="primary" onClick={addLinks} disabled={!links.trim()}>
-          Toevoegen
-        </button>
+        <div className="stack">
+          <PasteButton label="📋 Plak link" onPaste={(t) => addLinks(t)} />
+          <button className="primary" onClick={() => addLinks()} disabled={!links.trim()}>
+            Toevoegen
+          </button>
+        </div>
       </div>
-      {pending > 0 && <p className="muted">{pending} link(s) ophalen…</p>}
-      {errors.length > 0 && (
-        <p className="error">
-          Niet alles kon automatisch worden gelezen — plak bij die kaarten zelf een afbeeldingslink.
-          <br />
-          {errors.join(" · ")}
+      {pending > 0 && <p className="status">⏳ {pending} link(s) ophalen…</p>}
+      {messages.map((m) => (
+        <p key={m} className="error small">
+          {m}
         </p>
+      ))}
+
+      {project.products.length > 0 && (
+        <div className="summary">
+          <div className="row wrap between">
+            <span>
+              ❤️ {favorites.length} favoriet(en) · totaal <strong>{euro(total)}</strong>
+            </span>
+            <div className="row wrap">
+              <div className="segmented" role="group" aria-label="Filter">
+                {(
+                  [
+                    ["zonder-afgewezen", "Alles"],
+                    ["favorieten", "❤️ Favorieten"],
+                    ["alles", "Ook afgewezen"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button key={id} className={filter === id ? "on" : ""} onClick={() => setFilter(id)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {favorites.length > 0 && (
+                <>
+                  <button onClick={copyList}>{copied ? "✓ Gekopieerd" : "📋 Lijst kopiëren"}</button>
+                  <button
+                    onClick={() => shareOrDownload(new Blob([shoppingListCsv(project.products)], { type: "text/csv" }), "boodschappenlijst.csv")}
+                  >
+                    ⬇ Excel
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+          {perRoom.length > 1 && (
+            <div className="budget row wrap">
+              {perRoom.map((r) => (
+                <span key={r.label} className="chip">
+                  {r.label}: <strong>{euro(r.total)}</strong>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
-      <div className="summary row wrap">
-        <span>
-          ❤️ {favorites.length} favoriet(en) · totaal <strong>{euro(total)}</strong>
-        </span>
-        <label className="row">
-          <input type="checkbox" checked={hideRejected} onChange={(e) => setHideRejected(e.target.checked)} /> Afgewezen
-          verbergen
-        </label>
-      </div>
-
       {project.products.length === 0 && <p className="empty">Nog geen producten. Plak hierboven je eerste link.</p>}
+      {project.products.length > 0 && visible.length === 0 && <p className="empty">Niets in dit filter.</p>}
 
       {GROUPS.map((group) => {
         const cats = CATEGORIES.filter((c) => c.group === group.id)
@@ -126,9 +190,7 @@ export function ProductsPanel({ project, update }: Props) {
                 </h4>
                 <div className="grid products">
                   {cat.items.map((p) => (
-                    <ProductCard key={p.id} product={p} onChange={(patch) => setProduct(p.id, patch)} onRemove={() =>
-                      update((pr) => ({ ...pr, products: pr.products.filter((x) => x.id !== p.id) }))
-                    } />
+                    <ProductCard key={p.id} product={p} onChange={setProduct} onRemove={removeProduct} />
                   ))}
                 </div>
               </div>
@@ -140,35 +202,36 @@ export function ProductsPanel({ project, update }: Props) {
   );
 }
 
-function ProductCard({
+/** Memoised: typing a note re-renders one card, not all of them. */
+const ProductCard = memo(function ProductCard({
   product: p,
   onChange,
   onRemove,
 }: {
   product: Product;
-  onChange: (patch: Partial<Product>) => void;
-  onRemove: () => void;
+  onChange: (id: string, patch: Partial<Product>) => void;
+  onRemove: (id: string) => void;
 }) {
-  const toggle = (status: ProductStatus) => onChange({ status: p.status === status ? "optie" : status });
+  const set = (patch: Partial<Product>) => onChange(p.id, patch);
+  const toggle = (status: ProductStatus) => set({ status: p.status === status ? "optie" : status });
   const imgIndex = p.images.indexOf(p.image);
   const cycle = (dir: number) => {
     if (p.images.length < 2) return;
-    onChange({ image: p.images[(imgIndex + dir + p.images.length) % p.images.length] });
+    set({ image: p.images[(imgIndex + dir + p.images.length) % p.images.length] });
   };
 
   return (
     <article className={`card ${p.status}`}>
       <div className="thumb">
         {p.image ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={proxied(p.image)} alt={p.title} loading="lazy" />
+          <Img src={p.image} alt={p.title} loading="lazy" />
         ) : p.color ? (
           <div className="swatch" style={{ background: p.color }} />
         ) : (
           <input
             className="image-url"
             placeholder="Plak afbeeldingslink…"
-            onBlur={(e) => e.target.value && onChange({ image: e.target.value, images: [e.target.value] })}
+            onBlur={(e) => e.target.value && set({ image: e.target.value, images: [e.target.value] })}
           />
         )}
         {p.images.length > 1 && (
@@ -188,33 +251,54 @@ function ProductCard({
         </a>
         <div className="meta">
           <span>{p.shop}</span>
-          {p.price && <strong>{p.price}</strong>}
+          {p.price ? (
+            <strong>{p.price}</strong>
+          ) : (
+            <input
+              className="price-input"
+              inputMode="decimal"
+              placeholder="Prijs"
+              defaultValue={p.priceValue ? String(p.priceValue).replace(".", ",") : ""}
+              onBlur={(e) => set({ priceValue: parsePrice(e.target.value) })}
+              aria-label="Prijs"
+            />
+          )}
         </div>
-        <select value={p.category} onChange={(e) => onChange({ category: e.target.value as Category })}>
-          {CATEGORIES.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.label}
-            </option>
-          ))}
-        </select>
+        <div className="row two">
+          <select value={p.category} onChange={(e) => set({ category: e.target.value as Category })} aria-label="Soort">
+            {CATEGORIES.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+          <select value={p.room ?? ""} onChange={(e) => set({ room: (e.target.value || undefined) as RoomType | undefined })} aria-label="Voor ruimte">
+            <option value="">Ruimte…</option>
+            {BUY_ROOMS.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+        </div>
         {(p.category === "verf" || p.color) && (
           <label className="row small">
-            Kleur <input type="color" value={p.color ?? "#d8cfc4"} onChange={(e) => onChange({ color: e.target.value })} />
+            Kleur <input type="color" value={p.color ?? "#d8cfc4"} onChange={(e) => set({ color: e.target.value })} />
           </label>
         )}
-        <input placeholder="Notitie (maat, kleur, twijfel…)" value={p.note} onChange={(e) => onChange({ note: e.target.value })} />
+        <input placeholder="Notitie (maat, kleur, twijfel…)" value={p.note} onChange={(e) => set({ note: e.target.value })} />
         <div className="row actions">
-          <button className={p.status === "favoriet" ? "on" : ""} onClick={() => toggle("favoriet")} title="Favoriet">
+          <button className={p.status === "favoriet" ? "on" : ""} onClick={() => toggle("favoriet")} title="Favoriet" aria-pressed={p.status === "favoriet"}>
             ❤️
           </button>
-          <button className={p.status === "afgewezen" ? "on" : ""} onClick={() => toggle("afgewezen")} title="Afwijzen">
+          <button className={p.status === "afgewezen" ? "on" : ""} onClick={() => toggle("afgewezen")} title="Afwijzen" aria-pressed={p.status === "afgewezen"}>
             👎
           </button>
-          <button className="ghost" onClick={onRemove} title="Verwijderen">
+          <button className="ghost" onClick={() => confirm(`"${p.title}" verwijderen?`) && onRemove(p.id)} title="Verwijderen">
             🗑
           </button>
         </div>
       </div>
     </article>
   );
-}
+});

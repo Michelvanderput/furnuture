@@ -19,7 +19,11 @@ export async function GET(req: Request) {
     const body = await res.arrayBuffer();
     if (body.byteLength > MAX_BYTES) throw new FetchError("Afbeelding te groot", 413);
     return new Response(body, {
-      headers: { "content-type": type, "cache-control": "public, max-age=86400, immutable" },
+      headers: {
+        "content-type": type,
+        // Browsers keep it a day; Vercel's CDN a year, so each photo hits this function once.
+        "cache-control": "public, max-age=86400, s-maxage=31536000, immutable",
+      },
     });
   } catch (e) {
     return new Response(e instanceof Error ? e.message : "Fout", { status: e instanceof FetchError ? e.status : 500 });

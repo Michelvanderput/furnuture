@@ -1,42 +1,34 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { removeBackgroundAI } from "@/lib/ai";
-import { categoryLabel, roomLabel } from "@/lib/categories";
+import { exportFileName } from "@/lib/backup";
+import { renderDesign, shareOrDownload } from "@/lib/exportImage";
 import { centroid, pointInPolygon, project as projectPoint, quadToMatrix3d, rectQuad } from "@/lib/geometry";
 import { cropCenter, loadImage, NoPlainBackground, proxied, removeBackground } from "@/lib/images";
 import { renderErased } from "@/lib/inpaint";
-import { photoLook, productFilter } from "@/lib/look";
 import {
   cutoutKey,
-  fillFor,
   isFloor,
   placeOnFloor,
   planeOf,
   SURFACE_CATEGORIES,
   surfaceDefaults,
-  syncAnchors,
 } from "@/lib/layers";
+import { photoLook, productFilter } from "@/lib/look";
 import { ensureMask, maskToDataUrl, polygonMask, readyMask, rememberMask } from "@/lib/masks";
 import { fitFloorQuad, fitWallQuad, imageToPlane, PLANE, planeToImage } from "@/lib/plane";
 import { furnitureMask, segmentMask, segmentRoom, type RoomSegmentation, type Segment } from "@/lib/segment";
-import { FLOOR_PRESETS, presetTexture } from "@/lib/textures";
-import type {
-  EraseLayer,
-  FloorAnchor,
-  Layer,
-  Product,
-  ProductLayer,
-  Project,
-  Pt,
-  Quad,
-  Scene,
-  SurfaceFill,
-  SurfaceLayer,
-} from "@/lib/types";
+import { presetTexture } from "@/lib/textures";
+import type { EraseLayer, FloorAnchor, Layer, Product, ProductLayer, Project, Pt, Quad, SurfaceFill, SurfaceLayer } from "@/lib/types";
 import { newId } from "@/lib/useProject";
+import { useSceneEditor } from "@/lib/useSceneEditor";
 import { isLowMemoryDevice } from "@/lib/worker";
+import { Img } from "./Img";
 import { LayerControls } from "./LayerControls";
+import { Palette } from "./visualizer/Palette";
+import { PhotoStrip } from "./visualizer/PhotoStrip";
+import { Shadow } from "./visualizer/Shadow";
 
 interface Props {
   project: Project;
@@ -56,17 +48,37 @@ type Drag =
   | { type: "anchor-scale"; id: string; from: Pt; center: Pt; start: FloorAnchor }
   | { type: "vertex"; id: string; index: number }
   | { type: "plane"; id: string; index: number };
+type LayerPatch = Partial<ProductLayer> | Partial<SurfaceLayer> | Partial<EraseLayer>;
 
 // Room recognition results live in memory only (a few seconds to recompute).
 const segmentations = new Map<string, RoomSegmentation>();
 // Mask PNGs for drawn erase areas, so floors and walls can also cover them.
 const polygonMaskUrls = new Map<string, string>();
 
+/** Natural size of a photo, loaded directly (fast) with the proxy as fallback. */
+function measure(url: string): Promise<{ w: number; h: number }> {
+  const load = (src: string) =>
+    new Promise<{ w: number; h: number }>((resolve, reject) => {
+      const img = new Image();
+      img.referrerPolicy = "no-referrer";
+      img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+      img.onerror = reject;
+      img.src = src;
+    });
+  return load(url).catch(() => load(proxied(url)));
+}
+
+const isTyping = (t: EventTarget | null) =>
+  t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName));
+
 export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
-  const photos = (project.listing?.photos ?? []).filter((p) => p.room !== "plattegrond" && p.room !== "buitenkant");
+  const photos = useMemo(
+    () => (project.listing?.photos ?? []).filter((p) => p.room !== "plattegrond" && p.room !== "buitenkant"),
+    [project.listing],
+  );
   const photo = photos.find((p) => p.id === photoId) ?? photos[0];
-  const scene: Scene = (photo && project.scenes[photo.id]) || { photoId: photo?.id ?? "", layers: [] };
-  const products = project.products.filter((p) => p.status !== "afgewezen" && (p.image || p.color));
+  const editor = useSceneEditor(photo?.id, project, update);
+  const { layers, setLayers } = editor;
 
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const [displayWidth, setDisplayWidth] = useState(0);
@@ -80,9 +92,13 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   const [notice, setNotice] = useState("");
   const [segmentation, setSegmentation] = useState<RoomSegmentation | null>(null);
   const [picked, setPicked] = useState<Segment | null>(null);
+  const [exporting, setExporting] = useState(false);
   const drag = useRef<Drag | null>(null);
+  const pending = useRef<Pt | null>(null);
+  const frame = useRef(0);
   const svgRef = useRef<SVGSVGElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const coarse = useMemo(() => typeof window !== "undefined" && matchMedia("(pointer: coarse)").matches, []);
 
   useEffect(() => {
     setSize(null);
@@ -93,8 +109,8 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     setNotice("");
     setSegmentation(photo ? (segmentations.get(photo.id) ?? null) : null);
     if (!photo) return;
-    loadImage(proxied(photo.url))
-      .then((img) => setSize({ w: img.naturalWidth, h: img.naturalHeight }))
+    measure(photo.url)
+      .then(setSize)
       .catch(() => setSize({ w: 1440, h: 960 }));
   }, [photo?.id, photo?.url]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -106,15 +122,15 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     return () => ro.disconnect();
   }, [size]);
 
-  // Decode stored masks so clicks can hit them.
+  // Decode stored masks so taps can hit them.
   useEffect(() => {
     if (!size) return;
-    for (const l of scene.layers) if (l.kind !== "product" && l.mask) ensureMask(l.mask, size.w, size.h).catch(() => undefined);
-  }, [scene.layers, size]);
+    for (const l of layers) if (l.kind !== "product" && l.mask) ensureMask(l.mask, size.w, size.h).catch(() => undefined);
+  }, [layers, size]);
 
   // Background-free product images (simple colour flood fill, or AI).
   useEffect(() => {
-    for (const layer of scene.layers) {
+    for (const layer of layers) {
       if (layer.kind !== "product" || layer.cutout === "off") continue;
       const key = cutoutKey(layer);
       if (cutouts[key]) continue;
@@ -130,11 +146,11 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
         .then((png) => setCutouts((c) => ({ ...c, [key]: png })))
         .catch((e) => setCutouts((c) => ({ ...c, [key]: e instanceof NoPlainBackground ? "failed:plain" : "failed" })));
     }
-  }, [scene.layers, project.products, cutouts]);
+  }, [layers, project.products, cutouts]);
 
   // Product photos used as texture, cropped to their centre.
   useEffect(() => {
-    for (const layer of scene.layers) {
+    for (const layer of layers) {
       if (layer.kind !== "surface" || layer.fill.type !== "texture") continue;
       const productId = layer.fill.productId;
       const product = project.products.find((p) => p.id === productId);
@@ -145,10 +161,13 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
         .then((url) => setTextures((t) => ({ ...t, [key]: url })))
         .catch(() => setTextures((t) => ({ ...t, [key]: proxied(product.image) })));
     }
-  }, [scene.layers, project.products, textures]);
+  }, [layers, project.products, textures]);
 
   // The photo with existing furniture painted out.
-  const eraseLayers = scene.layers.filter((l): l is EraseLayer => l.kind === "erase" && (!!l.mask || l.points.length >= 3));
+  const eraseLayers = useMemo(
+    () => layers.filter((l): l is EraseLayer => l.kind === "erase" && (!!l.mask || l.points.length >= 3)),
+    [layers],
+  );
   const eraseKey = eraseLayers.length
     ? JSON.stringify(eraseLayers.map((l) => [l.method, l.mask ?? l.points.map((p) => p.map(Math.round))]))
     : "";
@@ -173,14 +192,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     };
   }, [photo?.url, eraseKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const setLayers = (fn: (layers: Layer[]) => Layer[]) => {
-    if (!photo) return;
-    update((p) => {
-      const current = p.scenes[photo.id]?.layers ?? [];
-      return { ...p, scenes: { ...p.scenes, [photo.id]: { photoId: photo.id, layers: syncAnchors(fn(current)) } } };
-    });
-  };
-  const patchLayer = (id: string, patch: Partial<ProductLayer> | Partial<SurfaceLayer> | Partial<EraseLayer>) =>
+  const patchLayer = (id: string, patch: LayerPatch) =>
     setLayers((ls) => ls.map((l) => (l.id === id ? ({ ...l, ...patch } as Layer) : l)));
 
   const toPhoto = (e: { clientX: number; clientY: number }): Pt => {
@@ -188,8 +200,15 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     return [pt.x, pt.y];
   };
 
-  const floors = scene.layers.filter(isFloor);
+  const floors = useMemo(() => layers.filter(isFloor), [layers]);
   const productById = useMemo(() => new Map(project.products.map((p) => [p.id, p])), [project.products]);
+  const products = useMemo(() => project.products.filter((p) => p.status !== "afgewezen" && (p.image || p.color)), [project.products]);
+  const furniture = useMemo(() => products.filter((p) => p.image && !SURFACE_CATEGORIES.has(p.category)), [products]);
+  const surfaces = useMemo(() => products.filter((p) => SURFACE_CATEGORIES.has(p.category)), [products]);
+  const edited = useMemo(
+    () => new Set(Object.entries(project.scenes).filter(([, s]) => s.layers.length).map(([id]) => id)),
+    [project.scenes],
+  );
 
   async function detect() {
     if (!photo) return;
@@ -221,11 +240,11 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   }
 
   /** Floor or wall from the recognition, with a fitted perspective plane. */
-  function surfaceFromSegment(seg: Segment, fill: SurfaceFill): string | null {
-    if (!segmentation) return null;
+  function surfaceFromSegment(seg: Segment, fill: SurfaceFill) {
+    if (!segmentation) return;
     const mask = segmentMask(segmentation, seg.id);
     const url = segmentLayerMask(seg);
-    if (!url) return null;
+    if (!url) return;
     const floor = seg.kind === "floor";
     const occluder = furnitureMask(segmentation);
     const fitted = floor
@@ -236,7 +255,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     const sy = (size?.h ?? segmentation.h) / segmentation.h;
     const plane = fitted && (fitted.map(([x, y]) => [x * sx, y * sy]) as Quad);
     const id = newId();
-    const layer: SurfaceLayer = {
+    insertSurface({
       kind: "surface",
       id,
       points: [],
@@ -248,11 +267,9 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
       scale: 350,
       perspective: !!plane && fill.type !== "color",
       crop: 1,
-    };
-    insertSurface(layer);
+    });
     setPicked(null);
     setSelected(id);
-    return id;
   }
 
   function insertSurface(layer: SurfaceLayer) {
@@ -265,7 +282,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   }
 
   async function addProduct(product: Product) {
-    if (!size || !product.image) return;
+    if (!size || !product.image || !photo) return;
     let aspect = 1;
     try {
       const img = await loadImage(proxied(product.image));
@@ -275,6 +292,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     }
     const width = size.w * 0.3;
     const height = width * aspect;
+    const look = await photoLook(photo.url).catch(() => ({ light: 1, warmth: 0 }));
     let layer: ProductLayer = {
       kind: "product",
       id: newId(),
@@ -285,10 +303,10 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
       cutout: "simple",
       tolerance: 18,
       distort: false,
+      // Match the room's light, and add a soft shadow.
+      ...look,
+      shadow: 0.5,
     };
-    // Match the room's light, and add a soft shadow.
-    const look = await photoLook(photo!.url).catch(() => ({ light: 1, warmth: 0 }));
-    layer = { ...layer, ...look, shadow: 0.5 };
     // With a floor in the room, stand on it: perspective and depth come for free.
     const floor = floors.at(-1);
     if (floor) layer = placeOnFloor(layer, floor, projectPoint(planeToImage(planeOf(floor)!), [PLANE / 2, PLANE * 0.65]));
@@ -298,7 +316,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
 
   /** Floors, paint and presets: fill the selected area or recognised floor/wall, or start drawing one. */
   function applyFill(fill: SurfaceFill) {
-    const current = scene.layers.find((l) => l.id === selected);
+    const current = layers.find((l) => l.id === selected);
     if (current?.kind === "surface") {
       patchLayer(current.id, { fill, ...surfaceDefaults(fill), perspective: !!planeOf(current) && fill.type !== "color" });
     } else if (picked && picked.kind !== "furniture") {
@@ -308,6 +326,13 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
       setDrawing({ kind: "surface", points: [], fill });
     }
   }
+
+  // Stable callbacks for the memoised palette (it must not re-render during drags).
+  const latest = useRef({ addProduct, applyFill });
+  latest.current = { addProduct, applyFill };
+  const onAddProduct = useCallback((p: Product) => latest.current.addProduct(p), []);
+  const onFill = useCallback((f: SurfaceFill) => latest.current.applyFill(f), []);
+  const onPickPhoto = useCallback((id: string) => setPhotoId(id), [setPhotoId]);
 
   function finishDrawing() {
     if (!drawing || drawing.points.length < 3) return;
@@ -333,11 +358,63 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     setSelected(id);
   }
 
+  function removeSelected() {
+    if (!selected) return;
+    setLayers((ls) => ls.filter((l) => l.id !== selected));
+    setSelected(null);
+  }
+
+  function duplicateSelected() {
+    const l = layers.find((x) => x.id === selected);
+    if (!l || l.kind === "erase") return;
+    const id = newId();
+    const offset = (size?.w ?? 1000) * 0.04;
+    const copy: Layer =
+      l.kind === "product"
+        ? l.floor
+          ? { ...l, id, floor: { ...l.floor, u: l.floor.u + 60 } }
+          : { ...l, id, corners: l.corners.map(([x, y]) => [x + offset, y]) as Quad }
+        : { ...l, id };
+    setLayers((ls) => [...ls, copy]);
+    setSelected(id);
+  }
+
+  function nudge(dx: number, dy: number) {
+    const l = layers.find((x) => x.id === selected);
+    if (l?.kind !== "product") return;
+    if (l.floor) patchLayer(l.id, { floor: { ...l.floor, u: l.floor.u + dx * 2, v: l.floor.v + dy * 2 } });
+    else patchLayer(l.id, { corners: l.corners.map(([x, y]) => [x + dx, y + dy]) as Quad });
+  }
+
+  // Keyboard: undo/redo, delete, duplicate, escape, arrow keys.
+  const keys = useRef<(e: KeyboardEvent) => void>(() => undefined);
+  keys.current = (e: KeyboardEvent) => {
+    if (isTyping(e.target)) return;
+    const mod = e.metaKey || e.ctrlKey;
+    const k = e.key.toLowerCase();
+    if (mod && k === "z") (e.preventDefault(), e.shiftKey ? editor.redo() : editor.undo());
+    else if (mod && k === "y") (e.preventDefault(), editor.redo());
+    else if (mod && k === "d") (e.preventDefault(), duplicateSelected());
+    else if (k === "escape") (setDrawing(null), setSelected(null), setPicked(null));
+    else if ((k === "delete" || k === "backspace") && selected) (e.preventDefault(), removeSelected());
+    else if (k === "enter" && drawing) finishDrawing();
+    else if (k.startsWith("arrow") && selected) {
+      e.preventDefault();
+      const step = e.shiftKey ? 10 : 2;
+      nudge(k === "arrowleft" ? -step : k === "arrowright" ? step : 0, k === "arrowup" ? -step : k === "arrowdown" ? step : 0);
+    }
+  };
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => keys.current(e);
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
+
   /** Topmost layer under a point. */
   function hitLayer(p: Pt): Layer | undefined {
     if (!size) return undefined;
     const idx = Math.round(p[1]) * size.w + Math.round(p[0]);
-    for (const l of [...scene.layers].reverse()) {
+    for (const l of [...layers].reverse()) {
       if (l.kind === "product" && pointInPolygon(p, l.corners)) return l;
       if (l.kind !== "product") {
         if (l.mask) {
@@ -346,6 +423,21 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
       }
     }
     return undefined;
+  }
+
+  function startDrag(d: Drag, e: React.PointerEvent) {
+    drag.current = d;
+    // Keep receiving moves even when the finger leaves the photo.
+    svgRef.current?.setPointerCapture?.(e.pointerId);
+    editor.beginDrag();
+  }
+
+  function endDrag() {
+    cancelAnimationFrame(frame.current);
+    if (pending.current && drag.current) applyDrag(pending.current);
+    pending.current = null;
+    drag.current = null;
+    editor.endDrag();
   }
 
   function onPointerDown(e: React.PointerEvent) {
@@ -360,12 +452,12 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
       setSelected(hit.id);
       setPicked(null);
       if (hit.kind === "product") {
-        const floor = hit.floor && scene.layers.find((l) => l.id === hit.floor!.planeId);
+        const floor = hit.floor && layers.find((l) => l.id === hit.floor!.planeId);
         if (hit.floor && floor?.kind === "surface" && planeOf(floor)) {
           const toPlane = imageToPlane(planeOf(floor)!);
-          drag.current = { type: "anchor-move", id: hit.id, q0: projectPoint(toPlane, p), start: hit.floor, toPlane };
+          startDrag({ type: "anchor-move", id: hit.id, q0: projectPoint(toPlane, p), start: hit.floor, toPlane }, e);
         } else {
-          drag.current = { type: "move", id: hit.id, from: p, start: hit.corners };
+          startDrag({ type: "move", id: hit.id, from: p, start: hit.corners }, e);
         }
       }
       return;
@@ -379,10 +471,9 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     }
   }
 
-  const onPointerMove = (e: React.PointerEvent) => {
+  function applyDrag(p: Pt) {
     const d = drag.current;
     if (!d) return;
-    const p = toPhoto(e);
     if (d.type === "move") {
       const dx = p[0] - d.from[0];
       const dy = p[1] - d.from[1];
@@ -405,37 +496,45 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
       }
     } else if (d.type === "plane") {
       setLayers((ls) =>
-        ls.map((l) =>
-          l.id === d.id && l.kind === "surface" && l.plane
-            ? { ...l, plane: l.plane.map((q, i) => (i === d.index ? p : q)) as Quad }
-            : l,
-        ),
+        ls.map((l) => (l.id === d.id && l.kind === "surface" && l.plane ? { ...l, plane: l.plane.map((q, i) => (i === d.index ? p : q)) as Quad } : l)),
       );
     } else {
-      setLayers((ls) =>
-        ls.map((l) =>
-          l.id === d.id && l.kind !== "product" ? { ...l, points: l.points.map((q, i) => (i === d.index ? p : q)) } : l,
-        ),
-      );
+      setLayers((ls) => ls.map((l) => (l.id === d.id && l.kind !== "product" ? { ...l, points: l.points.map((q, i) => (i === d.index ? p : q)) } : l)));
     }
+  }
+
+  // At most one update per screen frame, however fast the pointer events come in.
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!drag.current) return;
+    pending.current = toPhoto(e);
+    if (frame.current) return;
+    frame.current = requestAnimationFrame(() => {
+      frame.current = 0;
+      if (pending.current) applyDrag(pending.current);
+      pending.current = null;
+    });
   };
 
-  const selectedLayer = scene.layers.find((l) => l.id === selected);
+  const selectedLayer = layers.find((l) => l.id === selected);
   const pickedMask = useMemo(() => (picked ? segmentLayerMask(picked) : null), [picked]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!photo) {
     return (
       <section className="panel narrow">
-        <h2>3. Visualiseren</h2>
-        <p className="empty">Laad eerst een woning in (stap 1) om kamers in te richten.</p>
+        <h2>Visualiseren</h2>
+        <p className="empty">Laad eerst een woning in (tab Woning) om kamers in te richten.</p>
       </section>
     );
   }
 
-  const bgSrc = showLayers && erased && erased.key === eraseKey && eraseKey ? erased.url : proxied(photo.url);
+  const hasErased = showLayers && erased && erased.key === eraseKey && !!eraseKey;
   const scale = size && displayWidth ? displayWidth / size.w : 0;
-  const handleR = size ? Math.max(9, size.w / 110) : 10;
+  const handleR = (size ? Math.max(9, size.w / 110) : 10) * (coarse ? 1.7 : 1);
 
+  const cutoutSrc = (l: ProductLayer): string | null => {
+    const cut = cutouts[cutoutKey(l)];
+    return l.cutout !== "off" && cut && !cut.startsWith("failed") && cut !== "pending" ? cut : null;
+  };
   const textureSrc = (l: SurfaceLayer): string | null => {
     if (l.fill.type === "preset") return presetTexture(l.fill.preset);
     if (l.fill.type !== "texture") return null;
@@ -467,37 +566,51 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     return style;
   };
 
-  const furniture = products.filter((p) => p.image && !SURFACE_CATEGORIES.has(p.category));
-  const surfaces = products.filter((p) => SURFACE_CATEGORIES.has(p.category));
+  async function exportDesign() {
+    if (!size || !photo) return;
+    setExporting(true);
+    setNotice("");
+    try {
+      const blob = await renderDesign({
+        width: size.w,
+        height: size.h,
+        background: hasErased ? erased!.url : proxied(photo.url),
+        layers,
+        productSrc: (l) => {
+          const p = productById.get(l.productId);
+          return cutoutSrc(l) ?? (p?.image ? proxied(p.image) : null);
+        },
+        textureSrc,
+        eraseMasks: eraseMaskUrls,
+      });
+      await shareOrDownload(blob, exportFileName(project, photo.room));
+    } catch (e) {
+      setNotice(`Opslaan mislukt: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const found = segmentation?.segments ?? [];
+  const empty = layers.length === 0 && !segmentation && !drawing;
 
   return (
     <section className="panel visualizer">
-      <aside className="photo-strip">
-        {photos.map((p) => (
-          <button key={p.id} className={p.id === photo.id ? "active" : ""} onClick={() => setPhotoId(p.id)}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={proxied(p.url)} alt="" loading="lazy" />
-            <span>
-              {roomLabel(p.room)}
-              {project.scenes[p.id]?.layers.length ? " •" : ""}
-            </span>
-          </button>
-        ))}
-      </aside>
+      <PhotoStrip photos={photos} activeId={photo.id} edited={edited} onPick={onPickPhoto} />
 
       <div className="stage-wrap">
         <div className="toolbar row wrap">
           {drawing ? (
             <>
               <span className="hint">
-                {drawing.kind === "erase"
-                  ? "Klik rondom wat weg moet"
-                  : "Klik de hoeken van de vloer of muur aan — 4 hoeken geeft perspectief"}{" "}
-                ({drawing.points.length} punten)
+                {drawing.kind === "erase" ? "Tik rondom wat weg moet" : "Tik de hoeken van de vloer of muur aan — 4 hoeken geeft perspectief"} (
+                {drawing.points.length} punten)
               </span>
               <button className="primary" disabled={drawing.points.length < 3} onClick={finishDrawing}>
                 {drawing.kind === "erase" ? "Weggummen" : "Vlak afmaken"}
+              </button>
+              <button onClick={() => setDrawing((d) => (d && d.points.length ? { ...d, points: d.points.slice(0, -1) } : d))} disabled={!drawing.points.length}>
+                ↶ Punt terug
               </button>
               <button onClick={() => setDrawing(null)}>Annuleren</button>
             </>
@@ -506,43 +619,52 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
               <button className="primary" onClick={detect} disabled={!!status}>
                 ✨ {segmentation ? "Opnieuw herkennen" : "Herken meubels, muren & vloer"}
               </button>
-              <button
-                onClick={() => {
-                  setDrawing({ kind: "surface", points: [] });
-                  setSelected(null);
-                }}
-              >
-                🖌️ Zelf vlak aanwijzen
+              <button onClick={() => (setDrawing({ kind: "surface", points: [] }), setSelected(null))}>🖌️ Zelf vlak</button>
+              <button onClick={() => (setDrawing({ kind: "erase", points: [] }), setSelected(null))}>🧽 Zelf gummen</button>
+              <span className="toolbar-spacer" />
+              <button onClick={editor.undo} disabled={!editor.canUndo} title="Ongedaan maken (⌘/Ctrl + Z)" aria-label="Ongedaan maken">
+                ↶
               </button>
-              <button
-                onClick={() => {
-                  setDrawing({ kind: "erase", points: [] });
-                  setSelected(null);
-                }}
-              >
-                🧽 Zelf weggummen
+              <button onClick={editor.redo} disabled={!editor.canRedo} title="Opnieuw (⌘/Ctrl + Shift + Z)" aria-label="Opnieuw">
+                ↷
               </button>
               <button
                 onPointerDown={() => setShowLayers(false)}
                 onPointerUp={() => setShowLayers(true)}
                 onPointerLeave={() => setShowLayers(true)}
+                onContextMenu={(e) => e.preventDefault()}
+                title="Houd ingedrukt om de originele foto te zien"
               >
                 👁 Origineel
               </button>
-              {scene.layers.length > 0 && (
-                <button className="ghost" onClick={() => confirm("Alles van deze foto wissen?") && setLayers(() => [])}>
+              <button onClick={exportDesign} disabled={exporting || !size} title="Bewaar of deel dit ontwerp als foto">
+                {exporting ? "Bezig…" : "📷 Opslaan / delen"}
+              </button>
+              {layers.length > 0 && (
+                <button className="ghost" onClick={() => (setLayers(() => []), setSelected(null))} title="Alles van deze foto wissen (ongedaan te maken)">
                   Alles wissen
                 </button>
               )}
             </>
           )}
-          {status && <span className="hint">⏳ {status}</span>}
         </div>
+        {status && <p className="status">⏳ {status}</p>}
         {notice && <p className="error small">{notice}</p>}
+
+        {empty && (
+          <ol className="help">
+            <li>
+              Tik op <strong>✨ Herken</strong>: meubels, muren en vloer worden gevonden.
+            </li>
+            <li>Tik op een oude bank en kies <strong>Weghalen met AI</strong>.</li>
+            <li>Tik op de vloer of een muur en kies rechts een vloer of verfkleur.</li>
+            <li>Tik rechts op een meubel: het komt op de vloer te staan. Sleep het op zijn plek.</li>
+          </ol>
+        )}
 
         {found.length > 0 && !drawing && (
           <div className="found row wrap">
-            <span className="muted small">Gevonden — klik in de foto of hier:</span>
+            <span className="muted small">Gevonden:</span>
             {found.map((s) => (
               <button key={s.id} className={`chip ${s.kind} ${picked?.id === s.id ? "on" : ""}`} onClick={() => (setSelected(null), setPicked(s))}>
                 {s.label}
@@ -554,10 +676,14 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
         {size ? (
           <div ref={stageRef} className="stage" style={{ aspectRatio: `${size.w} / ${size.h}` }}>
             <div className="canvas" style={{ width: size.w, height: size.h, transform: `scale(${scale})` }}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img className="layer" src={bgSrc} alt="" style={{ width: size.w, height: size.h }} />
+              {hasErased ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img className="layer" src={erased!.url} alt="" style={{ width: size.w, height: size.h }} />
+              ) : (
+                <Img className="layer" src={photo.url} alt="" style={{ width: size.w, height: size.h }} />
+              )}
               {showLayers &&
-                scene.layers.map((l) => {
+                layers.map((l) => {
                   if (l.kind === "erase") return null;
                   if (l.kind === "surface") {
                     const tex = textureSrc(l);
@@ -585,32 +711,31 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
                   }
                   const product = productById.get(l.productId);
                   if (!product?.image) return null;
-                  const cut = cutouts[cutoutKey(l)];
-                  const src = l.cutout !== "off" && cut && !cut.startsWith("failed") && cut !== "pending" ? cut : proxied(product.image);
                   const h = PRODUCT_W * l.aspect;
-                  const floor = l.floor && scene.layers.find((f) => f.id === l.floor!.planeId);
+                  const floor = l.floor && layers.find((f) => f.id === l.floor!.planeId);
                   const floorPlane = floor?.kind === "surface" ? planeOf(floor) : null;
+                  const style: React.CSSProperties = {
+                    width: PRODUCT_W,
+                    height: h,
+                    filter: productFilter(l.light, l.warmth),
+                    transform: quadToMatrix3d(PRODUCT_W, h, l.corners) + (l.flip ? ` translateX(${PRODUCT_W}px) scaleX(-1)` : ""),
+                  };
+                  const cut = cutoutSrc(l);
                   return (
                     <Fragment key={l.id}>
                       {(l.shadow ?? 0.5) > 0 && <Shadow layer={l} plane={floorPlane} size={size} />}
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        className="layer product"
-                        src={src}
-                        alt={product.title}
-                        style={{
-                          width: PRODUCT_W,
-                          height: h,
-                          filter: productFilter(l.light, l.warmth),
-                          transform: quadToMatrix3d(PRODUCT_W, h, l.corners) + (l.flip ? ` translateX(${PRODUCT_W}px) scaleX(-1)` : ""),
-                        }}
-                      />
+                      {cut ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img className="layer product" src={cut} alt={product.title} style={style} />
+                      ) : (
+                        <Img className="layer product" src={product.image} alt={product.title} style={style} />
+                      )}
                     </Fragment>
                   );
                 })}
             </div>
 
-            {/* Interaction layer: outlines and handles, in photo coordinates. Clicks are hit-tested in code. */}
+            {/* Interaction layer: outlines and handles, in photo coordinates. Taps are hit-tested in code. */}
             <svg
               ref={svgRef}
               className={`overlay ${drawing ? "drawing" : ""} ${segmentation ? "pickable" : ""}`}
@@ -618,14 +743,15 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
               preserveAspectRatio="none"
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
-              onPointerUp={() => (drag.current = null)}
-              onPointerLeave={() => (drag.current = null)}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
+              onLostPointerCapture={endDrag}
             >
               {pickedMask && <image className="highlight" href={pickedMask} width={size.w} height={size.h} preserveAspectRatio="none" />}
               {showLayers &&
                 selectedLayer &&
                 (selectedLayer.kind !== "product" && selectedLayer.mask ? (
-                  <image className="highlight" href={selectedLayer.mask} width={size.w} height={size.h} preserveAspectRatio="none" />
+                  <image className="highlight selected-area" href={selectedLayer.mask} width={size.w} height={size.h} preserveAspectRatio="none" />
                 ) : (
                   <polygon
                     className="outline"
@@ -633,11 +759,12 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
                   />
                 ))}
               {showLayers &&
-                scene.layers
+                layers
                   .filter((l): l is EraseLayer => l.kind === "erase" && !l.mask && l.id !== selected)
                   .map((l) => <polygon key={l.id} className="outline faint" points={l.points.map((p) => p.join(",")).join(" ")} />)}
 
-              {showLayers && selectedLayer?.kind === "product" &&
+              {showLayers &&
+                selectedLayer?.kind === "product" &&
                 selectedLayer.corners.map((c, i) => (
                   <circle
                     key={i}
@@ -651,16 +778,12 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
                       if (selectedLayer.floor) {
                         const c2 = selectedLayer.corners;
                         const center: Pt = [(c2[2][0] + c2[3][0]) / 2, (c2[2][1] + c2[3][1]) / 2];
-                        drag.current = { type: "anchor-scale", id: selectedLayer.id, from, center, start: selectedLayer.floor };
+                        startDrag({ type: "anchor-scale", id: selectedLayer.id, from, center, start: selectedLayer.floor }, e);
                       } else {
-                        drag.current = {
-                          type: "corner",
-                          id: selectedLayer.id,
-                          index: i,
-                          from,
-                          start: selectedLayer.corners,
-                          distort: selectedLayer.distort,
-                        };
+                        startDrag(
+                          { type: "corner", id: selectedLayer.id, index: i, from, start: selectedLayer.corners, distort: selectedLayer.distort },
+                          e,
+                        );
                       }
                     }}
                   />
@@ -678,13 +801,16 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
                       height={handleR * 2}
                       onPointerDown={(e) => {
                         e.stopPropagation();
-                        drag.current = { type: "plane", id: selectedLayer.id, index: i };
+                        startDrag({ type: "plane", id: selectedLayer.id, index: i }, e);
                       }}
                     />
                   ))}
                 </>
               )}
-              {showLayers && selectedLayer && selectedLayer.kind !== "product" && !selectedLayer.mask &&
+              {showLayers &&
+                selectedLayer &&
+                selectedLayer.kind !== "product" &&
+                !selectedLayer.mask &&
                 selectedLayer.points.map((p, i) => (
                   <circle
                     key={i}
@@ -694,7 +820,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
                     r={handleR * 0.85}
                     onPointerDown={(e) => {
                       e.stopPropagation();
-                      drag.current = { type: "vertex", id: selectedLayer.id, index: i };
+                      startDrag({ type: "vertex", id: selectedLayer.id, index: i }, e);
                     }}
                   />
                 ))}
@@ -728,7 +854,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
                 <button className="primary" onClick={() => surfaceFromSegment(picked, { type: "preset", preset: "eiken-naturel" })}>
                   🪵 Nieuwe vloer leggen
                 </button>
-                <span className="muted small">of klik rechts op een vloer</span>
+                <span className="muted small">of kies rechts een vloer</span>
               </>
             ) : (
               <>
@@ -738,7 +864,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
                 >
                   🎨 Verven
                 </button>
-                <span className="muted small">of klik rechts op verf, behang of tegels</span>
+                <span className="muted small">of kies rechts een kleur, behang of tegels</span>
               </>
             )}
             <button className="ghost" onClick={() => setPicked(null)}>
@@ -758,10 +884,8 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
               const floor = floors.find((f) => f.id === floorId);
               if (floor && selectedLayer.kind === "product") setLayers((ls) => ls.map((l) => (l.id === selectedLayer.id ? placeOnFloor(selectedLayer, floor) : l)));
             }}
-            onRemove={() => {
-              setLayers((ls) => ls.filter((l) => l.id !== selectedLayer.id));
-              setSelected(null);
-            }}
+            onRemove={removeSelected}
+            onDuplicate={duplicateSelected}
             onReorder={(dir) =>
               setLayers((ls) => {
                 const i = ls.findIndex((l) => l.id === selectedLayer.id);
@@ -776,94 +900,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
         )}
       </div>
 
-      <aside className="palette">
-        <h3>Meubels</h3>
-        {furniture.length === 0 && <p className="muted small">Voeg in stap 2 meubels toe.</p>}
-        {furniture
-          .sort((a, b) => Number(b.status === "favoriet") - Number(a.status === "favoriet"))
-          .map((p) => (
-            <button key={p.id} className="palette-item" onClick={() => addProduct(p)} title={`${p.title} in de kamer plaatsen`}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={proxied(p.image)} alt="" loading="lazy" />
-              <span>
-                {p.status === "favoriet" && "❤️ "}
-                {p.title}
-                <small>{categoryLabel(p.category)}</small>
-              </span>
-            </button>
-          ))}
-
-        <h3>Vloeren & wanden</h3>
-        <p className="muted small">Kies eerst een vloer of muur in de foto, klik dan hier.</p>
-        {surfaces.map((p) => (
-          <button key={p.id} className="palette-item" onClick={() => applyFill(fillFor(p))}>
-            {p.image ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={proxied(p.image)} alt="" loading="lazy" />
-            ) : (
-              <i className="swatch" style={{ background: p.color }} />
-            )}
-            <span>
-              {p.title}
-              <small>{categoryLabel(p.category)}</small>
-            </span>
-          </button>
-        ))}
-        <div className="presets">
-          {FLOOR_PRESETS.map((f) => (
-            <button key={f.id} className="preset" title={f.label} onClick={() => applyFill({ type: "preset", preset: f.id })}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={presetTexture(f.id)} alt="" />
-              <span>{f.label}</span>
-            </button>
-          ))}
-        </div>
-      </aside>
+      <Palette furniture={furniture} surfaces={surfaces} onAddProduct={onAddProduct} onFill={onFill} />
     </section>
-  );
-}
-
-
-/**
- * Soft contact shadow. On a floor it is drawn in the floor's plane, so it lies
- * flat in perspective under the product's footprint; otherwise a flat ellipse
- * under the bottom edge.
- */
-function Shadow({ layer, plane, size }: { layer: ProductLayer; plane: Quad | null; size: { w: number; h: number } }) {
-  const strength = layer.shadow ?? 0.5;
-  const gradient = `radial-gradient(closest-side, rgba(0,0,0,${0.55 * strength}), rgba(0,0,0,${0.3 * strength}) 55%, transparent)`;
-  if (layer.floor && plane) {
-    const { u, v, width, angle } = layer.floor;
-    const depth = width * 0.45; // footprint behind the front edge
-    return (
-      <div className="layer shadow" style={{ width: size.w, height: size.h }}>
-        <div className="plane" style={{ width: PLANE, height: PLANE, transform: quadToMatrix3d(PLANE, PLANE, plane) }}>
-          <div
-            style={{
-              position: "absolute",
-              left: u - width * 0.6,
-              top: v - depth * 1.1,
-              width: width * 1.2,
-              height: depth * 1.3,
-              background: gradient,
-              transform: `rotate(${angle}deg)`,
-              transformOrigin: `50% ${(depth * 1.1) / (depth * 1.3) * 100}%`,
-            }}
-          />
-        </div>
-      </div>
-    );
-  }
-  const [, , br, bl] = layer.corners;
-  const w = Math.hypot(br[0] - bl[0], br[1] - bl[1]) * 1.15;
-  const h = w * 0.14;
-  const cx = (br[0] + bl[0]) / 2;
-  const cy = (br[1] + bl[1]) / 2;
-  const rot = (Math.atan2(br[1] - bl[1], br[0] - bl[0]) * 180) / Math.PI;
-  return (
-    <div
-      className="layer shadow"
-      style={{ left: cx - w / 2, top: cy - h * 0.6, width: w, height: h, background: gradient, transform: `rotate(${rot}deg)`, transformOrigin: "50% 60%" }}
-    />
   );
 }

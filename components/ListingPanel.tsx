@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { classifyRooms } from "@/lib/ai";
 import { ROOMS, roomLabel } from "@/lib/categories";
 import { extractFundaPhotos } from "@/lib/extract";
-import { fileToDataUrl, proxied } from "@/lib/images";
+import { fileToDataUrl } from "@/lib/images";
+import { Img } from "./Img";
+import { PasteButton } from "./PasteButton";
 import { newId } from "@/lib/useProject";
 import type { FundaResult, Photo, Project, RoomType } from "@/lib/types";
 
@@ -121,6 +123,7 @@ export function ListingPanel({ project, update, onDecorate }: Props) {
             value={url}
             onChange={(e) => setUrl(e.target.value)}
           />
+          <PasteButton onPaste={(t) => setUrl(t.match(/https?:\/\/\S+/)?.[0] ?? t)} />
           <button className="primary" disabled={busy}>
             {busy ? "Ophalen…" : "Ophalen"}
           </button>
@@ -216,8 +219,7 @@ export function ListingPanel({ project, update, onDecorate }: Props) {
                   onDragStart={() => setDragId(photo.id)}
                   onDragEnd={() => setDragId(null)}
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={proxied(photo.url)} alt={roomLabel(photo.room)} loading="lazy" />
+                  <Img src={photo.url} width={480} alt={roomLabel(photo.room)} loading="lazy" />
                   <figcaption>
                     <select value={photo.room} onChange={(e) => moveTo(photo.id, e.target.value as RoomType)}>
                       {ROOMS.map((r) => (
@@ -232,7 +234,14 @@ export function ListingPanel({ project, update, onDecorate }: Props) {
                     <button
                       className="small ghost"
                       title="Verwijderen"
-                      onClick={() => setPhotos((photos) => photos.filter((p) => p.id !== photo.id))}
+                      onClick={() =>
+                        update((p) => {
+                          // Also drop the design made on this photo.
+                          const scenes = { ...p.scenes };
+                          delete scenes[photo.id];
+                          return { ...p, scenes, listing: p.listing && { ...p.listing, photos: p.listing.photos.filter((x) => x.id !== photo.id) } };
+                        })
+                      }
                     >
                       ✕
                     </button>

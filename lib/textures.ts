@@ -199,3 +199,24 @@ export function presetTexture(id: string): string {
 }
 
 export const presetLabel = (id: string) => FLOOR_PRESETS.find((p) => p.id === id)?.label ?? id;
+
+// Generating a texture takes a few tens of ms; the palette shows 12 of them.
+// Make them one at a time when the browser is idle, so the page never stutters.
+let queue: Promise<unknown> = Promise.resolve();
+const pending = new Map<string, Promise<string>>();
+const whenIdle = (fn: () => void) => {
+  const w = window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number };
+  if (w.requestIdleCallback) w.requestIdleCallback(fn, { timeout: 400 });
+  else setTimeout(fn, 16);
+};
+
+export function presetTextureAsync(id: string): Promise<string> {
+  const hit = cache.get(id);
+  if (hit) return Promise.resolve(hit);
+  if (!pending.has(id)) {
+    const job = queue.then(() => new Promise<string>((resolve) => whenIdle(() => resolve(presetTexture(id)))));
+    queue = job;
+    pending.set(id, job);
+  }
+  return pending.get(id)!;
+}

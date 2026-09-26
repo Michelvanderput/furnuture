@@ -64,3 +64,17 @@ describe("room look", () => {
     expect(lookFromStats(150, -30).warmth).toBe(0);
   });
 });
+
+import { affineFromTriangles } from "@/lib/exportImage";
+
+describe("affineFromTriangles", () => {
+  it("maps each source corner onto its destination", () => {
+    const s: [number, number][] = [[0, 0], [100, 0], [0, 50]];
+    const d: [number, number][] = [[10, 20], [200, 40], [30, 180]];
+    const [a, b, c, dd, e, f] = affineFromTriangles(s as never, d as never)!;
+    s.forEach(([x, y], i) => {
+      expect(a * x + c * y + e).toBeCloseTo(d[i][0], 6);
+      expect(b * x + dd * y + f).toBeCloseTo(d[i][1], 6);
+    });
+  });
+});

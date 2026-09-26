@@ -16,12 +16,13 @@ interface Props {
   onPlaceOnFloor: (floorId: string) => void;
   onRemove: () => void;
   onReorder: (dir: number) => void;
+  onDuplicate: () => void;
 }
 
 const fillValue = (f: SurfaceFill) =>
   f.type === "color" ? `color:${f.color}` : f.type === "texture" ? `tex:${f.productId}` : `preset:${f.preset}`;
 
-export function LayerControls({ layer, products, floors, cutoutState, onChange, onPlaceOnFloor, onRemove, onReorder }: Props) {
+export function LayerControls({ layer, products, floors, cutoutState, onChange, onPlaceOnFloor, onRemove, onReorder, onDuplicate }: Props) {
   if (layer.kind === "erase") {
     return (
       <div className="layer-controls row wrap">
@@ -41,13 +42,16 @@ export function LayerControls({ layer, products, floors, cutoutState, onChange, 
   const lowMemory = isLowMemoryDevice();
   const order = (
     <>
-      <button onClick={() => onReorder(-1)} title="Naar achteren">
+      <button onClick={onDuplicate} title="Dupliceren (⌘/Ctrl + D)">
+        ⧉ Dupliceren
+      </button>
+      <button onClick={() => onReorder(-1)} title="Naar achteren" aria-label="Naar achteren">
         ⬇
       </button>
-      <button onClick={() => onReorder(1)} title="Naar voren">
+      <button onClick={() => onReorder(1)} title="Naar voren" aria-label="Naar voren">
         ⬆
       </button>
-      <button className="ghost" onClick={onRemove}>
+      <button className="ghost" onClick={onRemove} title="Verwijderen (Delete)">
         🗑 Verwijderen
       </button>
     </>

@@ -59,6 +59,8 @@ export interface Product {
   note: string;
   /** Hex colour, used for paint products so they can be applied to walls. */
   color?: string;
+  /** Which room it is meant for (budget per room). */
+  room?: RoomType;
 }
 
 export type Pt = [number, number];
