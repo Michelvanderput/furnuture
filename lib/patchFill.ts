@@ -244,30 +244,23 @@ function solveLevel(l: Level, nnf: Int32Array, em: number, rand: () => number, s
  * Fills the hole (mask: 1 = fill) of an RGBA image in place. `labels` (optional)
  * keeps regions apart, e.g. 1 = floor, 2 = wall; 255 = no part of the picture.
  *
- * Light and texture are filled separately. Broad light (a window, a shadow) is
- * interpolated smoothly from the hole's border; only the texture (planks, grain)
- * is copied from matching patches. Copying both at once made the fill pick "lit"
- * or "shadowed" pieces with a hard edge in between, and made matches worse.
+ * PatchMatch works directly on the photo's real colours: a plank seam is a rare,
+ * thin feature next to a lot of near-flat colour, and it is the photo's own broad
+ * light gradient (a window is brighter on one side) that pulls matches towards
+ * the right *position* in the room, which is what makes matches land on the same
+ * plank pattern instead of any flat patch anywhere. Stripping that gradient out
+ * first (to fix seams) removes exactly the signal that finds real texture, so
+ * instead any residual light mismatch at the hole's edge is fixed afterwards,
+ * as a smooth additive correction (`seamless`) that leaves the copied texture intact.
  */
 export function patchFill(rgba: Uint8ClampedArray, mask: Uint8Array, w: number, h: number, labels?: Uint8Array, seed = 7): void {
   const n = w * h;
-  const img = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) img[i * 3 + c] = rgba[i * 4 + c];
-  const light = smoothLight(img, mask, labels, w, h);
-  // Texture = colour relative to its light (multiplicative: a shadow darkens texture and its contrast alike).
-  const detail = new Float32Array(n * 3);
-  for (let i = 0; i < n * 3; i++) detail[i] = (img[i] / Math.max(6, light[i])) * 128;
-  fillCore(detail, mask, w, h, labels, rng(seed));
-  for (let i = 0; i < n; i++) {
-    if (!mask[i]) continue;
-    for (let c = 0; c < 3; c++) rgba[i * 4 + c] = (detail[i * 3 + c] / 128) * light[i * 3 + c];
-  }
-}
-
-function fillCore(img: Float32Array, mask: Uint8Array, w: number, h: number, labels: Uint8Array | undefined, rand: () => number) {
-  const base: Level = { w, h, img, hole: mask.slice(), labels };
+  const base: Level = { w, h, img: new Float32Array(n * 3), hole: mask.slice(), labels };
+  for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) base.img[i * 3 + c] = rgba[i * 4 + c];
   const levels = [base];
   while (Math.min(levels.at(-1)!.w, levels.at(-1)!.h) > 40) levels.push(downsample(levels.at(-1)!));
+  const rand = rng(seed);
+
   let prev: { nnf: Int32Array; w: number; h: number } | null = null;
   for (let li = levels.length - 1; li >= 0; li--) {
     const l = levels[li];
@@ -293,123 +286,89 @@ function fillCore(img: Float32Array, mask: Uint8Array, w: number, h: number, lab
     solveLevel(l, nnf, li === levels.length - 1 ? 6 : li === 0 ? 3 : 4, rand, li === 0, li === levels.length - 1);
     prev = { nnf, w: l.w, h: l.h };
   }
+  seamless(base, mask, labels);
+  for (let i = 0; i < n; i++) {
+    if (!mask[i]) continue;
+    for (let c = 0; c < 3; c++) rgba[i * 4 + c] = base.img[i * 3 + c];
+  }
 }
 
 /**
- * Broad light per pixel: a blur of the known pixels (per region), and inside the hole
- * a smooth (harmonic) surface between the hole's borders, solved on a coarse grid.
+ * Patches come from elsewhere in the room, often lit differently (brighter near the
+ * window): the hole can show as a slightly mismatched patch. Seamless cloning,
+ * simplified: measure the difference in broad light just inside and just outside the
+ * hole's border (skipping pixel pairs that straddle a real edge, such as a plank seam,
+ * so texture is not mistaken for a light step), spread that difference smoothly over
+ * the hole on a coarse grid, and add it back. Detail (the copied texture) stays;
+ * only the broad light shifts to match its surroundings.
  */
-function smoothLight(img: Float32Array, mask: Uint8Array, labels: Uint8Array | undefined, w: number, h: number, k = 4): Float32Array {
+function seamless(l: Level, mask: Uint8Array, labels: Uint8Array | undefined, k = 6) {
+  const { w, h, img } = l;
   const n = w * h;
-  const known = new Float32Array(n);
-  for (let i = 0; i < n; i++) known[i] = mask[i] || (labels && labels[i] === 255) ? 0 : 1;
-  // Wide enough to remove planks, tiles and grain, narrow enough to keep a window's light and a shadow.
-  const r = Math.max(4, Math.round(Math.max(w, h) * 0.03));
-  const light = regionBlur(img, labels, w, h, r, known);
   const gw = Math.ceil(w / k), gh = Math.ceil(h / k), gn = gw * gh;
-  const val = new Float32Array(gn * 3), free = new Uint8Array(gn), label = new Uint8Array(gn), use = new Uint8Array(gn);
-  for (let g = 0; g < gn; g++) {
-    const x = Math.min(w - 1, (g % gw) * k + (k >> 1)), y = Math.min(h - 1, ((g / gw) | 0) * k + (k >> 1));
-    const i = y * w + x;
+  const inHole = new Uint8Array(gn), label = new Uint8Array(gn);
+  const diffs = new Map<number, number[][]>();
+  for (let i = 0; i < n; i++) {
+    if (!mask[i]) continue;
+    const x = i % w, y = (i / w) | 0;
+    const g = ((y / k) | 0) * gw + ((x / k) | 0);
+    inHole[g] = 1;
     if (labels) label[g] = labels[i];
-    if (labels && labels[i] === 255) continue;
-    use[g] = 1;
-    free[g] = mask[i] ? 1 : 0;
-    for (let c = 0; c < 3; c++) val[g * 3 + c] = light[i * 3 + c];
-  }
-  const cells: number[] = [];
-  for (let g = 0; g < gn; g++) if (free[g]) cells.push(g);
-  // Start from the border inwards (the hole's own pixels are the old object, not light),
-  // then smooth: converges in far fewer steps than smoothing from scratch.
-  const done = Uint8Array.from(free, (f, g) => (use[g] && !f ? 1 : 0));
-  for (let changed = true; changed; ) {
-    changed = false;
-    const ready: number[] = [];
-    for (const g of cells) {
-      if (done[g]) continue;
-      const x = g % gw, y = (g / gw) | 0;
-      let m = 0, a = 0, b = 0, c = 0;
-      for (const j of [x > 0 ? g - 1 : -1, x < gw - 1 ? g + 1 : -1, y > 0 ? g - gw : -1, y < gh - 1 ? g + gw : -1]) {
-        if (j < 0 || done[j] !== 1 || (labels && label[j] !== label[g])) continue;
-        m++;
-        a += val[j * 3];
-        b += val[j * 3 + 1];
-        c += val[j * 3 + 2];
-      }
-      if (m) (val[g * 3] = a / m), (val[g * 3 + 1] = b / m), (val[g * 3 + 2] = c / m), ready.push(g);
-    }
-    for (const g of ready) (done[g] = 1), (changed = true);
-  }
-  for (let it = 0; it < 300; it++) {
-    for (const g of cells) {
-      const x = g % gw, y = (g / gw) | 0;
-      let m = 0, a = 0, b = 0, c = 0;
-      for (const j of [x > 0 ? g - 1 : -1, x < gw - 1 ? g + 1 : -1, y > 0 ? g - gw : -1, y < gh - 1 ? g + gw : -1]) {
-        if (j < 0 || !use[j] || (labels && label[j] !== label[g])) continue;
-        m++;
-        a += val[j * 3];
-        b += val[j * 3 + 1];
-        c += val[j * 3 + 2];
-      }
-      if (m) (val[g * 3] = a / m), (val[g * 3 + 1] = b / m), (val[g * 3 + 2] = c / m);
+    // Difference with the known pixels right across the border. Where the fill continues
+    // the texture this is only the difference in light; texture itself cancels out.
+    for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) {
+      if (j < 0 || mask[j] || (labels && labels[j] !== labels[i])) continue;
+      const d0 = img[j * 3] - img[i * 3], d1 = img[j * 3 + 1] - img[i * 3 + 1], d2 = img[j * 3 + 2] - img[i * 3 + 2];
+      // A big jump is an edge in the texture (a plank seam right at the border), not light: skip it.
+      if (Math.abs(d0 + d1 + d2) / 3 > 40) continue;
+      if (!diffs.has(g)) diffs.set(g, [[], [], []]);
+      const d = diffs.get(g)!;
+      d[0].push(d0);
+      d[1].push(d1);
+      d[2].push(d2);
     }
   }
-  // Back to the hole's pixels (bilinear between cell centres of the same region).
+  const corr = new Float32Array(gn * 3);
+  const fixed = new Uint8Array(gn);
+  // Median per cell (robust to the rare seam that slips through), capped to a light
+  // difference rather than a repaint.
+  const median = (v: number[]) => (v.sort((a, b) => a - b), Math.max(-90, Math.min(90, v[v.length >> 1])));
+  for (const [g, d] of diffs) {
+    fixed[g] = 1;
+    for (let c = 0; c < 3; c++) corr[g * 3 + c] = median(d[c]);
+  }
+  const free: number[] = [];
+  for (let g = 0; g < gn; g++) if (inHole[g] && !fixed[g]) free.push(g);
+  for (let it = 0; it < 400; it++) {
+    for (const g of free) {
+      const x = g % gw, y = (g / gw) | 0;
+      let m = 0, r0 = 0, r1 = 0, r2 = 0;
+      for (const j of [x > 0 ? g - 1 : -1, x < gw - 1 ? g + 1 : -1, y > 0 ? g - gw : -1, y < gh - 1 ? g + gw : -1]) {
+        if (j < 0 || !inHole[j] || (labels && label[j] !== label[g])) continue;
+        m++;
+        r0 += corr[j * 3];
+        r1 += corr[j * 3 + 1];
+        r2 += corr[j * 3 + 2];
+      }
+      if (m) (corr[g * 3] = r0 / m), (corr[g * 3 + 1] = r1 / m), (corr[g * 3 + 2] = r2 / m);
+    }
+  }
+  // Back to pixels (bilinear between cell centres), then add.
   for (let i = 0; i < n; i++) {
     if (!mask[i]) continue;
     const x = i % w, y = (i / w) | 0;
     const gx = Math.min(gw - 1, Math.max(0, (x + 0.5) / k - 0.5)), gy = Math.min(gh - 1, Math.max(0, (y + 0.5) / k - 0.5));
     const x0 = Math.floor(gx), y0 = Math.floor(gy), x1 = Math.min(gw - 1, x0 + 1), y1 = Math.min(gh - 1, y0 + 1);
     const fx = gx - x0, fy = gy - y0;
-    const own = labels ? labels[i] : 0;
+    const own = ((y / k) | 0) * gw + ((x / k) | 0);
     for (let c = 0; c < 3; c++) {
       let acc = 0, wsum = 0;
       for (const [g, wt] of [[y0 * gw + x0, (1 - fx) * (1 - fy)], [y0 * gw + x1, fx * (1 - fy)], [y1 * gw + x0, (1 - fx) * fy], [y1 * gw + x1, fx * fy]] as const) {
-        if (!use[g] || (labels && label[g] !== own) || wt <= 0) continue;
-        acc += val[g * 3 + c] * wt;
+        if (!inHole[g] || (labels && label[g] !== label[own]) || wt <= 0) continue;
+        acc += corr[g * 3 + c] * wt;
         wsum += wt;
       }
-      if (wsum > 0) light[i * 3 + c] = acc / wsum;
+      img[i * 3 + c] += wsum > 0 ? acc / wsum : corr[own * 3 + c];
     }
   }
-  return light;
-}
-
-/** Box blur (3 passes) of an RGB image that does not mix different regions; only pixels with `use` count. */
-function regionBlur(img: Float32Array, labels: Uint8Array | undefined, w: number, h: number, r: number, use?: Float32Array): Float32Array {
-  const n = w * h;
-  const out = new Float32Array(n * 3);
-  const keys = labels ? [...new Set(labels)] : [0];
-  for (const key of keys) {
-    const weight = new Float32Array(n);
-    for (let i = 0; i < n; i++) weight[i] = (!labels || labels[i] === key ? 1 : 0) * (use ? use[i] : 1);
-    const blur = (src: Float32Array) => {
-      let v = src.slice();
-      const tmp = new Float32Array(n);
-      for (let pass = 0; pass < 3; pass++) {
-        for (const horizontal of [true, false]) {
-          const [outer, inner] = horizontal ? [h, w] : [w, h];
-          for (let a = 0; a < outer; a++) {
-            const at = (b: number) => (horizontal ? a * w + b : b * w + a);
-            let sum = 0;
-            for (let b = -r; b <= r; b++) sum += v[at(Math.min(inner - 1, Math.max(0, b)))];
-            for (let b = 0; b < inner; b++) {
-              tmp[at(b)] = sum;
-              sum += v[at(Math.min(inner - 1, b + r + 1))] - v[at(Math.max(0, b - r))];
-            }
-          }
-          v = tmp.slice();
-        }
-      }
-      return v;
-    };
-    const wb = blur(weight);
-    for (let c = 0; c < 3; c++) {
-      const ch = new Float32Array(n);
-      for (let i = 0; i < n; i++) ch[i] = img[i * 3 + c] * weight[i];
-      const cb = blur(ch);
-      for (let i = 0; i < n; i++) if (!labels || labels[i] === key) out[i * 3 + c] = wb[i] > 1e-6 ? cb[i] / wb[i] : img[i * 3 + c];
-    }
-  }
-  return out;
 }

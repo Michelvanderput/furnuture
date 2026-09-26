@@ -28,22 +28,32 @@ describe("patchFill", () => {
 });
 
 describe("patchFill light", () => {
-  it("blends a shadow edge smoothly instead of cutting it", () => {
-    const w = 120, h = 70;
+  it("blends a gradual window-light falloff smoothly, keeping the plank texture", () => {
+    // A realistic room: light fades gradually left-to-right (a window on the left),
+    // over the plank texture. Never a hard 1px step like a studio backdrop.
+    const w = 160, h = 90;
     const rgba = new Uint8ClampedArray(w * h * 4);
+    const light = (x: number) => 100 + 100 / (1 + Math.exp((x - 80) / 18));
+    const stripe = (x: number) => (Math.floor(x / 7) % 2 ? 12 : -12);
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
-        const v = (Math.floor(x / 7) % 2 ? 190 : 170) - (x >= 80 ? 70 : 0);
+        const v = Math.round(light(x) + stripe(x));
         rgba.fill(v, (y * w + x) * 4, (y * w + x) * 4 + 3);
         rgba[(y * w + x) * 4 + 3] = 255;
       }
     }
     const mask = new Uint8Array(w * h);
-    for (let y = 20; y < 50; y++) for (let x = 40; x < 80; x++) mask[y * w + x] = 1;
+    for (let y = 25; y < 65; y++) for (let x = 50; x < 110; x++) mask[y * w + x] = 1;
     patchFill(rgba, mask, w, h);
-    const at = (x: number) => rgba[(35 * w + x) * 4];
-    // Next to the dark side the fill is dark, next to the light side light: no hard cut at the border.
-    expect(Math.abs(at(79) - at(81))).toBeLessThan(40);
-    expect(at(41)).toBeGreaterThan(at(78) + 20);
+    const at = (x: number) => rgba[(45 * w + x) * 4];
+    // No hard seam right at the hole's borders: close to the known neighbour outside it.
+    expect(Math.abs(at(51) - at(49))).toBeLessThan(25);
+    expect(Math.abs(at(108) - at(110))).toBeLessThan(25);
+    // The window's falloff still shows across the hole (left brighter than right).
+    expect(at(51)).toBeGreaterThan(at(108) + 15);
+    // Plank texture (not just a flat gradient) is still visible inside the hole.
+    const row = Array.from({ length: 60 }, (_, i) => at(50 + i));
+    const diffs = row.slice(1).map((v, i) => Math.abs(v - row[i]));
+    expect(Math.max(...diffs)).toBeGreaterThan(8);
   });
 });
