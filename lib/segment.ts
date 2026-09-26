@@ -1,13 +1,14 @@
-import { loadTransformers, type Progress } from "./ai";
-import { proxied } from "./images";
 import { components } from "./masks";
+import { imagePixels, isLowMemoryDevice, runAi, type Progress } from "./worker";
 
 /**
- * Room recognition with SegFormer-B2 trained on ADE20K (150 indoor/outdoor classes,
- * ~30 MB, runs free in the browser). Every pixel gets a class such as wall, floor,
- * sofa or bed; we split furniture and walls into separate objects.
+ * Room recognition with SegFormer trained on ADE20K (150 indoor/outdoor classes),
+ * free in the browser. Every pixel gets a class such as wall, floor, sofa or bed;
+ * we split furniture and walls into separate objects.
+ * B2 (~30 MB) on computers, the much lighter B0 (~4 MB) on iPad/iPhone.
  */
 const MODEL = "Xenova/segformer-b2-finetuned-ade-512-512";
+const MODEL_LIGHT = "Xenova/segformer-b0-finetuned-ade-512-512";
 
 export type SegmentKind = "floor" | "wall" | "ceiling" | "furniture";
 
@@ -93,86 +94,22 @@ const FURNITURE: Record<string, string> = {
 const KIND: Record<string, SegmentKind> = { floor: "floor", wall: "wall", ceiling: "ceiling" };
 const PLAIN_LABEL: Record<SegmentKind, string> = { floor: "Vloer", wall: "Muur", ceiling: "Plafond", furniture: "" };
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-let model: Promise<{ t: any; processor: any; model: any }> | null = null;
-
-function loadModel(onProgress?: Progress) {
-  model ??= (async () => {
-    const t = await loadTransformers();
-    const progress_callback = (e: { status: string; file?: string; progress?: number }) => {
-      if (e.status === "progress" && e.file?.endsWith(".onnx")) onProgress?.(`Kamer-herkenning downloaden… ${Math.round(e.progress ?? 0)}%`);
-    };
-    const [processor, m] = await Promise.all([
-      t.AutoProcessor.from_pretrained(MODEL),
-      t.AutoModelForSemanticSegmentation.from_pretrained(MODEL, { dtype: "q8", progress_callback }),
-    ]);
-    return { t, processor, model: m };
-  })();
-  model.catch(() => (model = null));
-  return model;
-}
-
-/**
- * Class per pixel from the model's low-resolution logits [C, h, w].
- *
- * The standard post-processing first scales all 150 class maps up to the photo
- * size (~1 GB for a Funda photo) and crashed browsers. Instead we upscale
- * bilinearly to at most `maxSide` pixels, one pixel at a time, take the best
- * class, and repeat that label map (nearest) up to the photo size.
- */
-export function labelsFromLogits(
-  logits: Float32Array,
-  classes: number,
-  h: number,
-  w: number,
-  outW: number,
-  outH: number,
-  maxSide = 480,
-): Uint8Array {
-  const f = Math.min(1, maxSide / Math.max(outW, outH));
-  const mw = Math.max(1, Math.round(outW * f));
-  const mh = Math.max(1, Math.round(outH * f));
-  const mid = new Uint8Array(mw * mh);
-  const plane = h * w;
-  for (let y = 0; y < mh; y++) {
-    const sy = Math.min(h - 1, Math.max(0, ((y + 0.5) * h) / mh - 0.5));
-    const y0 = Math.floor(sy), y1 = Math.min(h - 1, y0 + 1), fy = sy - y0;
-    for (let x = 0; x < mw; x++) {
-      const sx = Math.min(w - 1, Math.max(0, ((x + 0.5) * w) / mw - 0.5));
-      const x0 = Math.floor(sx), x1 = Math.min(w - 1, x0 + 1), fx = sx - x0;
-      const a = y0 * w + x0, b = y0 * w + x1, c = y1 * w + x0, d = y1 * w + x1;
-      const wa = (1 - fx) * (1 - fy), wb = fx * (1 - fy), wc = (1 - fx) * fy, wd = fx * fy;
-      let best = 0, bestV = -Infinity;
-      for (let k = 0; k < classes; k++) {
-        const o = k * plane;
-        const v = logits[o + a] * wa + logits[o + b] * wb + logits[o + c] * wc + logits[o + d] * wd;
-        if (v > bestV) (bestV = v), (best = k);
-      }
-      mid[y * mw + x] = best;
-    }
-  }
-  if (mw === outW && mh === outH) return mid;
-  const out = new Uint8Array(outW * outH);
-  for (let y = 0; y < outH; y++) {
-    const row = Math.min(mh - 1, Math.floor((y * mh) / outH)) * mw;
-    for (let x = 0; x < outW; x++) out[y * outW + x] = mid[row + Math.min(mw - 1, Math.floor((x * mw) / outW))];
-  }
-  return out;
-}
+/** Working resolution of the recognition result (plenty for selecting and masks). */
+const WORK_SIDE = 480;
 
 export async function segmentRoom(photoUrl: string, onProgress?: Progress): Promise<RoomSegmentation> {
-  onProgress?.("Kamer-herkenning laden…");
-  const { t, processor, model: m } = await loadModel(onProgress);
-  onProgress?.("Meubels, muren en vloer herkennen…");
-  const image = await t.RawImage.fromURL(new URL(proxied(photoUrl), window.location.href).toString());
-  const w: number = image.width;
-  const h: number = image.height;
-  const inputs = await processor(image);
-  const { logits } = await m(inputs);
-  const [, classes, lh, lw] = logits.dims as number[];
-  const classMap = labelsFromLogits(logits.data as Float32Array, classes, lh, lw, w, h);
-  logits.dispose?.();
-  return buildSegments(classMap, w, h, m.config.id2label as Record<number, string>, onProgress);
+  onProgress?.("Foto voorbereiden…");
+  // The model looks at 512×512 pixels; a larger photo only costs memory.
+  const image = await imagePixels(photoUrl, 512);
+  const f = WORK_SIDE / Math.max(image.width, image.height);
+  const outW = Math.round(image.width * f);
+  const outH = Math.round(image.height * f);
+  const { classMap, id2label } = await runAi<{ classMap: Uint8Array; id2label: Record<number, string> }>(
+    { task: "segment", image, model: isLowMemoryDevice() ? MODEL_LIGHT : MODEL, outW, outH },
+    onProgress,
+    [image.data.buffer],
+  );
+  return buildSegments(classMap, outW, outH, id2label, onProgress);
 }
 
 /** Turns a class-per-pixel map into selectable objects (floor, walls, furniture). */

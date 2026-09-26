@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildSegments, labelsFromLogits } from "@/lib/segment";
+import { labelsFromLogits } from "@/lib/labels";
+import { buildSegments } from "@/lib/segment";
 
 describe("labelsFromLogits", () => {
   it("picks the best class per pixel and scales up to the photo size", () => {

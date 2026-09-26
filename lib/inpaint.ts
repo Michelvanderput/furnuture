@@ -1,6 +1,6 @@
 import type { Progress } from "./ai";
 import { loadImage, proxied } from "./images";
-import { lamaInpaint } from "./lama";
+import { aiInpaint } from "./aiInpaint";
 import { dilate, ensureMask, polygonMask } from "./masks";
 import type { EraseLayer } from "./types";
 
@@ -91,7 +91,7 @@ export function pushPullFill(rgb: Uint8ClampedArray, mask: Uint8Array, w: number
 
 /**
  * Returns the photo with every erase layer painted out, as a JPEG data URL.
- * AI layers use LaMa; if that cannot run (download blocked, too little memory)
+ * AI layers use MI-GAN; if that cannot run (download blocked, too little memory)
  * they fall back to the push-pull fill.
  */
 export async function renderErased(
@@ -115,10 +115,10 @@ export async function renderErased(
     const mask = dilate(area, w, h, Math.round(Math.max(3, w / 200)));
     if (layer.method === "ai") {
       try {
-        await lamaInpaint(canvas, mask, onProgress);
+        await aiInpaint(canvas, mask, onProgress);
         continue;
       } catch (e) {
-        console.warn("LaMa failed, using simple fill", e);
+        console.warn("AI inpainting failed, using simple fill", e);
         aiFailed = true;
       }
     }
@@ -127,5 +127,7 @@ export async function renderErased(
     ctx.putImageData(photo, 0, 0);
   }
   onProgress?.("");
-  return { url: canvas.toDataURL("image/jpeg", 0.92), aiFailed };
+  const url = canvas.toDataURL("image/jpeg", 0.92);
+  canvas.width = canvas.height = 0; // free the backing store right away (Safari keeps it otherwise)
+  return { url, aiFailed };
 }

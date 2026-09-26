@@ -140,7 +140,7 @@ export interface EraseLayer {
   points: Pt[];
   /** AI-detected object: PNG whose alpha is the area to erase (used instead of points). */
   mask?: string;
-  /** "ai" = LaMa inpainting, "simple" = fill from the surroundings. */
+  /** "ai" = MI-GAN inpainting, "simple" = fill from the surroundings. */
   method: "ai" | "simple";
   label?: string;
 }

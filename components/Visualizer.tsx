@@ -35,6 +35,7 @@ import type {
   SurfaceLayer,
 } from "@/lib/types";
 import { newId } from "@/lib/useProject";
+import { isLowMemoryDevice } from "@/lib/worker";
 import { LayerControls } from "./LayerControls";
 
 interface Props {
@@ -120,8 +121,9 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
       const product = project.products.find((p) => p.id === layer.productId);
       if (!product?.image) continue;
       setCutouts((c) => ({ ...c, [key]: "pending" }));
+      // The AI cut-out is too heavy for iPad Safari: use the simple one there.
       const job =
-        layer.cutout === "ai"
+        layer.cutout === "ai" && !isLowMemoryDevice()
           ? removeBackgroundAI(product.image, setStatus).finally(() => setStatus(""))
           : removeBackground(product.image, layer.tolerance);
       job
@@ -226,9 +228,13 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     if (!url) return null;
     const floor = seg.kind === "floor";
     const occluder = furnitureMask(segmentation);
-    const plane = floor
+    const fitted = floor
       ? fitFloorQuad(mask, segmentation.w, segmentation.h, occluder)
       : fitWallQuad(mask, segmentation.w, segmentation.h, occluder);
+    // Recognition runs at a lower resolution than the photo: scale the plane up.
+    const sx = (size?.w ?? segmentation.w) / segmentation.w;
+    const sy = (size?.h ?? segmentation.h) / segmentation.h;
+    const plane = fitted && (fitted.map(([x, y]) => [x * sx, y * sy]) as Quad);
     const id = newId();
     const layer: SurfaceLayer = {
       kind: "surface",

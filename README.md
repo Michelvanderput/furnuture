@@ -43,15 +43,17 @@ Alles hieronder draait gratis in de browser van de gebruiker (geen server, geen 
 
 | Functie | Model | Download | Licentie |
 |---|---|---|---|
-| Meubels, muren en vloer herkennen | SegFormer-B2 (ADE20K) via transformers.js | ± 30 MB | NVIDIA SegFormer-licentie (onderzoek/niet-commercieel) |
-| Meubels weggummen | LaMa (big-lama, ONNX) via onnxruntime-web, WebGPU of WebAssembly | ± 200 MB | Apache-2.0 |
-| Achtergrond van productfoto weghalen | RMBG-1.4 via transformers.js | ± 45 MB | Niet-commercieel |
+| Meubels, muren en vloer herkennen | SegFormer-B2 (ADE20K) via transformers.js; op iPad/iPhone SegFormer-B0 | ± 30 MB (B0: ± 4 MB) | NVIDIA SegFormer-licentie (onderzoek/niet-commercieel) |
+| Meubels weggummen | MI-GAN (gemaakt voor telefoons) via onnxruntime-web | ± 27 MB | MIT |
+| Achtergrond van productfoto weghalen | RMBG-1.4 via transformers.js (niet op iPad: te zwaar) | ± 45 MB | Niet-commercieel |
 | Foto's per ruimte sorteren | CLIP ViT-B/32 via transformers.js | ± 90 MB | MIT |
+
+**Geheugen (iPad/Safari):** elk AI-model draait in een eigen Web Worker die na de taak wordt afgesloten. WebAssembly-geheugen wordt anders nooit teruggegeven, en Safari op iPad sluit een tabblad dat te veel geheugen gebruikt. De modellen krijgen alleen een verkleinde foto (512 px), het resultaat wordt op 480 px verwerkt, en op iPad/iPhone worden de lichtste modellen gebruikt.
 
 Zo werkt het:
 
 1. **✨ Herken meubels, muren & vloer**: elke pixel krijgt een klasse (bank, stoel, muur, vloer…). Meubels en muren worden losse objecten die je aanklikt.
-2. **Weghalen met AI**: LaMa vult het object op met wat erachter hoort. Omdat het werkt op een uitsnede rond het object, blijft de kwaliteit hoog. Lukt de AI niet (download geblokkeerd, te weinig geheugen), dan valt hij terug op de snelle gum.
+2. **Weghalen met AI**: MI-GAN vult het object op met wat erachter hoort. Omdat het werkt op een uitsnede rond het object, blijft de kwaliteit hoog. Lukt de AI niet (download geblokkeerd, te weinig geheugen), dan valt hij terug op de snelle gum.
 3. **Nieuwe vloer / verven**: uit het vloer- of muurmasker wordt automatisch een perspectiefvlak berekend. Randen die door meubels verborgen zijn, tellen niet mee. De textuur loopt mee met de diepte; de oranje hoekjes stellen het vlak bij. Een nieuwe vloer of muur bedekt ook de plek waar weggegumde meubels stonden.
 4. **Meubels op de vloer**: staat er een vloer in de foto, dan wordt een nieuw meubel erop gezet. Schuif je het naar achteren, dan wordt het vanzelf kleiner; met "Draaien op de vloer" zet je het schuin, bijvoorbeeld in een hoek.
 

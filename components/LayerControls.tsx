@@ -2,6 +2,7 @@
 
 import { centroid, rectQuad, rotateQuad, turnQuad } from "@/lib/geometry";
 import { FLOOR_PRESETS } from "@/lib/textures";
+import { isLowMemoryDevice } from "@/lib/worker";
 import type { CutoutMode, EraseLayer, Layer, Product, ProductLayer, SurfaceFill, SurfaceLayer } from "@/lib/types";
 import { fillFor, SURFACE_CATEGORIES, surfaceDefaults } from "@/lib/layers";
 
@@ -26,7 +27,7 @@ export function LayerControls({ layer, products, floors, cutoutState, onChange, 
       <div className="layer-controls row wrap">
         <strong>{layer.label ?? "Weggegumd"}</strong>
         <select value={layer.method} onChange={(e) => onChange({ method: e.target.value as EraseLayer["method"] })}>
-          <option value="ai">AI-gum (LaMa, mooiste resultaat)</option>
+          <option value="ai">AI-gum (mooiste resultaat)</option>
           <option value="simple">Snel (vervagen vanuit de omgeving)</option>
         </select>
         {!layer.mask && <span className="muted small">Versleep de punten om het gebied aan te passen.</span>}
@@ -37,6 +38,7 @@ export function LayerControls({ layer, products, floors, cutoutState, onChange, 
     );
   }
 
+  const lowMemory = isLowMemoryDevice();
   const order = (
     <>
       <button onClick={() => onReorder(-1)} title="Naar achteren">
@@ -66,7 +68,10 @@ export function LayerControls({ layer, products, floors, cutoutState, onChange, 
             Achtergrond
             <select value={layer.cutout} onChange={(e) => onChange({ cutout: e.target.value as CutoutMode })}>
               <option value="simple">Weghalen (snel)</option>
-              <option value="ai">Weghalen met AI (nauwkeurig)</option>
+              {/* RMBG works at 1024×1024 and needs more memory than iPad Safari allows. */}
+              <option value="ai" disabled={lowMemory}>
+                Weghalen met AI (nauwkeurig){lowMemory ? " – niet op dit apparaat" : ""}
+              </option>
               <option value="off">Laten staan</option>
             </select>
           </label>
