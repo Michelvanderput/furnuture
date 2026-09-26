@@ -39,6 +39,17 @@ Let op: de voorwaarden van Funda staan geautomatiseerd ophalen niet toe. Voor pe
 
 ## AI in de visualizer
 
+### ☁️ Gratis AI-server (aanrader voor de iPad)
+
+Een iPad-tabblad heeft weinig geheugen; AI-modellen in Safari kunnen het laten vastlopen.
+Met een eigen, gratis **Hugging Face Space** (map [`ai-server`](ai-server/README.md), CPU basic,
+16 GB) draait alle AI daar: de iPad stuurt alleen een foto en krijgt een masker of beeld terug.
+Bovendien sterkere modellen (SegFormer-B5, SAM ViT-B, LaMa). Opzetten in ± 5 minuten, zie
+[`ai-server/README.md`](ai-server/README.md); daarna de link plakken in **⋯ Project → ☁️ AI-server**
+(of voor alle apparaten `NEXT_PUBLIC_AI_SERVER` in Vercel). Een slapende Space wordt vanzelf
+wakker gemaakt; is hij onbereikbaar, dan valt de app terug op de AI in de browser.
+
+
 Alles hieronder draait gratis in de browser van de gebruiker (geen server, geen API-sleutel). Modellen worden één keer gedownload en daarna door de browser bewaard.
 
 | Functie | Model | Download | Licentie |
@@ -110,7 +121,7 @@ Grenzen: een productfoto laat één kant zien, dus de zijkant van een meubel wor
 
 - **Tik op een meubel**: SlimSAM (een lichte "Segment Anything", ± 15 MB) omlijnt precies wat je aantikt. Is de kamer herkend, dan krijgt SAM extra tikpunten verspreid over het herkende meubel en wordt het resultaat samengevoegd met de herkenning, gaten gevuld en losse vlekjes weggehaald — zo wordt de hele bank geselecteerd en niet één kussen. Met ➕/➖ tik je stukken erbij of eraf; met de 🖌️/🧽 kwast (instelbare grootte) veeg je randen precies bij. De foto wordt één keer geanalyseerd, daarna is elke tik snel. Het werkproces sluit zichzelf na 90 seconden zonder gebruik.
 - **Betere herkenning**: overal SegFormer-B2; kussens en plaids worden bij de bank of het bed gevoegd, stukken van één meubel samengevoegd en gaten gedicht. Kleine spullen die duidelijk ergens op staan (een vaas, een fles, een dienblad op een tafel of kast) gaan ook mee: weg je de tafel, dan verdwijnt de vaas niet zwevend achter — die was namelijk het bekende, onrealistische resultaat zonder deze koppeling. Ook herkent de app nu oven, magnetron, vaatwasser, openhaard en bar als meubel-achtige objecten.
-- **Crash-vangnet**: loopt een tabblad vast op een AI-taak (iPad met te weinig geheugen), dan meldt de app dat bij de volgende start en zet hij de **lichte AI-modus** aan (kleinere modellen en beelden). In het Project-menu aan en uit te zetten.
+- **Crash-vangnet**: op iPad/iPhone staat de **lichte AI-modus** standaard aan (kleinste modellen, nooit WebGPU). Loopt een tabblad toch vast op een AI-taak, dan meldt de app dat bij de volgende start en zet hij de lichte modus aan. Gebeurt het ook dan nog, dan gaat alleen díe AI-stap uit op dat apparaat en gebruikt de app de variant zonder AI (gummen met content-aware fill, selecteren met de herkenning en de kwast) — zo kan hij nooit in een lus blijven crashen. In het Project-menu: "AI op dit apparaat opnieuw proberen".
 
 ### Weggummen zonder AI: wat het wel en niet goed kan
 

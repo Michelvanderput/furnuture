@@ -1,7 +1,7 @@
 import { ROOMS } from "./categories";
 import { canvasToUrl } from "./images";
 import type { RoomType } from "./types";
-import { imagePixels, pixelsToCanvas, runAi, type Img, type Progress } from "./worker";
+import { imagePixels, isLightMode, pixelsToCanvas, runAi, type Img, type Progress } from "./worker";
 
 /**
  * Free, in-browser AI (transformers.js / onnxruntime-web). Every job runs in its
@@ -23,7 +23,8 @@ export async function classifyRooms(
   for (const p of photos) images.push(await imagePixels(p.url, 256));
   const best = await runAi<string[]>(
     // ViT-B/16 looks at 4× more patches than B/32 (same download size): noticeably better at telling rooms apart.
-    { task: "classify", images, labels: LABELED.map((r) => r.clip), models: ["Xenova/clip-vit-base-patch16", "Xenova/clip-vit-base-patch32"] },
+    // Light mode (iPad): B/32 only, which needs a quarter of the memory while running.
+    { task: "classify", images, labels: LABELED.map((r) => r.clip), models: isLightMode() ? ["Xenova/clip-vit-base-patch32"] : ["Xenova/clip-vit-base-patch16", "Xenova/clip-vit-base-patch32"] },
     onProgress,
     images.map((i) => i.data.buffer),
   );

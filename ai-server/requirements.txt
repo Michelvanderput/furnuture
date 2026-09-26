@@ -1,0 +1,10 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.20
+pillow==11.0.0
+numpy==1.26.4
+transformers==4.46.3
+huggingface_hub==0.26.5
+onnxruntime==1.20.1
+# RMBG-1.4 (product cut-out) runs custom model code that needs these:
+scikit-image==0.24.0

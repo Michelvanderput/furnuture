@@ -2,6 +2,7 @@ import { polygonMask } from "./masks";
 import { project } from "./geometry";
 import { imageToPlane, PLANE, planeToImage } from "./plane";
 import type { Pt, Quad } from "./types";
+import { cloudUrl } from "./cloud";
 import { isLightMode, isLowMemoryDevice, runAi, type Img, type Progress } from "./worker";
 
 /** Largest crop sent to the AI: MI-GAN works at 512 px internally, more only costs memory. */
@@ -133,12 +134,15 @@ function resized(image: Img, hole: Uint8Array, w: number, h: number): { image: I
 
 /** Removes the masked area with AI in a worker: LaMa on computers, MI-GAN on iPad (and as fallback). */
 export function aiInpaint(canvas: HTMLCanvasElement, mask: Uint8Array, onProgress?: Progress): Promise<void> {
-  const migan = (image: Img, hole: Uint8Array) => {
-    // MI-GAN: 255 = keep, 0 = remove.
+  // MI-GAN on this device, or whatever the AI server runs (LaMa).
+  const plain = (image: Img, hole: Uint8Array) => {
+    // 255 = keep, 0 = remove.
     const keep = hole.map((v) => (v ? 0 : 255));
     return runAi<Img>({ task: "inpaint", image, mask: keep }, onProgress, [image.data.buffer, keep.buffer]);
   };
-  return cropInpaint(canvas, mask, maxCrop(), async (image, hole) => {
+  return cropInpaint(canvas, mask, cloudUrl() ? 1024 : maxCrop(), async (image, hole) => {
+    // On the AI server (LaMa there) the crop goes as it is.
+    if (cloudUrl()) return plain(image, hole);
     if (inpaintModel() === "lama") {
       try {
         // LaMa takes a fixed 512×512 input; the result is scaled back to the crop.
@@ -150,7 +154,7 @@ export function aiInpaint(canvas: HTMLCanvasElement, mask: Uint8Array, onProgres
         console.warn("LaMa failed, using MI-GAN", e);
       }
     }
-    return migan(image, hole);
+    return plain(image, hole);
   });
 }
 

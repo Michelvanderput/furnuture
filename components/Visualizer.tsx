@@ -34,7 +34,7 @@ import { newId } from "@/lib/useProject";
 import { fetchProduct, sameLink } from "@/lib/products";
 import { designList } from "@/lib/shopping";
 import { useSceneEditor } from "@/lib/useSceneEditor";
-import { isLowMemoryDevice } from "@/lib/worker";
+import { heavyAiAllowed } from "@/lib/worker";
 import { Img } from "./Img";
 import { LayerControls, type LayerPatch } from "./LayerControls";
 import { PlanItemControls } from "./PlanItemControls";
@@ -419,7 +419,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
    * device can handle it.
    */
   async function makeCutout(image: string, mode: ProductLayer["cutout"], tolerance: number): Promise<string> {
-    const ai = !isLowMemoryDevice();
+    const ai = heavyAiAllowed();
     const cacheKey = (m: string) => `cut2:${m}:${fingerprintOf(image)}`; // cut2: packshot shadows kept as soft shadows
     const fromCache = async (m: string) => {
       const blob = await getCached<Blob>(cacheKey(m));

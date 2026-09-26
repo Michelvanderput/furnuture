@@ -6,7 +6,9 @@ import { ListingPanel } from "@/components/ListingPanel";
 import { backupBlob, backupFileName, readBackup } from "@/lib/backup";
 import { shareOrDownload } from "@/lib/exportImage";
 import { useProject } from "@/lib/useProject";
-import { isLightMode, setLightMode, takeCrashReport } from "@/lib/worker";
+import { anyDeviceAiOff, isLightMode, resetDeviceAi, setLightMode, takeCrashReport } from "@/lib/worker";
+import { AiServerSetting } from "@/components/AiServerSetting";
+import { cloudUrl } from "@/lib/cloud";
 
 // Loaded when the tab is first opened: a faster first start, especially on an iPad.
 const ProductsPanel = dynamic(() => import("@/components/ProductsPanel").then((m) => m.ProductsPanel), {
@@ -45,14 +47,18 @@ export default function Home() {
   const [tab, setTab] = useState<Tab>("woning");
   const [photoId, setPhotoId] = useState<string | null>(null);
   const [menuMessage, setMenuMessage] = useState("");
-  const [crashed, setCrashed] = useState<string | null>(null);
+  const [crashed, setCrashed] = useState<{ label: string; switchedOff: boolean } | null>(null);
   const [light, setLight] = useState(false);
+  const [aiOff, setAiOff] = useState(false);
+  const [cloud, setCloud] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Did an AI job take the tab down last time (iPad out of memory)? Then use the light models.
   useEffect(() => {
     setCrashed(takeCrashReport());
     setLight(isLightMode());
+    setAiOff(anyDeviceAiOff());
+    setCloud(!!cloudUrl());
   }, []);
 
   // Safari reloads background tabs; come back where you were.
@@ -116,6 +122,19 @@ export default function Home() {
                 />
                 Lichte AI-modus
               </label>
+              {aiOff && (
+                <button
+                  onClick={() => {
+                    resetDeviceAi();
+                    setAiOff(false);
+                    setMenuMessage("AI op dit apparaat staat weer aan.");
+                  }}
+                  title="AI die de app liet vastlopen staat uit; hiermee probeer je het opnieuw"
+                >
+                  🔁 AI op dit apparaat opnieuw proberen
+                </button>
+              )}
+              <AiServerSetting onChange={(on) => setCloud(on)} />
               <p className="muted small">
                 Alles wordt alleen op dit apparaat bewaard. Met een back-up zet je het over naar een ander apparaat of deel je het met je
                 partner.
@@ -137,8 +156,18 @@ export default function Home() {
       {crashed && (
         <div className="banner" role="status">
           <span>
-            De app is de vorige keer gestopt tijdens {crashed} — waarschijnlijk had het apparaat te weinig geheugen. De{" "}
-            <strong>lichte AI-modus</strong> staat nu aan (kleinere modellen). Je werk is bewaard.
+            De app is de vorige keer gestopt tijdens {crashed.label} — het apparaat had te weinig geheugen. Je werk is bewaard.{" "}
+            {crashed.switchedOff ? (
+              <>
+                Die AI-stap staat nu <strong>uit op dit apparaat</strong>, zodat het niet opnieuw gebeurt; de app gebruikt de variant zonder
+                AI.
+              </>
+            ) : (
+              <>
+                De <strong>lichte AI-modus</strong> staat nu aan (kleinere modellen).
+              </>
+            )}{" "}
+            {!cloud && <>Wil je de volle AI zonder risico? Zet in het Project-menu een gratis AI-server aan: dan rekent de iPad niets zwaars meer.</>}
           </span>
           <button className="ghost" onClick={() => setCrashed(null)} aria-label="Sluiten">
             ✕

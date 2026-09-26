@@ -6,7 +6,7 @@ import { fillFor, SURFACE_CATEGORIES, surfaceDefaults } from "@/lib/layers";
 import { formatCm, type FloorMetric } from "@/lib/metric";
 import { FLOOR_PRESETS } from "@/lib/textures";
 import type { CutoutMode, EraseLayer, Layer, MeasureLayer, Product, ProductLayer, SurfaceFill, SurfaceLayer } from "@/lib/types";
-import { isLowMemoryDevice } from "@/lib/worker";
+import { heavyAiAllowed } from "@/lib/worker";
 
 export type LayerPatch = Partial<ProductLayer> | Partial<SurfaceLayer> | Partial<EraseLayer> | Partial<MeasureLayer>;
 
@@ -105,7 +105,7 @@ export function LayerControls({
     );
   }
 
-  const lowMemory = isLowMemoryDevice();
+  const lowMemory = !heavyAiAllowed();
   const order = (
     <>
       <button onClick={onDuplicate} title="Dupliceren (⌘/Ctrl + D)">
