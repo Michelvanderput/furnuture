@@ -22,6 +22,7 @@ export function migrateLayer(raw: Layer | Legacy): Layer {
     };
   }
   if (l.kind === "product" && typeof l.cutout === "boolean") return { ...(l as unknown as Layer), cutout: l.cutout ? "simple" : "off" } as Layer;
+  if (l.kind === "erase" && !l.method) return { ...(l as unknown as Layer), method: "simple" } as Layer;
   if (l.kind === "surface" && l.crop === undefined) {
     return { ...(l as unknown as Layer), perspective: (l.points as unknown[]).length === 4, crop: 1 } as Layer;
   }

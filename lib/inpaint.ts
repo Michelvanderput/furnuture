@@ -1,5 +1,8 @@
+import type { Progress } from "./ai";
 import { loadImage, proxied } from "./images";
-import type { Pt } from "./types";
+import { lamaInpaint } from "./lama";
+import { dilate, ensureMask, polygonMask } from "./masks";
+import type { EraseLayer } from "./types";
 
 /**
  * Fills a masked area from its surroundings with a push-pull pyramid (no AI):
@@ -86,8 +89,16 @@ export function pushPullFill(rgb: Uint8ClampedArray, mask: Uint8Array, w: number
   }
 }
 
-/** Returns the photo with the given polygons painted out, as a JPEG data URL. */
-export async function erasePolygons(photoUrl: string, polygons: Pt[][]): Promise<string> {
+/**
+ * Returns the photo with every erase layer painted out, as a JPEG data URL.
+ * AI layers use LaMa; if that cannot run (download blocked, too little memory)
+ * they fall back to the push-pull fill.
+ */
+export async function renderErased(
+  photoUrl: string,
+  layers: EraseLayer[],
+  onProgress?: Progress,
+): Promise<{ url: string; aiFailed: boolean }> {
   const img = await loadImage(proxied(photoUrl));
   const w = img.naturalWidth;
   const h = img.naturalHeight;
@@ -95,27 +106,26 @@ export async function erasePolygons(photoUrl: string, polygons: Pt[][]): Promise
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
-
-  // Rasterise the mask (slightly grown, so object outlines disappear too).
-  ctx.fillStyle = "#000";
-  ctx.strokeStyle = "#000";
-  ctx.lineWidth = Math.max(4, w / 250);
-  ctx.lineJoin = "round";
-  for (const poly of polygons) {
-    ctx.beginPath();
-    poly.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-  }
-  const maskData = ctx.getImageData(0, 0, w, h).data;
-  const mask = new Uint8Array(w * h);
-  for (let i = 0; i < w * h; i++) mask[i] = maskData[i * 4 + 3] > 0 ? 1 : 0;
-
-  ctx.clearRect(0, 0, w, h);
   ctx.drawImage(img, 0, 0);
-  const photo = ctx.getImageData(0, 0, w, h);
-  pushPullFill(photo.data, mask, w, h);
-  ctx.putImageData(photo, 0, 0);
-  return canvas.toDataURL("image/jpeg", 0.92);
+  let aiFailed = false;
+
+  for (const layer of layers) {
+    const area = layer.mask ? await ensureMask(layer.mask, w, h) : polygonMask(layer.points, w, h);
+    // Grow the area a little so outlines and contact shadows go too.
+    const mask = dilate(area, w, h, Math.round(Math.max(3, w / 200)));
+    if (layer.method === "ai") {
+      try {
+        await lamaInpaint(canvas, mask, onProgress);
+        continue;
+      } catch (e) {
+        console.warn("LaMa failed, using simple fill", e);
+        aiFailed = true;
+      }
+    }
+    const photo = ctx.getImageData(0, 0, w, h);
+    pushPullFill(photo.data, mask, w, h);
+    ctx.putImageData(photo, 0, 0);
+  }
+  onProgress?.("");
+  return { url: canvas.toDataURL("image/jpeg", 0.92), aiFailed };
 }

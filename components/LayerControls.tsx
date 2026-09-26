@@ -8,8 +8,11 @@ import { fillFor, SURFACE_CATEGORIES, surfaceDefaults } from "@/lib/layers";
 interface Props {
   layer: Layer;
   products: Product[];
+  /** Floors in this photo that furniture can stand on. */
+  floors: SurfaceLayer[];
   cutoutState?: string;
   onChange: (patch: Partial<ProductLayer> | Partial<SurfaceLayer> | Partial<EraseLayer>) => void;
+  onPlaceOnFloor: (floorId: string) => void;
   onRemove: () => void;
   onReorder: (dir: number) => void;
 }
@@ -17,11 +20,16 @@ interface Props {
 const fillValue = (f: SurfaceFill) =>
   f.type === "color" ? `color:${f.color}` : f.type === "texture" ? `tex:${f.productId}` : `preset:${f.preset}`;
 
-export function LayerControls({ layer, products, cutoutState, onChange, onRemove, onReorder }: Props) {
+export function LayerControls({ layer, products, floors, cutoutState, onChange, onPlaceOnFloor, onRemove, onReorder }: Props) {
   if (layer.kind === "erase") {
     return (
       <div className="layer-controls row wrap">
-        <span className="muted small">Weggegumd gebied. Versleep de punten om het aan te passen.</span>
+        <strong>{layer.label ?? "Weggegumd"}</strong>
+        <select value={layer.method} onChange={(e) => onChange({ method: e.target.value as EraseLayer["method"] })}>
+          <option value="ai">AI-gum (LaMa, mooiste resultaat)</option>
+          <option value="simple">Snel (vervagen vanuit de omgeving)</option>
+        </select>
+        {!layer.mask && <span className="muted small">Versleep de punten om het gebied aan te passen.</span>}
         <button className="ghost" onClick={onRemove}>
           🗑 Terugzetten
         </button>
@@ -78,24 +86,48 @@ export function LayerControls({ layer, products, cutoutState, onChange, onRemove
           {cutoutState === "failed:plain" && <small className="error">Geen effen achtergrond — kies AI.</small>}
           {cutoutState === "failed" && <small className="error">Uitknippen mislukt.</small>}
         </div>
+        {layer.floor ? (
+          <div className="row wrap">
+            <span className="small">✅ Staat op de vloer: schuif hem naar achteren en hij wordt vanzelf kleiner.</span>
+            <label className="row" title="Draai het meubel op de vloer, bijvoorbeeld schuin in een hoek">
+              Draaien op de vloer
+              <input
+                type="range"
+                min={-60}
+                max={60}
+                value={layer.floor.angle}
+                onChange={(e) => onChange({ floor: { ...layer.floor!, angle: Number(e.target.value) } })}
+              />
+            </label>
+            <button onClick={() => onChange({ floor: undefined })}>Losmaken van vloer</button>
+          </div>
+        ) : (
+          <div className="row wrap">
+            {floors.length > 0 && (
+              <button className="primary" onClick={() => onPlaceOnFloor(floors.at(-1)!.id)} title="Perspectief en diepte volgen de vloer">
+                ⬇ Op de vloer zetten
+              </button>
+            )}
+            <label className="row" title="Sleep de hoeken los om het meubel schuin of de diepte in te zetten">
+              <input type="checkbox" checked={layer.distort} onChange={(e) => onChange({ distort: e.target.checked })} />
+              Hoeken los
+            </label>
+            <button onClick={() => onChange({ corners: turnQuad(c, "left"), distort: true })} title="Linkerkant de diepte in">
+              ◧ Links naar achteren
+            </button>
+            <button onClick={() => onChange({ corners: turnQuad(c, "right"), distort: true })} title="Rechterkant de diepte in">
+              ◨ Rechts naar achteren
+            </button>
+            <button onClick={() => onChange({ corners: rotateQuad(c, -4) })} title="Draaien">
+              ↺
+            </button>
+            <button onClick={() => onChange({ corners: rotateQuad(c, 4) })} title="Draaien">
+              ↻
+            </button>
+            <button onClick={straighten}>Recht zetten</button>
+          </div>
+        )}
         <div className="row wrap">
-          <label className="row" title="Sleep de hoeken los om het meubel schuin of de diepte in te zetten">
-            <input type="checkbox" checked={layer.distort} onChange={(e) => onChange({ distort: e.target.checked })} />
-            Hoeken los (perspectief)
-          </label>
-          <button onClick={() => onChange({ corners: turnQuad(c, "left"), distort: true })} title="Linkerkant de diepte in">
-            ◧ Links naar achteren
-          </button>
-          <button onClick={() => onChange({ corners: turnQuad(c, "right"), distort: true })} title="Rechterkant de diepte in">
-            ◨ Rechts naar achteren
-          </button>
-          <button onClick={() => onChange({ corners: rotateQuad(c, -4) })} title="Draaien">
-            ↺
-          </button>
-          <button onClick={() => onChange({ corners: rotateQuad(c, 4) })} title="Draaien">
-            ↻
-          </button>
-          <button onClick={straighten}>Recht zetten</button>
           <button onClick={() => onChange({ flip: !layer.flip })}>↔ Spiegelen</button>
           {order}
         </div>
@@ -156,8 +188,8 @@ export function LayerControls({ layer, products, cutoutState, onChange, onRemove
         {layer.fill.type === "color" && (
           <input type="color" value={layer.fill.color} onChange={(e) => onChange({ fill: { type: "color", color: e.target.value } })} />
         )}
-        {layer.points.length === 4 && isTexture && (
-          <label className="row" title="Leg de textuur in perspectief op de 4 hoeken">
+        {(layer.plane || layer.points.length === 4) && isTexture && (
+          <label className="row" title="Leg de textuur in perspectief; versleep de vierkante hoeken om de diepte bij te stellen">
             <input type="checkbox" checked={layer.perspective} onChange={(e) => onChange({ perspective: e.target.checked })} />
             Perspectief
           </label>

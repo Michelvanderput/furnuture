@@ -37,31 +37,31 @@ De website van Funda heeft botbescherming, en die blokkeert servers zoals die va
 
 Let op: de voorwaarden van Funda staan geautomatiseerd ophalen niet toe. Voor persoonlijk gebruik is de bookmarklet de netste route; voor een publieke app is dit een juridisch aandachtspunt.
 
-## Kan het meubels in de foto's vervangen?
+## AI in de visualizer
 
-Kort antwoord: **zonder AI kun je al veel** (dat zit er nu in). **Met gratis AI kan het slimmer**, maar echt fotorealistisch meubels vervangen vraagt een GPU.
+Alles hieronder draait gratis in de browser van de gebruiker (geen server, geen API-sleutel). Modellen worden één keer gedownload en daarna door de browser bewaard.
 
-**Zonder AI (nu gebouwd)**
-- Productfoto's als uitsnede op de kamerfoto slepen, schalen, draaien, spiegelen en met vier hoeken in perspectief zetten.
-- Muren en vloeren aanwijzen door hoeken te klikken. Vloeren liggen in perspectief bij vier hoeken.
-- Meubels van de vorige bewoners weggummen. Op effen muren en vloeren werkt dat goed, op drukke patronen wordt het wazig.
-- Beperkingen: een meubelfoto blijft een platte foto (je ziet nooit de zijkant) en er zijn geen echte schaduwen.
+| Functie | Model | Download | Licentie |
+|---|---|---|---|
+| Meubels, muren en vloer herkennen | SegFormer-B2 (ADE20K) via transformers.js | ± 30 MB | NVIDIA SegFormer-licentie (onderzoek/niet-commercieel) |
+| Meubels weggummen | LaMa (big-lama, ONNX) via onnxruntime-web, WebGPU of WebAssembly | ± 200 MB | Apache-2.0 |
+| Achtergrond van productfoto weghalen | RMBG-1.4 via transformers.js | ± 45 MB | Niet-commercieel |
+| Foto's per ruimte sorteren | CLIP ViT-B/32 via transformers.js | ± 90 MB | MIT |
 
-**Met gratis AI in de browser (volgende stap, zonder serverkosten)**
-- *Semantische segmentatie* (SegFormer ADE20K via transformers.js) herkent automatisch muur, vloer, plafond, bank, bed en kast. Dan klik je op "muur" in plaats van hem zelf te tekenen.
-- *Achtergrond verwijderen* (RMBG-1.4): zit er nu in als optie "Weghalen met AI". RMBG-1.4 is gratis voor niet-commercieel gebruik; voor een commerciële app kies je BiRefNet (MIT).
-- *Diepte-schatting* (Depth Anything) voor de juiste grootte en het perspectief van meubels en vloeren.
-- *Object-verwijdering* (LaMa-inpainting) haalt de meubels van de vorige bewoners uit de foto.
+Zo werkt het:
 
-**Met generatieve AI (open modellen, gratis te draaien, maar wel een GPU nodig)**
-- Stable Diffusion XL / FLUX-inpainting met ControlNet (diepte) en IP-Adapter: het echte product fotorealistisch in de kamer, inclusief licht en schaduw ("virtual staging").
-- Gratis testen kan via Hugging Face Spaces, met wachtrijen en limieten. In productie kost dit ongeveer €0,01–0,05 per beeld (bijvoorbeeld via Replicate of fal.ai), of je draait het zelf op een eigen GPU.
-- Het resultaat lijkt op het product, maar is geen exacte kopie. Daarom is de aanpak van nu (echte productfoto's als laag) juist handig om keuzes te maken.
+1. **✨ Herken meubels, muren & vloer**: elke pixel krijgt een klasse (bank, stoel, muur, vloer…). Meubels en muren worden losse objecten die je aanklikt.
+2. **Weghalen met AI**: LaMa vult het object op met wat erachter hoort. Omdat het werkt op een uitsnede rond het object, blijft de kwaliteit hoog. Lukt de AI niet (download geblokkeerd, te weinig geheugen), dan valt hij terug op de snelle gum.
+3. **Nieuwe vloer / verven**: uit het vloer- of muurmasker wordt automatisch een perspectiefvlak berekend. Randen die door meubels verborgen zijn, tellen niet mee. De textuur loopt mee met de diepte; de oranje hoekjes stellen het vlak bij. Een nieuwe vloer of muur bedekt ook de plek waar weggegumde meubels stonden.
+4. **Meubels op de vloer**: staat er een vloer in de foto, dan wordt een nieuw meubel erop gezet. Schuif je het naar achteren, dan wordt het vanzelf kleiner; met "Draaien op de vloer" zet je het schuin, bijvoorbeeld in een hoek.
+
+### Grenzen en de volgende stap
+
+Een productfoto blijft een foto van één kant: schuin zetten vervormt hem, maar laat nooit de zijkant zien, en er komt geen echte schaduw. Daarvoor is **generatieve beeld-AI** nodig die de kamerfoto en de productfoto samen opnieuw tekent (bijvoorbeeld Gemini Image, FLUX Kontext of GPT Image). Die modellen draaien niet in de browser, dus dat wordt een betaalde API (enkele centen per beeld) met een API-sleutel op de server.
 
 ## Mogelijke volgende stappen
 
-- [ ] SegFormer-segmentatie: klik op een muur of vloer in plaats van hem te tekenen
-- [ ] AI-weggummen (LaMa) voor drukke achtergronden
+- [ ] Knop "Maak fotorealistisch" met generatieve beeld-AI (licht, schaduw, echte draaiing)
 - [ ] Visualisatie exporteren als afbeelding en een project delen met je partner
 - [ ] Browserextensie of deel-knop op de telefoon ("Delen → furnuture") om producten toe te voegen
 - [ ] Budget per ruimte en afmetingen van producten tegenover de plattegrond

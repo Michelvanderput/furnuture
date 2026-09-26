@@ -85,6 +85,20 @@ export interface ProductLayer {
   tolerance: number;
   /** Corner handles move individually (perspective) instead of scaling. */
   distort: boolean;
+  /** Standing on a floor: corners follow the floor's perspective and depth. */
+  floor?: FloorAnchor;
+}
+
+export interface FloorAnchor {
+  /** Id of the surface layer whose plane the product stands on. */
+  planeId: string;
+  /** Middle of the product's bottom edge, in plane units (0..1000). */
+  u: number;
+  v: number;
+  /** Width in plane units. */
+  width: number;
+  /** Rotation on the floor in degrees (0 = facing the camera). */
+  angle: number;
 }
 
 export type SurfaceFill =
@@ -107,6 +121,11 @@ export interface SurfaceLayer {
   perspective: boolean;
   /** Part of a product photo used as texture (1 = whole image, 0.3 = centre 30%). */
   crop: number;
+  /** AI-detected area: PNG whose alpha is the area (used instead of points). */
+  mask?: string;
+  /** Perspective plane (top-left, top-right, bottom-right, bottom-left); defaults to the 4 points. */
+  plane?: Quad;
+  role?: "floor" | "wall";
 }
 
 /** An area of the photo that is painted out (existing furniture removed). */
@@ -114,6 +133,11 @@ export interface EraseLayer {
   kind: "erase";
   id: string;
   points: Pt[];
+  /** AI-detected object: PNG whose alpha is the area to erase (used instead of points). */
+  mask?: string;
+  /** "ai" = LaMa inpainting, "simple" = fill from the surroundings. */
+  method: "ai" | "simple";
+  label?: string;
 }
 
 export type Layer = ProductLayer | SurfaceLayer | EraseLayer;
