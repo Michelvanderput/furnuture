@@ -122,6 +122,20 @@ Grenzen: een productfoto laat één kant zien, dus de zijkant van een meubel wor
 - **Plakknoppen** voor links (handig op iPad), **back-up** downloaden/terugzetten via het Project-menu, installeerbaar als app (**Zet op beginscherm**).
 - **Snelheid**: tijdens slepen wordt alleen de visualizer bijgewerkt (één keer per schermverversing) en pas bij loslaten opgeslagen; foto's komen direct van Funda/de shop (de server is alleen reserve) en in overzichten in kleinere maten; beelden via de server worden door Vercel's CDN bewaard; vloertexturen worden gemaakt als de browser niets te doen heeft; de tabbladen Producten en Inrichten laden pas als je ze opent; opslaan gebeurt ook direct als je de app verlaat, en de app vraagt de browser om de gegevens te bewaren.
 
+## Inrichten met meubels van internet
+
+- **Link plakken in Inrichten**: plak een productlink rechtsboven; het product wordt opgehaald, bij Producten gezet (met de ruimte van de foto) en meteen in de kamer gezet. Een vloer, verf of behang wordt als vlak toegepast. Een link die er al is, wordt hergebruikt.
+- **In dit ontwerp**: welke producten in deze foto staan, hoe vaak, met prijs, een link naar de winkel en het totaal. Verf en vloeren tellen één keer. Met "Alles favoriet" komen ze op je boodschappenlijst.
+- **Zoeken en per ruimte**: bij meer dan 6 meubels een zoekveld; producten voor deze ruimte eerst, of alleen die.
+- **Eigen productfoto**: blokkeert een webshop het ophalen, of is de foto een sfeerfoto, kies dan een eigen foto of screenshot op de productkaart (📷).
+- **Automatisch AI-uitknippen**: vindt de snelle uitsnede geen effen achtergrond, dan knipt de AI het meubel uit (niet op iPad/iPhone).
+
+## Opslaan en AI zonder crashes
+
+- **Opslaan per onderdeel**: woning, producten, plattegronden en het ontwerp van elke foto zijn losse records. Alleen wat veranderde wordt geschreven, als de browser even niets te doen heeft (en direct bij het verlaten van de app). Oude opslag wordt bij de eerste keer omgezet.
+- **AI-uitkomsten worden bewaard**: uitsnedes, gegumde foto's en kamerherkenningen staan in een eigen cache (maximaal 300 stuks / 250 MB, de oudste gaan eerst). Een foto die je opnieuw opent, toont zijn herkende objecten en gegumde versie direct, zonder AI.
+- **Eén AI-taak tegelijk**: taken wachten op elkaar in plaats van tegelijk modellen te laden. Opeenvolgende taken van dezelfde soort (drie uitsnedes) delen één geladen model; bij een andere soort, of kort na de laatste, wordt de worker gesloten zodat het geheugen echt vrijkomt. Op iPad wordt ook de selecteer-AI gesloten voordat een ander model start.
+
 ## Mogelijke volgende stappen
 
 - [ ] Visualisatie exporteren als afbeelding en een project delen met je partner

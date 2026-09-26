@@ -6,15 +6,16 @@ import { exportFileName } from "@/lib/backup";
 import { renderDesign, shareOrDownload } from "@/lib/exportImage";
 import { centroid, pointInPolygon, project as projectPoint, quadToMatrix3d, rectQuad } from "@/lib/geometry";
 import { cropCenter, loadImage, NoPlainBackground, proxied, releaseUrl, removeBackground } from "@/lib/images";
-import { renderErased } from "@/lib/inpaint";
+import { eraseLayerId, renderErased } from "@/lib/inpaint";
+import { fingerprintOf, getCached, putCached } from "@/lib/aiCache";
 import {
-  cutoutKey,
   floorMetric,
   isFloor,
   placeOnFloor,
   planeOf,
   rulerOf,
   SURFACE_CATEGORIES,
+  fillFor,
   surfaceDefaults,
 } from "@/lib/layers";
 import { workSize } from "@/lib/labels";
@@ -25,10 +26,12 @@ import { defaultSize, planForPhoto, plansOf, updateItem, updatePlan } from "@/li
 import { photoLook, productFilter } from "@/lib/look";
 import { loadHitMask, maskHit, maskToDataUrl, polygonMask, rememberMask } from "@/lib/masks";
 import { fitFloorQuad, fitWallQuad, imageToPlane, PLANE, planeToImage } from "@/lib/plane";
-import { furnitureMask, segmentMask, segmentRoom, type RoomSegmentation, type Segment, type SegmentKind } from "@/lib/segment";
+import { cachedSegmentation, furnitureMask, segmentMask, segmentRoom, type RoomSegmentation, type Segment, type SegmentKind } from "@/lib/segment";
 import { presetTexture } from "@/lib/textures";
 import type { EraseLayer, FloorAnchor, Layer, MeasureLayer, Product, ProductLayer, Project, Pt, Quad, SurfaceFill, SurfaceLayer } from "@/lib/types";
 import { newId } from "@/lib/useProject";
+import { fetchProduct, sameLink } from "@/lib/products";
+import { designList } from "@/lib/shopping";
 import { useSceneEditor } from "@/lib/useSceneEditor";
 import { isLowMemoryDevice } from "@/lib/worker";
 import { Img } from "./Img";
@@ -75,6 +78,13 @@ type Drag =
 
 // Room recognition results live in memory only (a few seconds to recompute).
 const segmentations = new Map<string, RoomSegmentation>();
+/** Keeps the most recent photos' recognition in memory (each is ~1 MB); older ones come from the cache. */
+function rememberSegmentation(photoId: string, seg: RoomSegmentation) {
+  segmentations.delete(photoId);
+  segmentations.set(photoId, seg);
+  while (segmentations.size > 6) segmentations.delete(segmentations.keys().next().value!);
+}
+
 // Mask PNGs for drawn erase areas, so floors and walls can also cover them.
 // Made at working size (CSS scales them) and bounded: they used to be photo-sized and kept forever.
 const polygonMaskUrls = new Map<string, string>();
@@ -89,29 +99,6 @@ function polygonMaskUrl(points: Pt[], w: number, h: number): string {
     while (polygonMaskUrls.size > 30) polygonMaskUrls.delete(polygonMaskUrls.keys().next().value!);
   }
   return url;
-}
-
-/**
- * Short identity of an erase layer. Layers are immutable, so this is cached per
- * object: stringifying every mask PNG on each render (60× a second while
- * dragging) used to churn through megabytes of strings.
- */
-const eraseKeys = new WeakMap<EraseLayer, string>();
-let eraseSeq = 0;
-const eraseContent = new Map<string, string>();
-function eraseLayerKey(l: EraseLayer): string {
-  let key = eraseKeys.get(l);
-  if (!key) {
-    const content = `${l.method}:${l.mask ?? JSON.stringify(l.points.map((p) => p.map(Math.round)))}`;
-    key = eraseContent.get(content);
-    if (!key) {
-      key = `e${++eraseSeq}`;
-      eraseContent.set(content, key);
-      while (eraseContent.size > 100) eraseContent.delete(eraseContent.keys().next().value!);
-    }
-    eraseKeys.set(l, key);
-  }
-  return key;
 }
 
 /** Natural size of a photo, loaded directly (fast) with the proxy as fallback. */
@@ -137,6 +124,9 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   );
   const photo = photos.find((p) => p.id === photoId) ?? photos[0];
   const editor = useSceneEditor(photo?.id, project, update);
+  const productById = useMemo(() => new Map(project.products.map((p) => [p.id, p])), [project.products]);
+  const photoIdRef = useRef(photo?.id);
+  photoIdRef.current = photo?.id;
   const { layers, setLayers } = editor;
 
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
@@ -177,6 +167,15 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     setLinking(false);
     setNotice("");
     setSegmentation(photo ? (segmentations.get(photo.id) ?? null) : null);
+    // Recognised before (another visit)? Show the objects right away, without AI.
+    if (photo && !segmentations.has(photo.id)) {
+      const id = photo.id;
+      cachedSegmentation(photo.url).then((seg) => {
+        if (!seg) return;
+        rememberSegmentation(id, seg);
+        setSegmentation((cur) => cur ?? (photoIdRef.current === id ? seg : null));
+      });
+    }
     selector.current?.close();
     if (!photo) return;
     measure(photo.url)
@@ -205,18 +204,25 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
 
   // Cut-outs and textures that no scene uses any more (an old tolerance, a deleted
   // layer) are freed; they used to pile up for as long as the tab was open.
+  /** Cut-out identity: product, method and the product photo (choosing another photo makes a new cut-out). */
+  const cutKey = (productId: string, l: { cutout: ProductLayer["cutout"]; tolerance: number }) => {
+    const image = productById.get(productId)?.image ?? "";
+    return `${l.cutout === "ai" ? "ai" : `simple:${l.tolerance}`}:${productId}:${fingerprintOf(image)}`;
+  };
+  const layerCutKey = (l: ProductLayer) => cutKey(l.productId, l);
+
   const usedImages = useMemo(() => {
     const keys = new Set<string>();
     for (const l of [...Object.values(project.scenes).flatMap((sc) => sc.layers), ...layers]) {
-      if (l.kind === "product" && l.cutout !== "off") keys.add(cutoutKey(l));
+      if (l.kind === "product" && l.cutout !== "off") keys.add(layerCutKey(l));
       if (l.kind === "surface" && l.fill.type === "texture") keys.add(`${l.fill.productId}:${l.crop}`);
     }
     // Furniture on the floor plans is cut out the same way (see planLayersFor).
     for (const it of (project.plans ?? []).flatMap((pl) => pl.items)) {
-      if (it.cutout !== "off") keys.add(it.cutout === "ai" ? `${it.productId}:ai` : `${it.productId}:simple:${it.tolerance}`);
+      if (it.cutout !== "off") keys.add(cutKey(it.productId, it));
     }
     return keys;
-  }, [project.scenes, project.plans, layers]);
+  }, [project.scenes, project.plans, layers, productById]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const prune = (map: Record<string, string>) => {
       const stale = Object.keys(map).filter((k) => !usedImages.has(k));
@@ -262,7 +268,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     () => layers.filter((l): l is EraseLayer => l.kind === "erase" && (!!l.mask || l.points.length >= 3)),
     [layers],
   );
-  const eraseKey = useMemo(() => eraseLayers.map(eraseLayerKey).join("|"), [eraseLayers]);
+  const eraseKey = useMemo(() => eraseLayers.map(eraseLayerId).join("|"), [eraseLayers]);
   useEffect(() => {
     if (!photo || !eraseKey) return;
     let cancelled = false;
@@ -293,7 +299,6 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   };
 
   const floors = useMemo(() => layers.filter(isFloor), [layers]);
-  const productById = useMemo(() => new Map(project.products.map((p) => [p.id, p])), [project.products]);
   const products = useMemo(() => project.products.filter((p) => p.status !== "afgewezen" && (p.image || p.color)), [project.products]);
   const furniture = useMemo(() => products.filter((p) => p.image && !SURFACE_CATEGORIES.has(p.category)), [products]);
   const surfaces = useMemo(() => products.filter((p) => SURFACE_CATEGORIES.has(p.category)), [products]);
@@ -330,6 +335,14 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   );
   const allLayers = useMemo(() => [...layers, ...planLayers], [layers, planLayers]);
 
+  // Products in this design. Keyed on the ids, so dragging does not re-render the palette.
+  const designIds = allLayers
+    .map((l) => (l.kind === "product" ? l.productId : l.kind === "surface" && l.fill.type === "texture" ? l.fill.productId : ""))
+    .filter(Boolean)
+    .sort()
+    .join(",");
+  const design = useMemo(() => designList(designIds ? designIds.split(",") : [], project.products), [designIds, project.products]);
+
   // Background-free product images (simple colour flood fill, or AI). Started after
   // a short pause, so dragging the tolerance slider does not start a job per step.
   useEffect(() => {
@@ -340,28 +353,54 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   function startCutouts() {
     for (const layer of allLayers) {
       if (layer.kind !== "product" || layer.cutout === "off") continue;
-      const key = cutoutKey(layer);
+      const key = layerCutKey(layer);
       if (cutouts[key]) continue;
-      const product = project.products.find((p) => p.id === layer.productId);
+      const product = productById.get(layer.productId);
       if (!product?.image) continue;
       setCutouts((c) => ({ ...c, [key]: "pending" }));
-      // The AI cut-out is too heavy for iPad Safari: use the simple one there.
-      const job =
-        layer.cutout === "ai" && !isLowMemoryDevice()
-          ? removeBackgroundAI(product.image, setStatus).finally(() => setStatus(""))
-          : removeBackground(product.image, layer.tolerance);
-      job
-        .then((png) =>
+      makeCutout(product.image, layer.cutout, layer.tolerance)
+        .then((url) =>
           setCutouts((c) => {
-            if (!(key in c)) return (releaseUrl(png), c); // no longer needed
+            if (!(key in c)) return (releaseUrl(url), c); // no longer needed
             releaseUrl(c[key]);
-            return { ...c, [key]: png };
+            return { ...c, [key]: url };
           }),
         )
-        .catch((e) => setCutouts((c) => ({ ...c, [key]: e instanceof NoPlainBackground ? "failed:plain" : "failed" })));
+        .catch((e) => setCutouts((c) => (key in c ? { ...c, [key]: e instanceof NoPlainBackground ? "failed:plain" : "failed" } : c)));
     }
   }
 
+  /**
+   * A product photo without background, as an object URL. Remembered across
+   * visits (AI cut-outs take seconds and a 45 MB model). When the quick cut-out
+   * finds no plain background (a sfeerfoto), the AI does it instead where the
+   * device can handle it.
+   */
+  async function makeCutout(image: string, mode: ProductLayer["cutout"], tolerance: number): Promise<string> {
+    const ai = !isLowMemoryDevice();
+    const cacheKey = (m: string) => `cut:${m}:${fingerprintOf(image)}`;
+    const fromCache = async (m: string) => {
+      const blob = await getCached<Blob>(cacheKey(m));
+      return blob instanceof Blob ? URL.createObjectURL(blob) : null;
+    };
+    const remember = async (m: string, url: string) => {
+      putCached(cacheKey(m), await (await fetch(url)).blob());
+      return url;
+    };
+    const viaAi = async () =>
+      (await fromCache("ai")) ?? remember("ai", await removeBackgroundAI(image, setStatus).finally(() => setStatus("")));
+    // The AI cut-out is too heavy for iPad Safari: use the simple one there.
+    if (mode === "ai" && ai) return viaAi();
+    const simple = `simple${tolerance}`;
+    const hit = await fromCache(simple);
+    if (hit) return hit;
+    try {
+      return await remember(simple, await removeBackground(image, tolerance));
+    } catch (e) {
+      if (e instanceof NoPlainBackground && ai) return viaAi();
+      throw e;
+    }
+  }
 
   /** Links this photo to the plan from the two far floor corners tapped on it. */
   function linkPhoto(L: Pt, R: Pt) {
@@ -425,10 +464,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     setNotice("");
     try {
       const seg = await segmentRoom(photo.url, setStatus);
-      segmentations.delete(photo.id);
-      segmentations.set(photo.id, seg);
-      // Keep only the most recent photos' recognition (each is ~1 MB).
-      while (segmentations.size > 6) segmentations.delete(segmentations.keys().next().value!);
+      rememberSegmentation(photo.id, seg);
       setSegmentation(seg);
       if (!seg.segments.length) setNotice("Geen meubels, muren of vloer herkend op deze foto.");
       return seg;
@@ -619,9 +655,30 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     }
   }
 
+  /** A link pasted while decorating: fetch it, add it to Producten, and put it in the room. */
+  async function addLink(url: string): Promise<string | void> {
+    const known = project.products.find((p) => sameLink(p.url, url));
+    if (known) return known.image ? addProduct(known) : "Dit product heeft nog geen foto: voeg die toe bij Producten.";
+    const { product, error } = await fetchProduct(url, photo?.room);
+    update((p) => ({ ...p, products: [...p.products, product] }));
+    if (error || !product.image) return `${error ?? "Geen foto gevonden"} — de link staat bij Producten; voeg daar een foto toe.`;
+    if (SURFACE_CATEGORIES.has(product.category)) {
+      applyFill(fillFor(product));
+      return;
+    }
+    await addProduct(product);
+  }
+
+  function favoriteAll() {
+    const ids = new Set(design.items.map((x) => x.product.id));
+    update((p) => ({ ...p, products: p.products.map((x) => (ids.has(x.id) ? { ...x, status: "favoriet" } : x)) }));
+  }
+
   // Stable callbacks for the memoised palette (it must not re-render during drags).
-  const latest = useRef({ addProduct, applyFill });
-  latest.current = { addProduct, applyFill };
+  const latest = useRef({ addProduct, applyFill, addLink, favoriteAll });
+  latest.current = { addProduct, applyFill, addLink, favoriteAll };
+  const onAddLink = useCallback((url: string) => latest.current.addLink(url), []);
+  const onFavoriteAll = useCallback(() => latest.current.favoriteAll(), []);
   const onAddProduct = useCallback((p: Product) => latest.current.addProduct(p), []);
   const onFill = useCallback((f: SurfaceFill) => latest.current.applyFill(f), []);
   const onPickPhoto = useCallback((id: string) => setPhotoId(id), [setPhotoId]);
@@ -923,7 +980,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   const handleR = handleRadius();
 
   const cutoutSrc = (l: ProductLayer): string | null => {
-    const cut = cutouts[cutoutKey(l)];
+    const cut = cutouts[layerCutKey(l)];
     return l.cutout !== "off" && cut && !cut.startsWith("failed") && cut !== "pending" ? cut : null;
   };
   const textureSrc = (l: SurfaceLayer): string | null => {
@@ -1417,7 +1474,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
               const m = metricOf(selectedLayer.floorId);
               return plane && m ? distanceCm(plane, m, selectedLayer.points[0], selectedLayer.points[1]) : null;
             })()}
-            cutoutState={selectedLayer.kind === "product" ? cutouts[cutoutKey(selectedLayer)] : undefined}
+            cutoutState={selectedLayer.kind === "product" ? cutouts[layerCutKey(selectedLayer)] : undefined}
             onChange={(patch) => patchLayer(selectedLayer.id, patch)}
             onPlaceOnFloor={(floorId) => {
               const floor = floors.find((f) => f.id === floorId);
@@ -1445,7 +1502,16 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
         )}
       </div>
 
-      <Palette furniture={furniture} surfaces={surfaces} onAddProduct={onAddProduct} onFill={onFill} />
+      <Palette
+        furniture={furniture}
+        surfaces={surfaces}
+        onAddProduct={onAddProduct}
+        onFill={onFill}
+        onAddLink={onAddLink}
+        onFavoriteAll={onFavoriteAll}
+        room={photo?.room}
+        design={design}
+      />
     </section>
   );
 }

@@ -36,17 +36,27 @@ export class Selector {
     outH: number,
     onProgress?: Progress,
   ): Promise<Uint8Array> {
+    const ask = () =>
+      this.session.run<{ mask: Uint8Array; score: number }>(
+        {
+          task: "samMask",
+          points: points.map((p) => [p.at[0] * this.dims.w, p.at[1] * this.dims.h]),
+          labels: points.map((p) => (p.positive ? 1 : 0)),
+          outW,
+          outH,
+        },
+        onProgress,
+      );
     await this.prepare(photoUrl, onProgress);
-    const { mask } = await this.session.run<{ mask: Uint8Array; score: number }>(
-      {
-        task: "samMask",
-        points: points.map((p) => [p.at[0] * this.dims.w, p.at[1] * this.dims.h]),
-        labels: points.map((p) => (p.positive ? 1 : 0)),
-        outW,
-        outH,
-      },
-      onProgress,
-    );
+    let mask: Uint8Array;
+    try {
+      ({ mask } = await ask());
+    } catch {
+      // The worker was closed in between (to free memory for another AI job): analyse again.
+      this.photo = null;
+      await this.prepare(photoUrl, onProgress);
+      ({ mask } = await ask());
+    }
     return mask;
   }
 

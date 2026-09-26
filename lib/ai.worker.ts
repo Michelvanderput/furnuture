@@ -44,6 +44,22 @@ async function gpuRun(): Promise<Run | null> {
   }
 }
 
+/**
+ * Models loaded by this worker. The page reuses a worker for a run of jobs of
+ * the same kind (three cut-outs in a row load the model once) and closes it
+ * afterwards, which frees all of this.
+ */
+const loaded = new Map<string, Promise<any>>();
+function keep<T>(key: string, load: () => Promise<T>): Promise<T> {
+  let p = loaded.get(key);
+  if (!p) {
+    p = load();
+    loaded.set(key, p);
+    p.catch(() => loaded.delete(key));
+  }
+  return p;
+}
+
 /** Loads the first candidate model that works. */
 async function firstModel<T = any>(models: string[], load: (id: string) => Promise<T>): Promise<T> {
   let error: unknown = new Error("Geen model opgegeven");
@@ -78,11 +94,14 @@ const rawImage = (t: any, img: Img) => new t.RawImage(img.data, img.width, img.h
 async function segment({ image, models, outW, outH }: Extract<Task, { task: "segment" }>, run: Run) {
   const t = await transformers();
   progress("Kamer-herkenning laden…");
-  const [processor, net] = await firstModel(models, (model) =>
-    Promise.all([
-      t.AutoProcessor.from_pretrained(model),
-      t.AutoModelForSemanticSegmentation.from_pretrained(model, { ...run, progress_callback: onDownload("Kamer-herkenning") }),
-    ]),
+  const [processor, net, model] = await keep(`segment:${models}:${run.device}:${run.dtype}`, () =>
+    firstModel(models, (model) =>
+      Promise.all([
+        t.AutoProcessor.from_pretrained(model),
+        t.AutoModelForSemanticSegmentation.from_pretrained(model, { ...run, progress_callback: onDownload("Kamer-herkenning") }),
+        model,
+      ]),
+    ),
   );
   progress("Meubels, muren en vloer herkennen…");
   const { logits } = await net(await processor(rawImage(t, image)));
@@ -91,13 +110,13 @@ async function segment({ image, models, outW, outH }: Extract<Task, { task: "seg
   const data = toFloat32(logits);
   const classMap = labelsFromLogits(data, classes, h, w, outW, outH, Math.max(outW, outH));
   logits.dispose?.();
-  return { result: { classMap, id2label: net.config.id2label }, transfer: [classMap.buffer] };
+  return { result: { classMap, id2label: net.config.id2label, model }, transfer: [classMap.buffer] };
 }
 
 async function classify({ images, labels, models }: Extract<Task, { task: "classify" }>, run: Run) {
   const t = await transformers();
-  const clip = await firstModel(models, (model) =>
-    t.pipeline("zero-shot-image-classification", model, { ...run, progress_callback: onDownload("AI-model") }),
+  const clip = await keep(`classify:${models}:${run.device}:${run.dtype}`, () =>
+    firstModel(models, (model) => t.pipeline("zero-shot-image-classification", model, { ...run, progress_callback: onDownload("AI-model") })),
   );
   const out: string[] = [];
   for (const [i, img] of images.entries()) {
@@ -105,14 +124,13 @@ async function classify({ images, labels, models }: Extract<Task, { task: "class
     const [best] = await clip(rawImage(t, img), labels, { hypothesis_template: "a photo of {}" });
     out.push(best.label);
   }
-  await clip.dispose?.();
   return { result: out, transfer: [] };
 }
 
 async function removeBackground({ image, models }: Extract<Task, { task: "removeBackground" }>, run: Run) {
   const t = await transformers();
-  const remove = await firstModel(models, (model) =>
-    t.pipeline("background-removal", model, { ...run, progress_callback: onDownload("Uitknip-AI") }),
+  const remove = await keep(`removeBackground:${models}:${run.device}:${run.dtype}`, () =>
+    firstModel(models, (model) => t.pipeline("background-removal", model, { ...run, progress_callback: onDownload("Uitknip-AI") })),
   );
   progress("Achtergrond weghalen…");
   const [out] = await remove(rawImage(t, image));
@@ -150,9 +168,11 @@ async function inpaint({ image, mask }: Extract<Task, { task: "inpaint" }>) {
   const ort: any = await import(/* webpackIgnore: true */ `${ORT_DIST}ort.wasm.min.mjs`);
   ort.env.wasm.wasmPaths = ORT_DIST;
   ort.env.wasm.numThreads = 1;
-  const bytes = await modelBytes(MIGAN_URL, "AI-gum");
-  progress("AI-gum starten…");
-  const session = await ort.InferenceSession.create(bytes, { executionProviders: ["wasm"] });
+  const session = await keep("inpaint", async () => {
+    const bytes = await modelBytes(MIGAN_URL, "AI-gum");
+    progress("AI-gum starten…");
+    return ort.InferenceSession.create(bytes, { executionProviders: ["wasm"] });
+  });
   const { width: w, height: h, data } = image;
   const n = w * h;
   const chw = new Uint8Array(3 * n);
@@ -175,7 +195,6 @@ async function inpaint({ image, mask }: Extract<Task, { task: "inpaint" }>) {
     for (let c = 0; c < 3; c++) rgba[i * 4 + c] = src[c * on + i] * k;
     rgba[i * 4 + 3] = 255;
   }
-  await session.release?.();
   return { result: { data: rgba, width: ow, height: oh }, transfer: [rgba.buffer] };
 }
 

@@ -2,6 +2,7 @@ import type { Progress } from "./ai";
 import { loadImage, proxied } from "./images";
 import { aiInpaint } from "./aiInpaint";
 import { decodeMask, dilate, polygonMask } from "./masks";
+import { fingerprint, getCached, putCached } from "./aiCache";
 import type { EraseLayer } from "./types";
 
 /**
@@ -92,7 +93,20 @@ export function pushPullFill(rgb: Uint8ClampedArray, mask: Uint8Array, w: number
 /** Largest side the erased photo is worked on: bigger photos only cost memory (the screen scales it). */
 const MAX_SIDE = 2048;
 
-const layerKey = (l: EraseLayer) => `${l.method}:${l.mask ?? JSON.stringify(l.points.map((p) => p.map(Math.round)))}`;
+/**
+ * Stable short identity of an erase layer's content (same across visits, so
+ * results can be cached). Layers are immutable, so it is computed once per object:
+ * stringifying every mask PNG on each render used to churn through megabytes.
+ */
+const layerIds = new WeakMap<EraseLayer, string>();
+export function eraseLayerId(l: EraseLayer): string {
+  let id = layerIds.get(l);
+  if (!id) {
+    id = fingerprint(`${l.method}:${l.mask ?? JSON.stringify(l.points.map((p) => p.map(Math.round)))}`);
+    layerIds.set(l, id);
+  }
+  return id;
+}
 
 /**
  * The last result, so adding one erase layer only processes that layer instead
@@ -135,7 +149,14 @@ export async function renderErased(
   onProgress?: Progress,
 ): Promise<{ url: string; aiFailed: boolean }> {
   const ordered = [...layers].reverse(); // oldest first
-  const keys = ordered.map(layerKey);
+  const keys = ordered.map(eraseLayerId);
+  const cacheKey = `erased:${fingerprint(photoUrl)}:${keys.join(".")}`;
+  if (last && last.photoUrl === photoUrl && last.keys.join(".") === keys.join(".")) return { url: URL.createObjectURL(last.blob), aiFailed: false };
+  const stored = await getCached<Blob>(cacheKey);
+  if (stored instanceof Blob) {
+    last = { photoUrl, keys, blob: stored };
+    return { url: URL.createObjectURL(stored), aiFailed: false };
+  }
   const reuse = last && last.photoUrl === photoUrl && last.keys.length <= keys.length && last.keys.every((k, i) => k === keys[i]) ? last : null;
 
   const img = await loadImage(proxied(photoUrl));
@@ -175,5 +196,7 @@ export async function renderErased(
   );
   canvas.width = canvas.height = 0; // free the backing store right away (Safari keeps it otherwise)
   last = { photoUrl, keys, blob };
+  // Remembered for next time, unless the AI could not run (then it is tried again later).
+  if (!aiFailed) putCached(cacheKey, blob);
   return { url: URL.createObjectURL(blob), aiFailed };
 }
