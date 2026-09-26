@@ -42,6 +42,17 @@ function read(key: string): string | null {
 export const isLightMode = () => read(LIGHT_KEY) === "1";
 export const setLightMode = (on: boolean) => store(LIGHT_KEY, on ? "1" : null);
 
+// WebGPU: models run on the graphics card. Many times faster, and the weights do
+// not live in WebAssembly memory (which is never returned and is what made tabs
+// crash). Off in light mode and on low-memory devices, and switched off for good
+// once it failed on this device.
+const NO_GPU_KEY = "furnuture:no-gpu";
+export function gpuEnabled(): boolean {
+  if (typeof navigator === "undefined" || !("gpu" in navigator)) return false;
+  return !isLightMode() && !isLowMemoryDevice() && read(NO_GPU_KEY) !== "1";
+}
+const gpuFailed = () => store(NO_GPU_KEY, "1");
+
 const TASK_LABELS: Record<string, string> = {
   segment: "het herkennen van de kamer",
   sam: "het selecteren van een meubel",
@@ -75,41 +86,87 @@ const jobEnded = () => {
   if (!running) store(JOB_KEY, null);
 };
 
-/**
- * Runs one AI job in a fresh worker and terminates it afterwards, so the
- * model's memory is really released (important on iPad).
- */
-export function runAi<T>(job: Task, onProgress?: Progress, transfer: Transferable[] = []): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL("./ai.worker.ts", import.meta.url), { type: "module" });
+// ---------------------------------------------------------------------------
+// One AI job at a time. Several models loading at once (three cut-outs, an
+// erase and a tap-to-select) was the quickest way to run out of memory. Jobs
+// wait for each other; the order is kept.
+
+let lock: Promise<unknown> = Promise.resolve();
+function exclusive<T>(fn: () => Promise<T>): Promise<T> {
+  const next = lock.then(fn, fn);
+  lock = next.catch(() => undefined);
+  return next;
+}
+
+type Reply<T> = { type: string; message?: string; result?: T; gpuFailed?: boolean };
+const newWorker = () => new Worker(new URL("./ai.worker.ts", import.meta.url), { type: "module" });
+
+/** Sends one job to a worker and waits for its answer. */
+function ask<T>(worker: Worker, job: Task, onProgress: Progress | undefined, transfer: Transferable[]): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
     jobStarted(job.task);
-    const finish = () => {
-      worker.terminate();
-      jobEnded();
-      onProgress?.("");
-    };
-    worker.onmessage = (e: MessageEvent<{ type: string; message?: string; result?: T }>) => {
+    const done = () => (jobEnded(), onProgress?.(""));
+    worker.onmessage = (e: MessageEvent<Reply<T>>) => {
+      if (e.data.gpuFailed) gpuFailed();
       if (e.data.type === "progress") onProgress?.(e.data.message ?? "");
-      else if (e.data.type === "done") (finish(), resolve(e.data.result as T));
-      else (finish(), reject(new Error(e.data.message)));
+      else if (e.data.type === "done") (done(), resolve(e.data.result as T));
+      else (done(), reject(new Error(e.data.message)));
     };
     worker.onerror = (e) => {
-      finish();
-      reject(new Error(e.message || "De AI is gestopt (te weinig geheugen?)"));
+      done();
+      reject(Object.assign(new Error(e.message || "De AI is gestopt (te weinig geheugen?)"), { fatal: true }));
     };
-    worker.postMessage(job, transfer);
+    worker.postMessage({ gpu: gpuEnabled(), ...job }, transfer);
+  });
+}
+
+/**
+ * The worker for one-off jobs. It stays alive for a run of jobs of the same kind
+ * (the model is loaded once), and is closed as soon as another kind of job
+ * comes, or shortly after the last one: closing a worker is the only way to
+ * really free WebAssembly memory.
+ */
+let shared: { worker: Worker; task: string; idle?: ReturnType<typeof setTimeout> } | null = null;
+const closeShared = () => {
+  if (!shared) return;
+  clearTimeout(shared.idle);
+  shared.worker.terminate();
+  shared = null;
+};
+
+/** Sessions (tap-to-select) keep a worker with a model; on small devices they are closed before other jobs. */
+const sessions = new Set<AiSession>();
+
+/** Runs one AI job; see `exclusive` and `shared`. */
+export function runAi<T>(job: Task, onProgress?: Progress, transfer: Transferable[] = []): Promise<T> {
+  return exclusive(async () => {
+    const low = isLowMemoryDevice() || isLightMode();
+    if (low) for (const s of sessions) s.close();
+    if (shared && shared.task !== job.task) closeShared();
+    shared ??= { worker: newWorker(), task: job.task };
+    clearTimeout(shared.idle);
+    const mine = shared;
+    try {
+      return await ask<T>(mine.worker, job, onProgress, transfer);
+    } catch (e) {
+      if ((e as { fatal?: boolean }).fatal && shared === mine) closeShared();
+      throw e;
+    } finally {
+      // Keep the model for a follow-up job of the same kind (they arrive within milliseconds).
+      if (shared === mine) mine.idle = setTimeout(closeShared, low ? 800 : 3000);
+    }
   });
 }
 
 /**
  * A worker that stays alive for a series of jobs sharing state — used for
  * tap-to-select, where the photo is analysed once and every tap is then quick.
- * It shuts itself down after a minute without use (and frees its memory).
+ * It shuts itself down after a while without use (and frees its memory).
  */
 export class AiSession {
   private worker: Worker | null = null;
-  private queue: Promise<unknown> = Promise.resolve();
   private idle: ReturnType<typeof setTimeout> | undefined;
+  private busy = false;
 
   constructor(private readonly idleMs = 60_000) {}
 
@@ -118,40 +175,39 @@ export class AiSession {
   }
 
   run<T>(job: Task, onProgress?: Progress, transfer: Transferable[] = []): Promise<T> {
-    const next = this.queue.then(
-      () =>
-        new Promise<T>((resolve, reject) => {
-          clearTimeout(this.idle);
-          if (!this.worker) this.worker = new Worker(new URL("./ai.worker.ts", import.meta.url), { type: "module" });
-          const w = this.worker;
-          jobStarted(job.task);
-          const done = () => {
-            jobEnded();
-            onProgress?.("");
-            this.idle = setTimeout(() => this.close(), this.idleMs);
-          };
-          w.onmessage = (e: MessageEvent<{ type: string; message?: string; result?: T }>) => {
-            if (e.data.type === "progress") onProgress?.(e.data.message ?? "");
-            else if (e.data.type === "done") (done(), resolve(e.data.result as T));
-            else (done(), reject(new Error(e.data.message)));
-          };
-          w.onerror = (e) => {
-            done();
-            this.close();
-            reject(new Error(e.message || "De AI is gestopt (te weinig geheugen?)"));
-          };
-          w.postMessage(job, transfer);
-        }),
-    );
-    this.queue = next.catch(() => undefined);
-    return next;
+    return exclusive(async () => {
+      clearTimeout(this.idle);
+      // On small devices only one model at a time: close the one-off worker first.
+      if (isLowMemoryDevice() || isLightMode()) closeShared();
+      if (!this.worker) {
+        this.worker = newWorker();
+        sessions.add(this);
+      }
+      this.busy = true;
+      try {
+        return await ask<T>(this.worker, job, onProgress, transfer);
+      } catch (e) {
+        if ((e as { fatal?: boolean }).fatal) this.close(true);
+        throw e;
+      } finally {
+        this.busy = false;
+        if (this.worker) this.idle = setTimeout(() => this.close(), this.idleMs);
+      }
+    });
   }
 
-  close() {
+  /** Frees the worker (not while a job runs, unless forced). */
+  close(force = false) {
+    if (this.busy && !force) return;
     clearTimeout(this.idle);
     this.worker?.terminate();
     this.worker = null;
+    sessions.delete(this);
+    this.onClose?.();
   }
+
+  /** Called when the worker (and the state it held) is gone. */
+  onClose?: () => void;
 }
 
 /** Pixels of an image, scaled down to at most `maxSide` (only what the model needs). */

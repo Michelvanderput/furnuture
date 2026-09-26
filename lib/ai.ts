@@ -1,4 +1,5 @@
 import { ROOMS } from "./categories";
+import { canvasToUrl } from "./images";
 import type { RoomType } from "./types";
 import { imagePixels, pixelsToCanvas, runAi, type Img, type Progress } from "./worker";
 
@@ -21,7 +22,8 @@ export async function classifyRooms(
   const images: Img[] = [];
   for (const p of photos) images.push(await imagePixels(p.url, 256));
   const best = await runAi<string[]>(
-    { task: "classify", images, labels: LABELED.map((r) => r.clip) },
+    // ViT-B/16 looks at 4× more patches than B/32 (same download size): noticeably better at telling rooms apart.
+    { task: "classify", images, labels: LABELED.map((r) => r.clip), models: ["Xenova/clip-vit-base-patch16", "Xenova/clip-vit-base-patch32"] },
     onProgress,
     images.map((i) => i.data.buffer),
   );
@@ -34,9 +36,6 @@ export async function classifyRooms(
  */
 export async function removeBackgroundAI(src: string, onProgress?: Progress): Promise<string> {
   const image = await imagePixels(src, 1024);
-  const out = await runAi<Img>({ task: "removeBackground", image }, onProgress, [image.data.buffer]);
-  const canvas = pixelsToCanvas(out);
-  const url = canvas.toDataURL("image/png");
-  canvas.width = canvas.height = 0;
-  return url;
+  const out = await runAi<Img>({ task: "removeBackground", image, models: ["briaai/RMBG-1.4"] }, onProgress, [image.data.buffer]);
+  return canvasToUrl(pixelsToCanvas(out));
 }

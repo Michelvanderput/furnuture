@@ -86,3 +86,25 @@ export function workSize(w: number, h: number, side = 480): { w: number; h: numb
   const f = side / Math.max(w, h);
   return { w: Math.round(w * f), h: Math.round(h * f) };
 }
+
+/** Half-precision float (IEEE 754 binary16 bits) to a number. */
+function half(h: number): number {
+  const s = h & 0x8000 ? -1 : 1;
+  const e = (h >> 10) & 0x1f;
+  const f = h & 0x3ff;
+  if (e === 0) return s * f * 2 ** -24;
+  if (e === 31) return f ? NaN : s * Infinity;
+  return s * (1 + f / 1024) * 2 ** (e - 15);
+}
+
+/** Tensor data as float32; fp16 models (WebGPU) return half floats as raw 16-bit values. */
+export function toFloat32(tensor: { type?: string; data: ArrayLike<number> }): Float32Array {
+  const d = tensor.data;
+  if (d instanceof Float32Array) return d;
+  if (tensor.type === "float16" && d instanceof Uint16Array) {
+    const out = new Float32Array(d.length);
+    for (let i = 0; i < d.length; i++) out[i] = half(d[i]);
+    return out;
+  }
+  return Float32Array.from(d);
+}

@@ -78,3 +78,25 @@ describe("affineFromTriangles", () => {
     });
   });
 });
+
+import { lightSideFromPixels, sideShade } from "@/lib/look";
+
+describe("light direction", () => {
+  const room = (bright: (x: number) => boolean) => {
+    const w = 32, h = 16, d = new Uint8ClampedArray(w * h * 4);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) d.fill(bright(x) ? 250 : 110, (y * w + x) * 4, (y * w + x) * 4 + 3);
+    return lightSideFromPixels(d, w, h);
+  };
+  it("finds a window on the left or right", () => {
+    expect(room((x) => x < 3)).toBeLessThan(-0.5);
+    expect(room((x) => x > 28)).toBeGreaterThan(0.5);
+  });
+  it("sees no direction in an evenly lit room", () => {
+    expect(room(() => false)).toBe(0);
+  });
+  it("darkens the side away from the light, mirrored products too", () => {
+    expect(sideShade(-1, 1, false)).toContain("to right");
+    expect(sideShade(-1, 1, true)).toContain("to left");
+    expect(sideShade(0, 1, false)).toBeNull();
+  });
+});

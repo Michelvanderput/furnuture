@@ -63,3 +63,16 @@ export function shoppingListCsv(products: Product[]): string {
   }
   return "﻿" + rows.join("\n");
 }
+
+/** Products used in one design (how often each), with the total price. */
+export function designList(productIds: string[], products: Product[]): { items: { product: Product; count: number }[]; total: number; unknown: number } {
+  const counts = new Map<string, number>();
+  for (const id of productIds) counts.set(id, (counts.get(id) ?? 0) + 1);
+  const items = [...counts.entries()]
+    .map(([id, count]) => ({ product: products.find((p) => p.id === id), count }))
+    .filter((x): x is { product: Product; count: number } => !!x.product);
+  // Paint and flooring are priced per pot or m², not per use: count them once.
+  const once = (p: Product) => ["verf", "vloeren", "behang", "tegels"].includes(p.category);
+  const total = items.reduce((n, { product, count }) => n + (product.priceValue ?? 0) * (once(product) ? 1 : count), 0);
+  return { items, total, unknown: items.filter((x) => x.product.priceValue === undefined).length };
+}

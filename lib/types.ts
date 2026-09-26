@@ -104,6 +104,8 @@ export interface ProductLayer {
   /** Brightness and warmth to match the room's light (CSS brightness / sepia). */
   light?: number;
   warmth?: number;
+  /** Side light from the room's window (0 = off, default 0.8). */
+  sideLight?: number;
   /** Floor shadow as a quad in the photo (products coming from the floor plan). */
   shadowQuad?: Quad;
   /** Set for products that live on the floor plan (id of the plan item). */
@@ -152,8 +154,8 @@ export interface SurfaceLayer {
   role?: "floor" | "wall";
   /** Preset textures follow the measured floor's real size unless the user set a size. */
   autoScale?: boolean;
-  /** Texture turned a quarter (planks running the other way). */
-  turn?: boolean;
+  /** Texture turned a quarter (planks running into the room instead of across). */
+  rotate?: boolean;
 }
 
 /** An area of the photo that is painted out (existing furniture removed). */

@@ -5,16 +5,17 @@ import { removeBackgroundAI } from "@/lib/ai";
 import { exportFileName } from "@/lib/backup";
 import { renderDesign, shareOrDownload } from "@/lib/exportImage";
 import { centroid, pointInPolygon, project as projectPoint, quadToMatrix3d, rectQuad } from "@/lib/geometry";
-import { cropCenter, loadImage, NoPlainBackground, proxied, removeBackground, rotateQuarter } from "@/lib/images";
-import { renderErased } from "@/lib/inpaint";
+import { cropCenter, loadImage, NoPlainBackground, proxied, releaseUrl, removeBackground, rotatedTexture } from "@/lib/images";
+import { eraseLayerId, renderErased } from "@/lib/inpaint";
+import { fingerprintOf, getCached, putCached } from "@/lib/aiCache";
 import {
-  cutoutKey,
   floorMetric,
   isFloor,
   placeOnFloor,
   planeOf,
   rulerOf,
   SURFACE_CATEGORIES,
+  fillFor,
   surfaceDefaults,
 } from "@/lib/layers";
 import { workSize } from "@/lib/labels";
@@ -22,13 +23,16 @@ import { distanceCm, footprint, formatCm } from "@/lib/metric";
 import { Selector } from "@/lib/sam";
 import { linkedView, linkFromPoints, photoToPlan, planLayersFor, scanFurniture } from "@/lib/floorplan";
 import { defaultSize, planForPhoto, plansOf, updateItem, updatePlan } from "@/lib/plans";
-import { photoLook, productFilter } from "@/lib/look";
-import { dropSpecks, ensureMask, fillHoles, interiorPoints, maskToDataUrl, paintCircle, polygonMask, readyMask, rememberMask } from "@/lib/masks";
+import { photoLightSide, photoLook, productFilter, sideShade } from "@/lib/look";
+import { dropSpecks, fillHoles, interiorPoints, loadHitMask, maskHit, maskToDataUrl, paintCircle, polygonMask, rememberMask } from "@/lib/masks";
 import { extendedPlane, fitFloorQuad, fitWallQuad, fitWallQuads, imageToPlane, PLANE, planeToImage } from "@/lib/plane";
-import { furnitureMask, segmentMask, segmentRoom, type RoomSegmentation, type Segment, type SegmentKind } from "@/lib/segment";
+import { cachedSegmentation, furnitureMask, segmentMask, segmentRoom, type RoomSegmentation, type Segment, type SegmentKind } from "@/lib/segment";
 import { presetTexture } from "@/lib/textures";
+import { surfaceShading } from "@/lib/shading";
 import type { EraseLayer, FloorAnchor, Layer, MeasureLayer, Product, ProductLayer, Project, Pt, Quad, SurfaceFill, SurfaceLayer } from "@/lib/types";
 import { newId } from "@/lib/useProject";
+import { fetchProduct, sameLink } from "@/lib/products";
+import { designList } from "@/lib/shopping";
 import { useSceneEditor } from "@/lib/useSceneEditor";
 import { isLowMemoryDevice } from "@/lib/worker";
 import { Img } from "./Img";
@@ -75,8 +79,28 @@ type Drag =
 
 // Room recognition results live in memory only (a few seconds to recompute).
 const segmentations = new Map<string, RoomSegmentation>();
+/** Keeps the most recent photos' recognition in memory (each is ~1 MB); older ones come from the cache. */
+function rememberSegmentation(photoId: string, seg: RoomSegmentation) {
+  segmentations.delete(photoId);
+  segmentations.set(photoId, seg);
+  while (segmentations.size > 6) segmentations.delete(segmentations.keys().next().value!);
+}
+
 // Mask PNGs for drawn erase areas, so floors and walls can also cover them.
+// Made at working size (CSS scales them) and bounded: they used to be photo-sized and kept forever.
 const polygonMaskUrls = new Map<string, string>();
+function polygonMaskUrl(points: Pt[], w: number, h: number): string {
+  const key = `${w}x${h}:${JSON.stringify(points)}`;
+  let url = polygonMaskUrls.get(key);
+  if (!url) {
+    const ws = workSize(w, h);
+    const f = ws.w / w;
+    url = maskToDataUrl(polygonMask(points.map(([x, y]) => [x * f, y * f]), ws.w, ws.h), ws.w, ws.h);
+    polygonMaskUrls.set(key, url);
+    while (polygonMaskUrls.size > 30) polygonMaskUrls.delete(polygonMaskUrls.keys().next().value!);
+  }
+  return url;
+}
 
 /** Natural size of a photo, loaded directly (fast) with the proxy as fallback. */
 function measure(url: string): Promise<{ w: number; h: number }> {
@@ -101,6 +125,9 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   );
   const photo = photos.find((p) => p.id === photoId) ?? photos[0];
   const editor = useSceneEditor(photo?.id, project, update);
+  const productById = useMemo(() => new Map(project.products.map((p) => [p.id, p])), [project.products]);
+  const photoIdRef = useRef(photo?.id);
+  photoIdRef.current = photo?.id;
   const { layers, setLayers } = editor;
 
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
@@ -111,6 +138,10 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   const [cutouts, setCutouts] = useState<Record<string, string>>({});
   const [textures, setTextures] = useState<Record<string, string>>({});
   const [erased, setErased] = useState<{ key: string; url: string } | null>(null);
+  const [lightSide, setLightSide] = useState(0);
+  const [preview, setPreview] = useState(false);
+  const [rotated, setRotated] = useState<Record<string, string>>({});
+  const [shading, setShading] = useState<Record<string, { multiply: string; screen: string }>>({});
   const [status, setStatus] = useState("");
   const [notice, setNotice] = useState("");
   const [segmentation, setSegmentation] = useState<RoomSegmentation | null>(null);
@@ -124,7 +155,6 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   const selector = useRef<Selector | null>(null);
   const [linking, setLinking] = useState(false);
   const [aspects, setAspects] = useState<Record<string, number>>({});
-  const baseTextureRef = useRef<(l: SurfaceLayer) => string | null>(() => null);
   const selectRun = useRef(0);
   const [exporting, setExporting] = useState(false);
   const drag = useRef<Drag | null>(null);
@@ -146,8 +176,19 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     setLinking(false);
     setNotice("");
     setSegmentation(photo ? (segmentations.get(photo.id) ?? null) : null);
+    // Recognised before (another visit)? Show the objects right away, without AI.
+    if (photo && !segmentations.has(photo.id)) {
+      const id = photo.id;
+      cachedSegmentation(photo.url).then((seg) => {
+        if (!seg) return;
+        rememberSegmentation(id, seg);
+        setSegmentation((cur) => cur ?? (photoIdRef.current === id ? seg : null));
+      });
+    }
     selector.current?.close();
+    setLightSide(0);
     if (!photo) return;
+    photoLightSide(photo.url).then(setLightSide).catch(() => undefined);
     measure(photo.url)
       .then(setSize)
       .catch(() => setSize({ w: 1440, h: 960 }));
@@ -165,24 +206,53 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
 
   // Decode stored masks so taps can hit them.
   useEffect(() => {
-    if (!size) return;
-    for (const l of layers) if ((l.kind === "surface" || l.kind === "erase") && l.mask) ensureMask(l.mask, size.w, size.h).catch(() => undefined);
-  }, [layers, size]);
+    for (const l of layers) if ((l.kind === "surface" || l.kind === "erase") && l.mask) loadHitMask(l.mask).catch(() => undefined);
+  }, [layers]);
 
 
-  // Textures turned a quarter (planks running the other way).
-  useEffect(() => {
-    for (const layer of layers) {
-      if (layer.kind !== "surface" || !layer.turn) continue;
-      const key = `turn:${textureKey(layer)}`;
-      const base = baseTextureRef.current(layer);
-      if (textures[key] || !base) continue;
-      setTextures((t) => ({ ...t, [key]: "pending" }));
-      rotateQuarter(base)
-        .then((url) => setTextures((t) => ({ ...t, [key]: url })))
-        .catch(() => setTextures((t) => ({ ...t, [key]: base })));
+  // Free a replaced erased photo (object URLs stay in memory until revoked).
+  useEffect(() => () => releaseUrl(erased?.url), [erased]);
+
+  // Cut-outs and textures that no scene uses any more (an old tolerance, a deleted
+  // layer) are freed; they used to pile up for as long as the tab was open.
+  /** Cut-out identity: product, method and the product photo (choosing another photo makes a new cut-out). */
+  const cutKey = (productId: string, l: { cutout: ProductLayer["cutout"]; tolerance: number }) => {
+    const image = productById.get(productId)?.image ?? "";
+    return `${l.cutout === "ai" ? "ai" : `simple:${l.tolerance}`}:${productId}:${fingerprintOf(image)}`;
+  };
+  const layerCutKey = (l: ProductLayer) => cutKey(l.productId, l);
+
+  const usedImages = useMemo(() => {
+    const keys = new Set<string>();
+    for (const l of [...Object.values(project.scenes).flatMap((sc) => sc.layers), ...layers]) {
+      if (l.kind === "product" && l.cutout !== "off") keys.add(layerCutKey(l));
+      if (l.kind === "surface" && l.fill.type === "texture") keys.add(`${l.fill.productId}:${l.crop}`);
     }
-  }, [layers, textures]);
+    // Furniture on the floor plans is cut out the same way (see planLayersFor).
+    for (const it of (project.plans ?? []).flatMap((pl) => pl.items)) {
+      if (it.cutout !== "off") keys.add(cutKey(it.productId, it));
+    }
+    return keys;
+  }, [project.scenes, project.plans, layers, productById]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const prune = (map: Record<string, string>) => {
+      const stale = Object.keys(map).filter((k) => !usedImages.has(k));
+      if (!stale.length) return map;
+      const next = { ...map };
+      for (const k of stale) (releaseUrl(next[k]), delete next[k]);
+      return next;
+    };
+    setCutouts(prune);
+    setTextures(prune);
+  }, [usedImages]);
+  const imagesRef = useRef({ cutouts, textures });
+  imagesRef.current = { cutouts, textures };
+  useEffect(
+    () => () => {
+      for (const u of [...Object.values(imagesRef.current.cutouts), ...Object.values(imagesRef.current.textures)]) releaseUrl(u);
+    },
+    [],
+  );
 
   // Product photos used as texture, cropped to their centre.
   useEffect(() => {
@@ -194,26 +264,42 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
       if (!product?.image || textures[key]) continue;
       setTextures((t) => ({ ...t, [key]: "pending" }));
       cropCenter(product.image, layer.crop)
-        .then((url) => setTextures((t) => ({ ...t, [key]: url })))
+        .then((url) =>
+          setTextures((t) => {
+            if (!(key in t)) return (releaseUrl(url), t);
+            return { ...t, [key]: url };
+          }),
+        )
         .catch(() => setTextures((t) => ({ ...t, [key]: proxied(product.image) })));
     }
   }, [layers, project.products, textures]);
+
+  // Where the floor is (photo pixels): a laid or recognised floor. Erasing then fills
+  // floor from floor and wall from wall, so the skirting line stays straight.
+  const recognisedFloor = useMemo(() => {
+    const seg = segmentation;
+    const floorSeg = seg?.segments.find((x) => x.kind === "floor");
+    if (!seg || !floorSeg || !size) return undefined;
+    const quad = fitFloorQuad(segmentMask(seg, floorSeg.id), seg.w, seg.h, furnitureMask(seg));
+    return quad?.map(([x, y]) => [(x * size.w) / seg.w, (y * size.h) / seg.h] as Pt);
+  }, [segmentation, size]);
+  const floorOutline = useRef<Pt[] | undefined>(undefined);
+  const laidFloor = layers.find((l): l is SurfaceLayer => isFloor(l));
+  floorOutline.current = (laidFloor && planeOf(laidFloor)) || recognisedFloor;
 
   // The photo with existing furniture painted out.
   const eraseLayers = useMemo(
     () => layers.filter((l): l is EraseLayer => l.kind === "erase" && (!!l.mask || l.points.length >= 3)),
     [layers],
   );
-  const eraseKey = eraseLayers.length
-    ? JSON.stringify(eraseLayers.map((l) => [l.method, l.mask ?? l.points.map((p) => p.map(Math.round))]))
-    : "";
+  const eraseKey = useMemo(() => eraseLayers.map(eraseLayerId).join("|"), [eraseLayers]);
   useEffect(() => {
     if (!photo || !eraseKey) return;
     let cancelled = false;
     setStatus("Gummen…");
     // Let the status paint before the fill blocks the page briefly.
     const t = setTimeout(() => {
-      renderErased(photo.url, eraseLayers, (m) => !cancelled && setStatus(m || "Gummen…"))
+      renderErased(photo.url, eraseLayers, (m) => !cancelled && setStatus(m || "Gummen…"), floorOutline.current)
         .then(({ url, aiFailed }) => {
           if (cancelled) return;
           setErased({ key: eraseKey, url });
@@ -237,7 +323,6 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   };
 
   const floors = useMemo(() => layers.filter(isFloor), [layers]);
-  const productById = useMemo(() => new Map(project.products.map((p) => [p.id, p])), [project.products]);
   const products = useMemo(() => project.products.filter((p) => p.status !== "afgewezen" && (p.image || p.color)), [project.products]);
   const furniture = useMemo(() => products.filter((p) => p.image && !SURFACE_CATEGORIES.has(p.category)), [products]);
   const surfaces = useMemo(() => products.filter((p) => SURFACE_CATEGORIES.has(p.category)), [products]);
@@ -274,26 +359,90 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   );
   const allLayers = useMemo(() => [...layers, ...planLayers], [layers, planLayers]);
 
-  // Background-free product images (simple colour flood fill, or AI).
+  // Room light and shadow for textured floors and walls (see lib/shading.ts). Recomputed
+  // shortly after the surface or the erased photo changes, not on every drag frame.
+  const background = erased && erased.key === eraseKey && eraseKey ? erased.url : photo?.url;
   useEffect(() => {
+    if (!size || !background) return;
+    const timer = setTimeout(() => {
+      for (const l of layers) {
+        if (l.kind !== "surface" || (l.fill.type !== "texture" && l.fill.type !== "preset")) continue;
+        if (!l.mask && l.points.length < 3) continue;
+        const id = l.id;
+        surfaceShading(background, l.mask ? { mask: l.mask } : { points: l.points }, size.w, size.h)
+          .then((maps) => setShading((m) => (m[id] === maps ? m : { ...m, [id]: maps })))
+          .catch(() => undefined);
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [layers, background, size]);
+
+  // Products in this design. Keyed on the ids, so dragging does not re-render the palette.
+  const designIds = allLayers
+    .map((l) => (l.kind === "product" ? l.productId : l.kind === "surface" && l.fill.type === "texture" ? l.fill.productId : ""))
+    .filter(Boolean)
+    .sort()
+    .join(",");
+  const design = useMemo(() => designList(designIds ? designIds.split(",") : [], project.products), [designIds, project.products]);
+
+  // Background-free product images (simple colour flood fill, or AI). Started after
+  // a short pause, so dragging the tolerance slider does not start a job per step.
+  useEffect(() => {
+    const timer = setTimeout(() => startCutouts(), 250);
+    return () => clearTimeout(timer);
+  }, [allLayers, project.products, cutouts]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function startCutouts() {
     for (const layer of allLayers) {
       if (layer.kind !== "product" || layer.cutout === "off") continue;
-      const key = cutoutKey(layer);
+      const key = layerCutKey(layer);
       if (cutouts[key]) continue;
-      const product = project.products.find((p) => p.id === layer.productId);
+      const product = productById.get(layer.productId);
       if (!product?.image) continue;
       setCutouts((c) => ({ ...c, [key]: "pending" }));
-      // The AI cut-out is too heavy for iPad Safari: use the simple one there.
-      const job =
-        layer.cutout === "ai" && !isLowMemoryDevice()
-          ? removeBackgroundAI(product.image, setStatus).finally(() => setStatus(""))
-          : removeBackground(product.image, layer.tolerance);
-      job
-        .then((png) => setCutouts((c) => ({ ...c, [key]: png })))
-        .catch((e) => setCutouts((c) => ({ ...c, [key]: e instanceof NoPlainBackground ? "failed:plain" : "failed" })));
+      makeCutout(product.image, layer.cutout, layer.tolerance)
+        .then((url) =>
+          setCutouts((c) => {
+            if (!(key in c)) return (releaseUrl(url), c); // no longer needed
+            releaseUrl(c[key]);
+            return { ...c, [key]: url };
+          }),
+        )
+        .catch((e) => setCutouts((c) => (key in c ? { ...c, [key]: e instanceof NoPlainBackground ? "failed:plain" : "failed" } : c)));
     }
-  }, [allLayers, project.products, cutouts]);
+  }
 
+  /**
+   * A product photo without background, as an object URL. Remembered across
+   * visits (AI cut-outs take seconds and a 45 MB model). When the quick cut-out
+   * finds no plain background (a sfeerfoto), the AI does it instead where the
+   * device can handle it.
+   */
+  async function makeCutout(image: string, mode: ProductLayer["cutout"], tolerance: number): Promise<string> {
+    const ai = !isLowMemoryDevice();
+    const cacheKey = (m: string) => `cut2:${m}:${fingerprintOf(image)}`; // cut2: packshot shadows kept as soft shadows
+    const fromCache = async (m: string) => {
+      const blob = await getCached<Blob>(cacheKey(m));
+      return blob instanceof Blob ? URL.createObjectURL(blob) : null;
+    };
+    const remember = async (m: string, url: string) => {
+      putCached(cacheKey(m), await (await fetch(url)).blob());
+      return url;
+    };
+    const viaAi = async () =>
+      (await fromCache("ai")) ?? remember("ai", await removeBackgroundAI(image, setStatus).finally(() => setStatus("")));
+    // The AI cut-out is too heavy for iPad Safari: use the simple one there.
+    if (mode === "ai" && ai) return viaAi();
+    const simple = `simple${tolerance}`;
+    const hit = await fromCache(simple);
+    if (hit) return hit;
+    try {
+      return await remember(simple, await removeBackground(image, tolerance));
+    } catch (e) {
+      if (e instanceof NoPlainBackground && ai) return viaAi();
+      throw e;
+    }
+  }
 
   /** Links this photo to the plan from the two far floor corners tapped on it. */
   function linkPhoto(L: Pt, R: Pt) {
@@ -357,7 +506,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     setNotice("");
     try {
       const seg = await segmentRoom(photo.url, setStatus);
-      segmentations.set(photo.id, seg);
+      rememberSegmentation(photo.id, seg);
       setSegmentation(seg);
       if (!seg.segments.length) setNotice("Geen meubels, muren of vloer herkend op deze foto.");
       return seg;
@@ -379,7 +528,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
 
   function maskUrl(mask: Uint8Array, w: number, h: number) {
     const url = maskToDataUrl(mask, w, h);
-    if (size && w === size.w && h === size.h) rememberMask(url, w, h, mask);
+    rememberMask(url, w, h, mask);
     return url;
   }
 
@@ -618,9 +767,30 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     }
   }
 
+  /** A link pasted while decorating: fetch it, add it to Producten, and put it in the room. */
+  async function addLink(url: string): Promise<string | void> {
+    const known = project.products.find((p) => sameLink(p.url, url));
+    if (known) return known.image ? addProduct(known) : "Dit product heeft nog geen foto: voeg die toe bij Producten.";
+    const { product, error } = await fetchProduct(url, photo?.room);
+    update((p) => ({ ...p, products: [...p.products, product] }));
+    if (error || !product.image) return `${error ?? "Geen foto gevonden"} — de link staat bij Producten; voeg daar een foto toe.`;
+    if (SURFACE_CATEGORIES.has(product.category)) {
+      applyFill(fillFor(product));
+      return;
+    }
+    await addProduct(product);
+  }
+
+  function favoriteAll() {
+    const ids = new Set(design.items.map((x) => x.product.id));
+    update((p) => ({ ...p, products: p.products.map((x) => (ids.has(x.id) ? { ...x, status: "favoriet" } : x)) }));
+  }
+
   // Stable callbacks for the memoised palette (it must not re-render during drags).
-  const latest = useRef({ addProduct, applyFill });
-  latest.current = { addProduct, applyFill };
+  const latest = useRef({ addProduct, applyFill, addLink, favoriteAll });
+  latest.current = { addProduct, applyFill, addLink, favoriteAll };
+  const onAddLink = useCallback((url: string) => latest.current.addLink(url), []);
+  const onFavoriteAll = useCallback(() => latest.current.favoriteAll(), []);
   const onAddProduct = useCallback((p: Product) => latest.current.addProduct(p), []);
   const onFill = useCallback((f: SurfaceFill) => latest.current.applyFill(f), []);
   const onPickPhoto = useCallback((id: string) => setPhotoId(id), [setPhotoId]);
@@ -730,7 +900,6 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   /** Topmost layer under a point. */
   function hitLayer(p: Pt): Layer | undefined {
     if (!size) return undefined;
-    const idx = Math.round(p[1]) * size.w + Math.round(p[0]);
     for (const l of [...allLayers].reverse()) {
       if (l.kind === "measure") {
         if (distanceToSegment(p, l.points[0], l.points[1]) < handleRadius() * 1.3) return l;
@@ -740,7 +909,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
       if (l.kind === "product" && pointInPolygon(p, l.corners)) return l;
       if (l.kind !== "product") {
         if (l.mask) {
-          if (readyMask(l.mask, size.w, size.h)?.[idx]) return l;
+          if (maskHit(l.mask, p[0], p[1], size.w, size.h)) return l;
         } else if (l.points.length >= 3 && pointInPolygon(p, l.points)) return l;
       }
     }
@@ -763,6 +932,10 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   }
 
   function onPointerDown(e: React.PointerEvent) {
+    if (preview) {
+      setPreview(false); // a tap brings the tools back
+      return;
+    }
     const p = toPhoto(e);
     if (drawing) {
       if (e.target !== e.currentTarget) return;
@@ -809,7 +982,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   /** The floor a photo point lies on (its area or plane), else the most recent floor. */
   function floorAt(p: Pt): SurfaceLayer | undefined {
     const inside = floors.filter((f) => {
-      if (f.mask && size) return !!readyMask(f.mask, size.w, size.h)?.[Math.round(p[1]) * size.w + Math.round(p[0])];
+      if (f.mask && size) return !!maskHit(f.mask, p[0], p[1], size.w, size.h);
       const poly = f.points.length >= 3 ? f.points : planeOf(f);
       return !!poly && pointInPolygon(p, poly);
     });
@@ -928,35 +1101,33 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   const handleR = handleRadius();
 
   const cutoutSrc = (l: ProductLayer): string | null => {
-    const cut = cutouts[cutoutKey(l)];
+    const cut = cutouts[layerCutKey(l)];
     return l.cutout !== "off" && cut && !cut.startsWith("failed") && cut !== "pending" ? cut : null;
   };
-  const baseTexture = (l: SurfaceLayer): string | null => {
+  const baseTextureSrc = (l: SurfaceLayer): string | null => {
     if (l.fill.type === "preset") return presetTexture(l.fill.preset);
     if (l.fill.type !== "texture") return null;
     const t = textures[`${l.fill.productId}:${l.crop}`];
     const product = productById.get(l.fill.productId);
     return t && t !== "pending" ? t : product?.image ? proxied(product.image) : null;
   };
-  baseTextureRef.current = baseTexture;
   const textureSrc = (l: SurfaceLayer): string | null => {
-    if (!l.turn) return baseTexture(l);
-    const turned = textures[`turn:${textureKey(l)}`];
-    return turned && turned !== "pending" ? turned : baseTexture(l);
+    const src = baseTextureSrc(l);
+    if (!src || !l.rotate) return src;
+    if (!rotated[src]) rotatedTexture(src).then((url) => setRotated((r) => (r[src] ? r : { ...r, [src]: url }))).catch(() => undefined);
+    return rotated[src] ?? src;
   };
 
   // Erased areas as masks: a new floor or wall also covers the spot where old furniture stood.
   const eraseMaskUrls = size
     ? eraseLayers.map((l) => {
         if (l.mask) return l.mask;
-        const key = `${size.w}x${size.h}:${JSON.stringify(l.points)}`;
-        if (!polygonMaskUrls.has(key)) polygonMaskUrls.set(key, maskToDataUrl(polygonMask(l.points, size.w, size.h), size.w, size.h));
-        return polygonMaskUrls.get(key)!;
+        return polygonMaskUrl(l.points, size.w, size.h);
       })
     : [];
 
   const surfaceStyle = (l: SurfaceLayer): React.CSSProperties => {
-    const style: React.CSSProperties = { opacity: l.opacity, mixBlendMode: l.blend };
+    const style: React.CSSProperties = { opacity: l.opacity, mixBlendMode: l.blend, isolation: "isolate" };
     const plane = planeOf(l);
     if (l.mask) {
       const masks = [l.mask, ...eraseMaskUrls].map((u) => `url("${u}")`).join(",");
@@ -988,6 +1159,8 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
         },
         textureSrc,
         eraseMasks: eraseMaskUrls,
+        shading: (l) => shading[l.id],
+        lightSide,
         measureText,
       });
       await shareOrDownload(blob, exportFileName(project, photo.room));
@@ -1058,6 +1231,14 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
                 title="Houd ingedrukt om de originele foto te zien"
               >
                 👁 Origineel
+              </button>
+              <button
+                className={preview ? "on" : ""}
+                onClick={() => (setPreview((v) => !v), setSelected(null), setSelection(null))}
+                title="Bekijk het resultaat zonder hulplijnen, meetlijnen en selecties"
+                aria-pressed={preview}
+              >
+                ✨ Voorbeeld
               </button>
               <button onClick={exportDesign} disabled={exporting || !size} title="Bewaar of deel dit ontwerp als foto">
                 {exporting ? "Bezig…" : "📷 Opslaan / delen"}
@@ -1169,6 +1350,12 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
                         ) : (
                           <div className="fill" style={{ backgroundImage: `url("${tex}")`, backgroundSize: `${l.scale}px auto` }} />
                         )}
+                        {l.fill.type !== "color" && tex && shading[l.id] && (
+                          <>
+                            <div className="fill" style={{ backgroundImage: `url("${shading[l.id].multiply}")`, backgroundSize: "100% 100%", mixBlendMode: "multiply" }} />
+                            <div className="fill" style={{ backgroundImage: `url("${shading[l.id].screen}")`, backgroundSize: "100% 100%", mixBlendMode: "screen" }} />
+                          </>
+                        )}
                       </div>
                     );
                   }
@@ -1184,6 +1371,8 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
                     transform: quadToMatrix3d(PRODUCT_W, h, l.corners) + (l.flip ? ` translateX(${PRODUCT_W}px) scaleX(-1)` : ""),
                   };
                   const cut = cutoutSrc(l);
+                  const shade = sideShade(lightSide, l.sideLight ?? 0.8, l.flip);
+                  const shapeUrl = `url("${cut ?? proxied(product.image)}")`;
                   return (
                     <Fragment key={l.id}>
                       {(l.shadow ?? 0.5) > 0 && <Shadow layer={l} plane={floorPlane} size={size} />}
@@ -1193,6 +1382,21 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
                       ) : (
                         <Img className="layer product" src={product.image} alt={product.title} style={style} />
                       )}
+                      {shade && (
+                        <div
+                          className="layer"
+                          style={{
+                            width: style.width,
+                            height: style.height,
+                            transform: style.transform,
+                            background: shade,
+                            maskImage: shapeUrl,
+                            WebkitMaskImage: shapeUrl,
+                            maskSize: "100% 100%",
+                            WebkitMaskSize: "100% 100%",
+                          }}
+                        />
+                      )}
                     </Fragment>
                   );
                 })}
@@ -1201,7 +1405,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
             {/* Interaction layer: outlines and handles, in photo coordinates. Taps are hit-tested in code. */}
             <svg
               ref={svgRef}
-              className={`overlay ${drawing ? "drawing" : ""} ${segmentation ? "pickable" : ""}`}
+              className={`overlay ${drawing ? "drawing" : ""} ${segmentation ? "pickable" : ""} ${preview ? "preview" : ""}`}
               viewBox={`0 0 ${size.w} ${size.h}`}
               preserveAspectRatio="none"
               onPointerDown={onPointerDown}
@@ -1458,7 +1662,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
               const m = metricOf(selectedLayer.floorId);
               return plane && m ? distanceCm(plane, m, selectedLayer.points[0], selectedLayer.points[1]) : null;
             })()}
-            cutoutState={selectedLayer.kind === "product" ? cutouts[cutoutKey(selectedLayer)] : undefined}
+            cutoutState={selectedLayer.kind === "product" ? cutouts[layerCutKey(selectedLayer)] : undefined}
             onChange={(patch) => patchLayer(selectedLayer.id, patch)}
             onPlaceOnFloor={(floorId) => {
               const floor = floors.find((f) => f.id === floorId);
@@ -1486,7 +1690,16 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
         )}
       </div>
 
-      <Palette furniture={furniture} surfaces={surfaces} onAddProduct={onAddProduct} onFill={onFill} />
+      <Palette
+        furniture={furniture}
+        surfaces={surfaces}
+        onAddProduct={onAddProduct}
+        onFill={onFill}
+        onAddLink={onAddLink}
+        onFavoriteAll={onFavoriteAll}
+        room={photo?.room}
+        design={design}
+      />
     </section>
   );
 }
@@ -1497,8 +1710,3 @@ function distanceToSegment(p: Pt, a: Pt, b: Pt): number {
   return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
 }
 
-
-/** Stable key of a surface's texture (for caching turned versions). */
-function textureKey(l: SurfaceLayer): string {
-  return l.fill.type === "preset" ? `preset:${l.fill.preset}` : l.fill.type === "texture" ? `tex:${l.fill.productId}:${l.crop}` : "none";
-}

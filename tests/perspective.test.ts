@@ -74,6 +74,19 @@ describe("floor perspective from a mask", () => {
     expect(Math.abs(got[1] - vp[1]) / H).toBeLessThan(0.08);
   });
 
+  it("a wide sofa whose mask leaves a small gap to the floor does not pass for the far edge", () => {
+    const cam = shoot(f, W, H, 350, 520, 150, 0, 15);
+    const room: [number, number, number, number] = [100, 100, 600, 480];
+    const { mask, occ } = floorMask(cam, W, H, room, [200, 105, 500, 200]);
+    // Recognition masks seldom touch: shrink the sofa 3 px away from the floor.
+    const gap = new Uint8Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (occ[y * W + x] && !occ[Math.min(H - 1, y + 3) * W + x]) gap[y * W + x] = 1;
+    for (let i = 0; i < gap.length; i++) if (gap[i]) occ[i] = 0;
+    const q = fitFloorQuad(mask, W, H, occ)!;
+    const far = cam([350, 100, 0])!;
+    expect(Math.abs((q[0][1] + q[1][1]) / 2 - far[1])).toBeLessThan(H * 0.02);
+  });
+
   it("covers the whole floor", () => {
     const cam = shoot(f, W, H, 300, 900, 150, 25, 0);
     const { mask } = floorMask(cam, W, H, [-400, 100, 1200, 880]);

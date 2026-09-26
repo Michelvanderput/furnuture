@@ -1,4 +1,5 @@
 import { homography, project } from "./geometry";
+import { dilate } from "./masks";
 import type { FloorAnchor, Pt, Quad } from "./types";
 
 /** Floors and walls are modelled as a PLANE×PLANE square seen in perspective. */
@@ -110,9 +111,20 @@ export function ransacLine(ts: number[], vs: number[], tol: number, maxSlope = I
  *   assuming a level camera (horizon through the middle, as in most property photos);
  * - the quad is then spanned from V2 so that it covers the whole floor.
  */
+/**
+ * "Furniture is here" test for edge pixels. The masks of furniture and floor seldom
+ * touch exactly (a few pixels of neither in between), so the furniture is grown a
+ * little: the bottom of a sofa must never pass for the floor's far edge.
+ */
+function hiddenBy(occluder: Uint8Array | undefined, w: number, h: number) {
+  if (!occluder) return () => false;
+  const grown = dilate(occluder, w, h, Math.max(2, Math.round(Math.min(w, h) * 0.015)));
+  return (x: number, y: number) => x >= 0 && x < w && y >= 0 && y < h && !!grown[y * w + x];
+}
+
 export function fitFloorQuad(mask: Uint8Array, w: number, h: number, occluder?: Uint8Array): Quad | null {
   // Edges next to furniture are not real floor edges: leave them out of the fit.
-  const hidden = (x: number, y: number) => !!occluder && x >= 0 && x < w && y >= 0 && y < h && !!occluder[y * w + x];
+  const hidden = hiddenBy(occluder, w, h);
   const rows: number[] = [], left: number[] = [], right: number[] = [];
   for (let y = 0; y < h; y++) {
     let x0 = -1, x1 = -1;
@@ -204,7 +216,7 @@ export function fitFloorQuad(mask: Uint8Array, w: number, h: number, occluder?: 
 
 /** Perspective quad for a wall mask: vertical sides, top and bottom lines fitted to the mask. */
 export function fitWallQuad(mask: Uint8Array, w: number, h: number, occluder?: Uint8Array): Quad | null {
-  const hidden = (x: number, y: number) => !!occluder && y >= 0 && y < h && !!occluder[y * w + x];
+  const hidden = hiddenBy(occluder, w, h);
   const cols: number[] = [];
   const tc: number[] = [], tops: number[] = [], bc: number[] = [], bottoms: number[] = [];
   for (let x = 0; x < w; x++) {
@@ -242,7 +254,7 @@ const meanResidual = (ts: number[], vs: number[], l: Line) => ts.reduce((s, t, i
  * perspective. Each part has vertical sides, as walls do in a level photo.
  */
 export function fitWallQuads(mask: Uint8Array, w: number, h: number, occluder?: Uint8Array): WallPart[] {
-  const hidden = (x: number, y: number) => !!occluder && y >= 0 && y < h && !!occluder[y * w + x];
+  const hidden = hiddenBy(occluder, w, h);
   const cols: number[] = [], tops: (number | null)[] = [], bottoms: (number | null)[] = [];
   for (let x = 0; x < w; x++) {
     let y0 = -1, y1 = -1;

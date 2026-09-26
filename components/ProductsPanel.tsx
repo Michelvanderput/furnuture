@@ -4,9 +4,9 @@ import { memo, useCallback, useEffect, useState } from "react";
 import { CATEGORIES, ROOMS } from "@/lib/categories";
 import { shareOrDownload } from "@/lib/exportImage";
 import { euro, extractLinks, parsePrice, shoppingListCsv, shoppingListText, totalsPerRoom } from "@/lib/shopping";
-import type { Category, Dims, Product, ProductInfo, ProductStatus, Project, RoomType } from "@/lib/types";
-import { firstWorkingThumb } from "@/lib/images";
-import { newId } from "@/lib/useProject";
+import type { Category, Dims, Product, ProductStatus, Project, RoomType } from "@/lib/types";
+import { fetchProduct, sameLink } from "@/lib/products";
+import { fileToDataUrl, firstWorkingThumb } from "@/lib/images";
 import { Img } from "./Img";
 import { PasteButton } from "./PasteButton";
 
@@ -26,7 +26,6 @@ const BUY_ROOMS = ROOMS.filter((r) => !["buitenkant", "plattegrond", "overig"].i
 
 type Filter = "alles" | "favorieten" | "zonder-afgewezen";
 
-const sameLink = (a: string, b: string) => a.replace(/[?#].*$/, "").replace(/\/$/, "") === b.replace(/[?#].*$/, "").replace(/\/$/, "");
 
 export function ProductsPanel({ project, update }: Props) {
   const [links, setLinks] = useState("");
@@ -53,29 +52,11 @@ export function ProductsPanel({ project, update }: Props) {
     setPending((n) => n + urls.length);
     await Promise.all(
       urls.map(async (url) => {
-        try {
-          const res = await fetch("/api/product", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ url }),
-          });
-          const data = (await res.json()) as ProductInfo & { error?: string };
-          if (!res.ok) throw new Error(data.error ?? "mislukt");
-          update((p) => ({ ...p, products: [...p.products, { ...data, id: newId(), status: "optie", note: "" }] }));
-        } catch (e) {
-          // Keep the link anyway so the user can fill in the image by hand.
-          const host = new URL(url).hostname.replace(/^www\./, "");
-          update((p) => ({
-            ...p,
-            products: [
-              ...p.products,
-              { id: newId(), url, title: host, image: "", images: [], shop: host, category: "overig", status: "optie", note: "" },
-            ],
-          }));
-          setMessages((m) => [...m, `${host}: ${e instanceof Error ? e.message : e} — plak bij die kaart zelf een afbeeldingslink.`]);
-        } finally {
-          setPending((n) => n - 1);
-        }
+        const { product, error } = await fetchProduct(url);
+        update((p) => ({ ...p, products: [...p.products, product] }));
+        // The link is kept anyway, so the user can add a photo on its card.
+        if (error) setMessages((m) => [...m, `${error} — voeg bij die kaart zelf een foto toe.`]);
+        setPending((n) => n - 1);
       }),
     );
   }
@@ -248,11 +229,19 @@ const ProductCard = memo(function ProductCard({
         ) : p.color ? (
           <div className="swatch" style={{ background: p.color }} />
         ) : (
-          <input
-            className="image-url"
-            placeholder="Plak afbeeldingslink…"
-            onBlur={(e) => e.target.value && (setFailed(false), set({ image: e.target.value, images: [e.target.value, ...p.images], thumb: undefined }))}
-          />
+          <div className="stack">
+            <input
+              className="image-url"
+              placeholder="Plak afbeeldingslink…"
+              onBlur={(e) => e.target.value && (setFailed(false), set({ image: e.target.value, images: [e.target.value, ...p.images], thumb: undefined }))}
+            />
+            <PhotoUpload onPhoto={(url) => (setFailed(false), set({ image: url, images: [url, ...p.images], thumb: undefined }))} label="📷 Foto kiezen" />
+          </div>
+        )}
+        {p.image && (
+          <div className="thumb-actions">
+            <PhotoUpload onPhoto={(url) => (setFailed(false), set({ image: url, images: [url, ...p.images], thumb: undefined }))} label="📷" title="Eigen foto (bijvoorbeeld een screenshot van de webshop)" />
+          </div>
         )}
         {p.images.length > 1 && (
           <div className="cycle">
@@ -350,5 +339,24 @@ function DimsInput({ dims, onChange }: { dims?: Dims; onChange: (d: Dims | undef
       {field("h", "H")}
       <span className="muted">cm</span>
     </div>
+  );
+}
+
+/** Pick or take a photo for a product (when the shop blocks us, or its photo is a sfeerfoto). */
+function PhotoUpload({ onPhoto, label, title }: { onPhoto: (dataUrl: string) => void; label: string; title?: string }) {
+  return (
+    <label className="button small" title={title}>
+      {label}
+      <input
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={async (e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) onPhoto(await fileToDataUrl(file, 1200));
+        }}
+      />
+    </label>
   );
 }
