@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { homography } from "@/lib/geometry";
-import { floodRoom, itemToLayer, linkFromWall, linkedView } from "@/lib/floorplan";
+import { farEdgeMarkers, floodRoom, itemToLayer, linkFromPoints, linkFromWall, linkedView } from "@/lib/floorplan";
 import type { PlanItem, Pt, Quad } from "@/lib/types";
 
 /** Camera from tests/camera.test.ts: plan X right, Y down, Z up (plan pixels = cm here). */
@@ -31,6 +31,32 @@ describe("floor plan rooms", () => {
     // Tapping outside the house (everything around it) is refused.
     expect(floodRoom({ data, width: w, height: h }, [50, 35], 0.3)).toBeNull();
   });
+
+  it("follows an L-shaped room and stops at a door to the hall", () => {
+    const w = 300, h = 200;
+    const data = new Uint8ClampedArray(w * h * 4).fill(255);
+    const wall = (x0: number, y0: number, x1: number, y1: number) => {
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) data.set([0, 0, 0, 255], (y * w + x) * 4);
+    };
+    // Outer walls of an L: 10..150 wide at the top, only 10..80 below y = 70; a hall 80..150 × 70..130.
+    wall(10, 10, 150, 12); wall(10, 10, 12, 130); wall(10, 128, 150, 130); wall(148, 10, 150, 130);
+    // Wall between the room and the hall, with an 8 px door at x 100..108.
+    wall(80, 70, 100, 72); wall(108, 70, 150, 72); wall(80, 70, 82, 130);
+    const poly = floodRoom({ data, width: w, height: h }, [40, 40])!;
+    const inside = (x: number, y: number) => {
+      let c = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const [xi, yi] = poly[i], [xj, yj] = poly[j];
+        if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c;
+      }
+      return c;
+    };
+    expect(inside(40, 40)).toBe(true); // top part
+    expect(inside(40, 110)).toBe(true); // the leg of the L
+    expect(inside(120, 110)).toBe(false); // the hall behind the door
+    expect(inside(130, 40)).toBe(true);
+    expect(poly.length).toBeLessThan(16); // a clean outline, not every pixel step
+  });
 });
 
 describe("linking a photo and seeing plan furniture in it", () => {
@@ -60,6 +86,21 @@ describe("linking a photo and seeing plan furniture in it", () => {
     expect(layer.flip).toBe(false);
     // Turned around (facing the wall): the camera sees its back.
     expect(itemToLayer({ ...sofa, angle: 180 }, view, 1, 0.4)!.flip).toBe(true);
+  });
+
+  it("links from the visible part of the far edge when a corner is out of the photo", () => {
+    // Camera in the room, turned right: the far wall runs out of the picture on the left.
+    const cam2 = shoot(f, W, H, 300, 480, 150, 30, 12);
+    const quad = [[100, 100], [600, 100], [600, 400], [100, 400]].map(([x, y]) => cam2([x, y, 0])) as Quad;
+    expect(quad[0][0]).toBeLessThan(0); // L corner not in view
+    const m = farEdgeMarkers(quad, W, H);
+    expect(m.L[0]).toBeGreaterThan(0);
+    expect(m.ua).toBeGreaterThan(0);
+    // Where the user taps on the plan for L and R: those points of the top wall.
+    const onWall = (u: number): Pt => [100 + 500 * u, 100];
+    const plan = linkFromPoints(onWall(m.ua), onWall(m.ub), quad, W, H, m.ua, m.ub);
+    expect(plan[0][0]).toBeCloseTo(100, 0);
+    expect(plan[1][0]).toBeCloseTo(600, 0);
   });
 
   it("uses the plan homography consistently", () => {

@@ -315,15 +315,22 @@ export function fitWallQuads(mask: Uint8Array, w: number, h: number, occluder?: 
  */
 export function extendedPlane(plane: Quad, role: "floor" | "wall" | undefined): { quad: Quad; u0: number; v0: number; w: number; h: number } | null {
   const h = planeToImage(plane);
-  let ext = role === "wall" ? { l: 0.6, r: 0.6, t: 0.5, b: 0.3 } : { l: 1.5, r: 1.5, t: 0.03, b: 1.5 };
+  // A wall stops at the floor line: where erased furniture stood, the floor below is not wall.
+  let ext = role === "wall" ? { l: 0.6, r: 0.6, t: 0.5, b: 0.02 } : { l: 1.5, r: 1.5, t: 0.8, b: 1.5 };
+  // Towards the horizon as far as the camera allows (an open-plan room's floor runs on
+  // past the fitted far edge); the photo's floor mask decides what is shown.
+  const farSteps = [1, 0.5, 0.25, 0.1, 0.04];
   for (let tries = 0; tries < 6; tries++) {
-    const u0 = -ext.l * PLANE, v0 = -ext.t * PLANE, u1 = (1 + ext.r) * PLANE, v1 = (1 + ext.b) * PLANE;
-    const corners: Pt[] = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
-    // Every corner must be in front of the camera (positive homogeneous w).
-    // (relative to the plane's own corner, which is visible; the overall sign of H is arbitrary)
-    const ok = corners.every(([u, v]) => (h[6] * u + h[7] * v + h[8]) / h[8] > 0.05);
-    if (ok) return { quad: corners.map((c) => project(h, c)) as Quad, u0, v0, w: u1 - u0, h: v1 - v0 };
-    ext = { l: ext.l / 2, r: ext.r / 2, t: ext.t / 2, b: ext.b / 2 };
+    for (const k of farSteps) {
+      const t = ext.t * k;
+      const u0 = -ext.l * PLANE, v0 = -t * PLANE, u1 = (1 + ext.r) * PLANE, v1 = (1 + ext.b) * PLANE;
+      const corners: Pt[] = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
+      // Every corner must be in front of the camera (positive homogeneous w).
+      // (relative to the plane's own corner, which is visible; the overall sign of H is arbitrary)
+      const ok = corners.every(([u, v]) => (h[6] * u + h[7] * v + h[8]) / h[8] > 0.05);
+      if (ok) return { quad: corners.map((c) => project(h, c)) as Quad, u0, v0, w: u1 - u0, h: v1 - v0 };
+    }
+    ext = { l: ext.l / 2, r: ext.r / 2, t: ext.t, b: ext.b / 2 };
   }
   return null;
 }

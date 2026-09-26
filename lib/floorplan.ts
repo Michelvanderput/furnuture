@@ -1,6 +1,8 @@
 import { cameraFromHomography, cameraOnPlan, depthOf, project3, type Camera } from "./camera";
 import { homography, project } from "./geometry";
+import { components, dilate, erode, fillHoles } from "./masks";
 import { estimateFocal, planeAspect } from "./metric";
+import { PLANE, planeToImage } from "./plane";
 import type { RoomSegmentation } from "./segment";
 import type { FloorPlan, PhotoLink, PlanItem, ProductLayer, Pt, Quad } from "./types";
 
@@ -23,22 +25,86 @@ export function floodRoom(img: { data: Uint8ClampedArray; width: number; height:
   const stack = [sy * w + sx];
   seen[stack[0]] = 1;
   let area = 0;
-  const left = new Int32Array(h).fill(w), right = new Int32Array(h).fill(-1);
   while (stack.length) {
     const i = stack.pop()!;
     area++;
     if (area > w * h * maxShare) return null;
     const x = i % w, y = (i / w) | 0;
-    if (x < left[y]) left[y] = x;
-    if (x > right[y]) right[y] = x;
     for (const n of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) {
       if (n >= 0 && !seen[n] && light(n)) (seen[n] = 1), stack.push(n);
     }
   }
   if (area < 50) return null;
-  const pts: Pt[] = [];
-  for (let y = 0; y < h; y++) if (right[y] >= 0) pts.push([left[y], y], [right[y], y]);
-  return simplify(convexHull(pts), 2);
+  // Room names and furniture symbols are holes in the fill: part of the room.
+  let region = fillHoles(seen, w, h);
+  // Cut narrow passages (a door into the hall): open the shape, keep the part with the tap.
+  const r = Math.max(2, Math.round(Math.max(w, h) * 0.02));
+  const core = erode(region, w, h, r);
+  const { labels, sizes } = components(core, w, h);
+  let keep = labels[sy * w + sx];
+  if (!keep) keep = sizes.reduce((best, size, i) => (i && size > (sizes[best] ?? 0) ? i : best), 0);
+  if (keep) {
+    const grown = dilate(labels.map((l) => (l === keep ? 1 : 0)) as unknown as Uint8Array, w, h, r + 1);
+    const cut = region.map((v, i) => (v && grown[i] ? 1 : 0));
+    if (cut.some(Boolean)) region = cut;
+  }
+  return simplifyPath(traceOutline(region, w, h), Math.max(1.5, Math.max(w, h) * 0.006));
+}
+
+/** Outline (pixel centres, clockwise) of the region that contains the first set pixel (Moore neighbour tracing). */
+export function traceOutline(mask: Uint8Array, w: number, h: number): Pt[] {
+  let start = -1;
+  for (let i = 0; i < w * h; i++) if (mask[i]) ((start = i), (i = w * h));
+  if (start < 0) return [];
+  const inside = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && !!mask[y * w + x];
+  // Neighbours clockwise, starting west.
+  const dirs: Pt[] = [[-1, 0], [-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1]];
+  const sx = start % w, sy = (start / w) | 0;
+  const out: Pt[] = [[sx, sy]];
+  let x = sx, y = sy, from = 0; // we "came from" the west (outside)
+  for (let guard = 0; guard < 4 * w * h; guard++) {
+    let found = false;
+    for (let k = 0; k < 8; k++) {
+      const d = (from + k) % 8;
+      const nx = x + dirs[d][0], ny = y + dirs[d][1];
+      if (inside(nx, ny)) {
+        x = nx;
+        y = ny;
+        from = (d + 5) % 8; // back towards where we came from, one step on
+        found = true;
+        break;
+      }
+    }
+    if (!found || (x === sx && y === sy)) break;
+    out.push([x, y]);
+  }
+  return out;
+}
+
+/** Douglas–Peucker for a closed outline: keeps the corners of walls, drops the pixel steps. */
+export function simplifyPath(poly: Pt[], tol: number): Pt[] {
+  if (poly.length <= 4) return poly;
+  const dist = (p: Pt, a: Pt, b: Pt) => {
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const len = Math.hypot(dx, dy);
+    return len ? Math.abs(dy * p[0] - dx * p[1] + b[0] * a[1] - b[1] * a[0]) / len : Math.hypot(p[0] - a[0], p[1] - a[1]);
+  };
+  const dp = (pts: Pt[]): Pt[] => {
+    let idx = 0, max = 0;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const d = dist(pts[i], pts[0], pts[pts.length - 1]);
+      if (d > max) (max = d), (idx = i);
+    }
+    if (max <= tol) return [pts[0], pts[pts.length - 1]];
+    return [...dp(pts.slice(0, idx + 1)).slice(0, -1), ...dp(pts.slice(idx))];
+  };
+  // Split the loop at the point farthest from the start, simplify both halves.
+  let far = 0;
+  for (let i = 1; i < poly.length; i++) if (Math.hypot(poly[i][0] - poly[0][0], poly[i][1] - poly[0][1]) > Math.hypot(poly[far][0] - poly[0][0], poly[far][1] - poly[0][1])) far = i;
+  const a = dp(poly.slice(0, far + 1));
+  const b = dp([...poly.slice(far), poly[0]]);
+  const out = [...a.slice(0, -1), ...b.slice(0, -1)];
+  return out.length >= 3 ? out : poly;
 }
 
 export function convexHull(points: Pt[]): Pt[] {
@@ -55,18 +121,6 @@ export function convexHull(points: Pt[]): Pt[] {
     upper.push(q);
   }
   return [...lower.slice(0, -1), ...upper.slice(0, -1)];
-}
-
-/** Drop hull points that hardly change the outline (keeps room corners). */
-function simplify(poly: Pt[], tol: number): Pt[] {
-  if (poly.length <= 4) return poly;
-  const out: Pt[] = [];
-  for (let i = 0; i < poly.length; i++) {
-    const a = poly[(i - 1 + poly.length) % poly.length], b = poly[i], c = poly[(i + 1) % poly.length];
-    const area2 = Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
-    if (area2 / (Math.hypot(c[0] - a[0], c[1] - a[1]) || 1) > tol) out.push(b);
-  }
-  return out.length >= 3 ? out : poly;
 }
 
 export const centroidOf = (poly: Pt[]): Pt => [poly.reduce((s, p) => s + p[0], 0) / poly.length, poly.reduce((s, p) => s + p[1], 0) / poly.length];
@@ -92,16 +146,45 @@ export function linkFromWall(room: Pt[], wallIndex: number, floorQuad: Quad, ima
 }
 
 /**
- * Same, from the two far floor corners tapped on the plan: L is the one on the
+ * Same, from the two far floor points tapped on the plan: L is the one on the
  * left in the photo, R on the right. The room lies on the side you face.
+ * `ua`, `ub`: where L and R lie along the floor's far edge (0 = its left corner,
+ * 1 = its right corner), for when a corner is out of the photo (see farEdgeMarkers).
  */
-export function linkFromPoints(L: Pt, R: Pt, floorQuad: Quad, imageW: number, imageH: number): Quad {
+export function linkFromPoints(L: Pt, R: Pt, floorQuad: Quad, imageW: number, imageH: number, ua = 0, ub = 1): Quad {
   const len = Math.hypot(R[0] - L[0], R[1] - L[1]) || 1;
   const r: Pt = [(R[0] - L[0]) / len, (R[1] - L[1]) / len];
   const n: Pt = [-r[1], r[0]]; // towards the camera, into the room
+  const width = len / Math.max(0.05, ub - ua); // the whole far edge on the plan
+  const L0: Pt = [L[0] - r[0] * ua * width, L[1] - r[1] * ua * width];
+  const R0: Pt = [L0[0] + r[0] * width, L0[1] + r[1] * width];
   const rho = planeAspect(floorQuad, estimateFocal(floorQuad, imageW, imageH), imageW, imageH);
-  const depth = len * rho;
-  return [L, R, [R[0] + n[0] * depth, R[1] + n[1] * depth], [L[0] + n[0] * depth, L[1] + n[1] * depth]];
+  const depth = width * rho;
+  return [L0, R0, [R0[0] + n[0] * depth, R0[1] + n[1] * depth], [L0[0] + n[0] * depth, L0[1] + n[1] * depth]];
+}
+
+/**
+ * The two points to find on the plan: the floor's far corners, or, when a corner is
+ * out of the photo (often: the camera stands in the room), the last point of the far
+ * edge that is still well inside the photo. `ua`/`ub` say where they are on the edge.
+ */
+export function farEdgeMarkers(floorQuad: Quad, imageW: number, imageH: number): { L: Pt; R: Pt; ua: number; ub: number } {
+  const toImage = planeToImage(floorQuad);
+  const mx = imageW * 0.05, my = imageH * 0.05;
+  const at = (u: number): Pt => project(toImage, [u * PLANE, 0]);
+  const inside = (u: number) => {
+    const [x, y] = at(u);
+    return x >= mx && x <= imageW - mx && y >= my && y <= imageH - my;
+  };
+  let ua = -1, ub = -1;
+  for (let i = 0; i <= 200; i++) {
+    const u = i / 200;
+    if (!inside(u)) continue;
+    if (ua < 0) ua = u;
+    ub = u;
+  }
+  if (ua < 0 || ub - ua < 0.15) (ua = 0), (ub = 1);
+  return { L: at(ua), R: at(ub), ua, ub };
 }
 
 export interface LinkedView {

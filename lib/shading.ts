@@ -40,7 +40,8 @@ function maskedBlur(values: Float32Array, weight: Float32Array, w: number, h: nu
     pass(tmpW, wt, false);
   }
   const out = new Float32Array(w * h);
-  for (let i = 0; i < w * h; i++) out[i] = wt[i] > 1e-4 ? v[i] / wt[i] : 0;
+  // NaN where no surface pixel is near: the caller fills those in.
+  for (let i = 0; i < w * h; i++) out[i] = wt[i] > 1e-4 ? v[i] / wt[i] : NaN;
   return out;
 }
 
@@ -77,6 +78,15 @@ export function shadingFromPixels(rgba: Uint8ClampedArray, mask: Uint8Array, w: 
     }
     mean /= count;
     const lit = maskedBlur(ch, weight, w, h, r);
+    // Far from the measured surface (where erased furniture stood, which the new floor
+    // now covers too): the light of a much wider neighbourhood, else neutral. It used
+    // to be black there.
+    let wide: Float32Array | null = null;
+    for (let i = 0; i < n; i++) {
+      if (!Number.isNaN(lit[i])) continue;
+      wide ??= maskedBlur(ch, weight, w, h, r * 6, 2);
+      lit[i] = Number.isNaN(wide[i]) ? mean : wide[i];
+    }
     for (let i = 0; i < n; i++) {
       const ratio = mean > 1e-5 ? (1 + (lit[i] / mean - 1) * strength) : 1;
       // Back to sRGB for the blend (multiply/screen work on displayed values).

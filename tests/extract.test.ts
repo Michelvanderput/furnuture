@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { guessCategory } from "@/lib/categories";
-import { extractFundaPhotos, fundaListingId, largeImageUrl, isFundaUrl, parseFunda, parseFundaApi, parseProduct, productImages } from "@/lib/extract";
+import { extractFundaPhotos, fundaListingId, largeImageUrl, isFundaUrl, parseFunda, parseFundaApi, parseProduct, productImages, withoutShopName } from "@/lib/extract";
 
 describe("funda", () => {
   const html = `
@@ -161,5 +161,13 @@ describe("shop quirks", () => {
     expect(largeImageUrl("https://d2fb1ew6v6wv87.cloudfront.net/products/10063742/s01/424x424/origin.webp")).toBe(
       "https://d2fb1ew6v6wv87.cloudfront.net/products/10063742/s01/1400x1400/origin.webp",
     );
+  });
+});
+
+describe("product titles", () => {
+  it("drops the shop's name at the end", () => {
+    expect(withoutShopName("Flexa Kleur van het Jaar 2025 | True Joy™ | Flexa", "Flexa")).toBe("Flexa Kleur van het Jaar 2025 | True Joy™");
+    expect(withoutShopName("Bank Lissabon - 3-zits - Leen Bakker", "Leenbakker")).toBe("Bank Lissabon - 3-zits");
+    expect(withoutShopName("GLOSTAD 3-zitsbank - Knisa donkergrijs", "Ikea")).toBe("GLOSTAD 3-zitsbank - Knisa donkergrijs");
   });
 });

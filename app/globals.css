@@ -259,7 +259,6 @@ h3.group { margin-top: 28px; padding-bottom: 6px; border-bottom: 1px solid var(-
 .plan-main { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .plan-stage { background: #fff; }
 .plan-stage .plan-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
-.plan-stage.mini { max-height: 55vh; }
 .plan-choice { padding: 0; overflow: hidden; display: flex; flex-direction: column; text-align: center; }
 .plan-choice img { width: 100%; aspect-ratio: 3 / 2; object-fit: contain; background: #fff; }
 .plan-choice span { padding: 6px; font-weight: 600; }
@@ -282,6 +281,14 @@ h3.group { margin-top: 28px; padding-bottom: 6px; border-bottom: 1px solid var(-
 .overlay .link-marker { pointer-events: none; }
 .link-panel { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 2px solid var(--accent); border-radius: 8px; background: var(--surface); }
 .link-panel p { margin: 0; }
+.link-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+.link-body > :only-child { grid-column: 1 / -1; }
+.link-photo { width: 100%; }
+.link-photo .corner-label { fill: #fff; stroke: #000; stroke-width: 3px; paint-order: stroke; font-weight: 700; }
+.link-photo .link-marker circle { fill: var(--accent); stroke: #fff; stroke-width: 3; vector-effect: non-scaling-stroke; }
+.link-photo .link-marker.next circle { animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+@media (max-width: 700px) { .link-body { grid-template-columns: 1fr; } }
 .chip.warn { border-color: #d9a400; background: #fff4d6; color: #5a4300; }
 button.on { background: var(--accent-soft); border-color: var(--accent); }
 .room-name { width: 180px; }
@@ -300,3 +307,4 @@ button.on { background: var(--accent-soft); border-color: var(--accent); }
 label.button.small { padding: 3px 8px; font-size: 13px; }
 .overlay.preview > * { display: none; }
 .overlay.preview { cursor: zoom-out; }
+.link-photo .plan-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }

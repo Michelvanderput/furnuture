@@ -68,19 +68,35 @@ export function polygonMask(polygon: [number, number][], w: number, h: number): 
   return out;
 }
 
-/** Mask as an orange PNG: its alpha is the area, the colour doubles as highlight. */
-export function maskToDataUrl(mask: Uint8Array, w: number, h: number): string {
+/**
+ * Mask as an orange PNG: its alpha is the area, the colour doubles as highlight.
+ * `smooth`: twice the size with interpolated edges. Masks are made at a few hundred
+ * pixels wide and stretched over the photo; without this, a painted wall or new
+ * floor showed a staircase along its edges.
+ */
+export function maskToDataUrl(mask: Uint8Array, w: number, h: number, smooth = true): string {
+  const s = smooth ? 2 : 1;
+  const W = w * s, H = h * s;
   const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
+  canvas.width = W;
+  canvas.height = H;
   const ctx = canvas.getContext("2d")!;
-  const img = ctx.createImageData(w, h);
-  for (let i = 0; i < w * h; i++) {
-    if (!mask[i]) continue;
-    img.data.set([233, 96, 31, 255], i * 4);
+  const img = ctx.createImageData(W, H);
+  const at = (x: number, y: number) => mask[Math.min(h - 1, Math.max(0, y)) * w + Math.min(w - 1, Math.max(0, x))] ? 1 : 0;
+  for (let Y = 0; Y < H; Y++) {
+    const fy = (Y + 0.5) / s - 0.5, y0 = Math.floor(fy), ty = fy - y0;
+    for (let X = 0; X < W; X++) {
+      const fx = (X + 0.5) / s - 0.5, x0 = Math.floor(fx), tx = fx - x0;
+      const v = s === 1 ? at(X, Y) :
+        (at(x0, y0) * (1 - tx) + at(x0 + 1, y0) * tx) * (1 - ty) + (at(x0, y0 + 1) * (1 - tx) + at(x0 + 1, y0 + 1) * tx) * ty;
+      if (!v) continue;
+      img.data.set([233, 96, 31, Math.round(v * 255)], (Y * W + X) * 4);
+    }
   }
   ctx.putImageData(img, 0, 0);
-  return canvas.toDataURL("image/png");
+  const url = canvas.toDataURL("image/png");
+  canvas.width = canvas.height = 0;
+  return url;
 }
 
 /** Decodes a PNG mask to a binary mask of w×h (default: the PNG's own size). Not cached. */

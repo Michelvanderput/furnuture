@@ -296,6 +296,13 @@ function linkImages(html: string): string[] {
   return out.filter(Boolean);
 }
 
+/** "Kleur van het Jaar 2025 | True Joy™ | Flexa" → "Kleur van het Jaar 2025 | True Joy™": the shop's name is shown anyway. */
+export function withoutShopName(title: string, shop: string): string {
+  const parts = title.split(/\s+[|–—-]\s+/);
+  while (parts.length > 1 && parts[parts.length - 1].toLowerCase().replace(/[^a-z0-9]/g, "").includes(shop.toLowerCase().replace(/[^a-z0-9]/g, ""))) parts.pop();
+  return parts.join(" | ") === title ? title : title.slice(0, title.lastIndexOf(parts[parts.length - 1]) + parts[parts.length - 1].length);
+}
+
 export function parseProduct(html: string, pageUrl: string): ProductInfo {
   const meta = extractMeta(html);
   const ld = extractJsonLd(html);
@@ -340,7 +347,7 @@ export function parseProduct(html: string, pageUrl: string): ProductInfo {
     new URL(pageUrl).pathname.replace(/[-_/]/g, " "),
   );
 
-  const cleanTitle = decodeEntities(String(title)).replace(/\s+/g, " ").trim();
+  const cleanTitle = withoutShopName(decodeEntities(String(title)).replace(/\s+/g, " ").trim(), shopName(pageUrl));
   const dims = mergeDims(
     dimsFromJsonLd(product),
     dimsFromNamedMeasures(html),

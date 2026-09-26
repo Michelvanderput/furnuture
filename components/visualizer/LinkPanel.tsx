@@ -12,6 +12,8 @@ interface Props {
   /** Current link quad on the plan (for fine-tuning), if linked. */
   linkQuad?: Quad;
   imageW: number;
+  /** The photo and its far floor corners L and R (photo pixels), shown next to the plan. */
+  photo?: { url: string; w: number; h: number; corners: Pt[] };
   onLink: (left: Pt, right: Pt) => void;
   onAdjust: (quad: Quad) => void;
   onUnlink: () => void;
@@ -23,7 +25,7 @@ interface Props {
  * marked in the photo) are on the plan. Room corners snap. The recovered camera
  * is drawn on the plan, so you see immediately whether it is right.
  */
-export function LinkPanel({ plan, planUrl, view, linkQuad, imageW, onLink, onAdjust, onUnlink, onClose }: Props) {
+export function LinkPanel({ plan, planUrl, view, linkQuad, imageW, photo, onLink, onAdjust, onUnlink, onClose }: Props) {
   const [taps, setTaps] = useState<Pt[]>([]);
   const svgRef = useRef<SVGSVGElement>(null);
   const dragIndex = useRef<number | null>(null);
@@ -70,12 +72,29 @@ export function LinkPanel({ plan, planUrl, view, linkQuad, imageW, onLink, onAdj
       </div>
       <p className="small">
         {taps.length === 0
-          ? "Tik op de plattegrond waar punt L staat (de linker verre hoek van de vloer, zie de foto)."
-          : "Tik nu waar punt R staat (de rechter verre hoek)."}{" "}
+          ? "Tik op de plattegrond waar punt L ligt: links in de foto, waar de vloer de achterwand raakt."
+          : "Tik nu waar punt R ligt: rechts in de foto, ook tegen de achterwand."}{" "}
         Kamerhoeken worden vanzelf gevonden.
         {linkQuad && " Gekoppeld: de camera staat op de plattegrond. Klopt het niet helemaal? Versleep de oranje punten."}
       </p>
-      <div className="stage plan-stage mini" style={{ aspectRatio: `${W} / ${H}` }}>
+      <div className="link-body">
+      {photo && (
+        // The photo with L and R right next to the plan: no scrolling back and forth on an iPad.
+        <div className="stage link-photo" style={{ aspectRatio: `${photo.w} / ${photo.h}` }}>
+          <Img src={photo.url} alt="Foto" className="plan-image" />
+          <svg className="overlay" viewBox={`0 0 ${photo.w} ${photo.h}`} preserveAspectRatio="none">
+            {photo.corners.slice(0, 2).map((p, i) => (
+              <g key={i} className={`link-marker ${i === taps.length && !linkQuad ? "next" : ""}`}>
+                <circle cx={p[0]} cy={p[1]} r={photo.w / 45} />
+                <text x={p[0]} y={p[1] - photo.w / 28} fontSize={photo.w / 18} textAnchor="middle" className="corner-label">
+                  {i ? "R" : "L"}
+                </text>
+              </g>
+            ))}
+          </svg>
+        </div>
+      )}
+      <div className="stage plan-stage mini" style={{ aspectRatio: `${W} / ${H}`, width: `min(100%, calc(55vh * ${W / H}))`, marginInline: "auto" }}>
         <Img src={planUrl} alt="Plattegrond" className="plan-image" />
         <svg
           ref={svgRef}
@@ -131,6 +150,7 @@ export function LinkPanel({ plan, planUrl, view, linkQuad, imageW, onLink, onAdj
             </g>
           ))}
         </svg>
+      </div>
       </div>
     </div>
   );

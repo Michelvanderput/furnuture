@@ -21,7 +21,7 @@ import {
 import { workSize } from "@/lib/labels";
 import { distanceCm, footprint, formatCm } from "@/lib/metric";
 import { Selector } from "@/lib/sam";
-import { linkedView, linkFromPoints, photoToPlan, planLayersFor, scanFurniture } from "@/lib/floorplan";
+import { farEdgeMarkers, linkedView, linkFromPoints, photoToPlan, planLayersFor, scanFurniture } from "@/lib/floorplan";
 import { defaultSize, planForPhoto, plansOf, updateItem, updatePlan } from "@/lib/plans";
 import { photoLightSide, photoLook, productFilter, sideShade } from "@/lib/look";
 import { dilate, dropSpecks, fillHoles, interiorPoints, loadHitMask, maskHit, maskToDataUrl, paintCircle, polygonMask, rememberMask } from "@/lib/masks";
@@ -338,6 +338,13 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   const link = linkedPlan && photo ? linkedPlan.links[photo.id] : undefined;
   const linkFloor = link ? layers.find((l) => l.id === link.floorId) : undefined;
   const linkQuad = linkFloor?.kind === "surface" ? planeOf(linkFloor) : null;
+  /** L and R to find on the plan: the floor's far corners, or the last visible points of its far edge. */
+  const linkMarkers = useMemo(() => {
+    const q = linkQuad ?? (floors.at(-1) && planeOf(floors.at(-1)!));
+    if (!q || !size) return null;
+    const m = farEdgeMarkers(q, size.w, size.h);
+    return [m.L, m.R] as Pt[];
+  }, [linkQuad, floors, size]);
   const view = useMemo(
     () => (link && linkQuad && size ? linkedView(link, linkQuad, size.w, size.h) : null),
     [link, linkQuad, size],
@@ -358,6 +365,15 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     [linkedPlan, view, aspects],
   );
   const allLayers = useMemo(() => [...layers, ...planLayers], [layers, planLayers]);
+  /**
+   * Drawing order: walls, then floors, then everything else (stable otherwise). Where
+   * erased furniture stood both a new wall and a new floor may reach; the floor wins,
+   * also when the wall was painted after the floor was laid.
+   */
+  const drawn = useMemo(() => {
+    const rank = (l: Layer) => (l.kind !== "surface" ? 2 : l.role === "wall" ? 0 : 1);
+    return [...allLayers].sort((a, b) => rank(a) - rank(b));
+  }, [allLayers]);
 
   // Room light and shadow for textured floors and walls (see lib/shading.ts). Recomputed
   // shortly after the surface or the erased photo changes, not on every drag frame.
@@ -450,7 +466,8 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     const floor = (link && floors.find((f) => f.id === link.floorId)) ?? floors.at(-1);
     const quad = floor && planeOf(floor);
     if (!floor || !quad) return;
-    const planQuad = linkFromPoints(L, R, quad, size.w, size.h);
+    const m = farEdgeMarkers(quad, size.w, size.h);
+    const planQuad = linkFromPoints(L, R, quad, size.w, size.h, m.ua, m.ub);
     const lenPx = Math.hypot(R[0] - L[0], R[1] - L[1]);
     const metric = floorMetric(layers, floor.id);
     // Scale travels both ways: a measured photo scales the plan, a scaled plan measures the photo.
@@ -630,7 +647,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     brushFrame.current = requestAnimationFrame(() => {
       brushFrame.current = 0;
       const c = brush.current;
-      if (c) setSelection((s) => (s ? { ...s, mask: c.mask, url: maskToDataUrl(c.mask, c.w, c.h) } : s));
+      if (c) setSelection((s) => (s ? { ...s, mask: c.mask, url: maskToDataUrl(c.mask, c.w, c.h, false) } : s));
     });
   }
 
@@ -1171,7 +1188,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
         width: size.w,
         height: size.h,
         background: hasErased ? erased!.url : proxied(photo.url),
-        layers: allLayers,
+        layers: drawn,
         productSrc: (l) => {
           const p = productById.get(l.productId);
           return cutoutSrc(l) ?? (p?.image ? proxied(p.image) : null);
@@ -1295,6 +1312,9 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
             view={view}
             linkQuad={link?.plan}
             imageW={size.w}
+            photo={(() => {
+              return linkMarkers && background ? { url: background, w: size.w, h: size.h, corners: linkMarkers } : undefined;
+            })()}
             onLink={linkPhoto}
             onAdjust={(q) => photo && updatePlan(update, plan.id, (pl) => ({ ...pl, links: { ...pl.links, [photo.id]: { ...pl.links[photo.id], plan: q } } }))}
             onUnlink={() => (unlinkPhoto(), setLinking(false))}
@@ -1402,7 +1422,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
                 <Img className="layer" src={photo.url} alt="" style={{ width: size.w, height: size.h }} />
               )}
               {showLayers &&
-                allLayers.map((l) => {
+                drawn.map((l) => {
                   if (l.kind === "erase" || l.kind === "measure") return null;
                   if (l.kind === "surface" && l.fill.type === "none") return null;
                   if (l.kind === "surface") {
@@ -1552,7 +1572,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
                     </g>
                   ))}
               {linking &&
-                (linkQuad ?? (floors.at(-1) && planeOf(floors.at(-1)!)))?.slice(0, 2).map((p, i) => (
+                linkMarkers?.map((p, i) => (
                   <g key={i} className="link-marker">
                     <circle cx={p[0]} cy={p[1]} r={handleR} />
                     <MeasureLabel at={[p[0], p[1] - handleR * 2.2]} text={i ? "R" : "L"} size={size.w * 1.3} />

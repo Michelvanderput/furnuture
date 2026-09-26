@@ -312,7 +312,11 @@ function PlanEditor({
           </ol>
         )}
 
-        <div className="stage plan-stage" style={{ aspectRatio: `${W} / ${H}` }}>
+        <div
+          className="stage plan-stage"
+          // As large as fits: the whole drawing in view, also on an iPad held sideways.
+          style={{ aspectRatio: `${W} / ${H}`, width: `min(100%, calc((100vh - 230px) * ${W / H}))`, marginInline: "auto" }}
+        >
           <Img src={photoUrl} alt="Plattegrond" className="plan-image" />
           <svg
             ref={svgRef}

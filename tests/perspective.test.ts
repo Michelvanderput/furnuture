@@ -129,11 +129,13 @@ describe("walls in corners", () => {
 });
 
 describe("extended plane", () => {
-  it("grows sideways and towards the camera, barely towards the horizon", () => {
+  it("grows sideways, towards the camera and on towards the horizon (open-plan rooms)", () => {
     const plane: [number, number][] = [[200, 150], [280, 150], [400, 320], [80, 320]];
     const e = extendedPlane(plane as never, "floor")!;
     expect(e.quad[3][1]).toBeGreaterThan(320);
-    expect(e.quad[0][1]).toBeLessThan(150);
-    expect(e.quad[0][1]).toBeGreaterThan(100);
+    expect(e.quad[0][1]).toBeLessThan(140);
+    // The side lines meet at y = 150 − 170·80/240 ≈ 93 (the horizon): the plane stays below it.
+    expect(e.quad[0][1]).toBeGreaterThan(93);
+    expect(e.quad.every((p) => p.every(Number.isFinite))).toBe(true);
   });
 });
