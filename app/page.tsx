@@ -6,6 +6,7 @@ import { ListingPanel } from "@/components/ListingPanel";
 import { backupBlob, backupFileName, readBackup } from "@/lib/backup";
 import { shareOrDownload } from "@/lib/exportImage";
 import { useProject } from "@/lib/useProject";
+import { isLightMode, setLightMode, takeCrashReport } from "@/lib/worker";
 
 // Loaded when the tab is first opened: a faster first start, especially on an iPad.
 const ProductsPanel = dynamic(() => import("@/components/ProductsPanel").then((m) => m.ProductsPanel), {
@@ -40,7 +41,15 @@ export default function Home() {
   const [tab, setTab] = useState<Tab>("woning");
   const [photoId, setPhotoId] = useState<string | null>(null);
   const [menuMessage, setMenuMessage] = useState("");
+  const [crashed, setCrashed] = useState<string | null>(null);
+  const [light, setLight] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Did an AI job take the tab down last time (iPad out of memory)? Then use the light models.
+  useEffect(() => {
+    setCrashed(takeCrashReport());
+    setLight(isLightMode());
+  }, []);
 
   // Safari reloads background tabs; come back where you were.
   useEffect(() => {
@@ -91,6 +100,17 @@ export default function Home() {
                 hidden
                 onChange={(e) => (restore(e.target.files?.[0]), (e.target.value = ""))}
               />
+              <label className="row small" title="Kleinere AI-modellen: minder precies, maar zuiniger met geheugen (voor oudere iPads)">
+                <input
+                  type="checkbox"
+                  checked={light}
+                  onChange={(e) => {
+                    setLightMode(e.target.checked);
+                    setLight(e.target.checked);
+                  }}
+                />
+                Lichte AI-modus
+              </label>
               <p className="muted small">
                 Alles wordt alleen op dit apparaat bewaard. Met een back-up zet je het over naar een ander apparaat of deel je het met je
                 partner.
@@ -108,6 +128,18 @@ export default function Home() {
           ))}
         </nav>
       </header>
+
+      {crashed && (
+        <div className="banner" role="status">
+          <span>
+            De app is de vorige keer gestopt tijdens {crashed} — waarschijnlijk had het apparaat te weinig geheugen. De{" "}
+            <strong>lichte AI-modus</strong> staat nu aan (kleinere modellen). Je werk is bewaard.
+          </span>
+          <button className="ghost" onClick={() => setCrashed(null)} aria-label="Sluiten">
+            ✕
+          </button>
+        </div>
+      )}
 
       {!loaded ? (
         <p className="empty">Laden…</p>

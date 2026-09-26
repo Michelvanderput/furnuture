@@ -1,7 +1,7 @@
-import { runAi, type Img, type Progress } from "./worker";
+import { isLightMode, runAi, type Img, type Progress } from "./worker";
 
 /** Largest crop sent to the AI: MI-GAN works at 512 px internally, more only costs memory. */
-const MAX_CROP = 1024;
+const maxCrop = () => (isLightMode() ? 640 : 1024);
 
 /**
  * Removes the masked area from the canvas (in place) with MI-GAN in a worker.
@@ -28,7 +28,7 @@ export async function aiInpaint(canvas: HTMLCanvasElement, mask: Uint8Array, onP
   const ch = Math.min(H, Math.max(256, side));
   const cx = Math.round(Math.min(Math.max(0, (x0 + x1) / 2 - cw / 2), W - cw));
   const cy = Math.round(Math.min(Math.max(0, (y0 + y1) / 2 - ch / 2), H - ch));
-  const f = Math.min(1, MAX_CROP / Math.max(cw, ch));
+  const f = Math.min(1, maxCrop() / Math.max(cw, ch));
   const sw = Math.round(cw * f);
   const sh = Math.round(ch * f);
 

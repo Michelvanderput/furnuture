@@ -4,7 +4,7 @@
  * terminates it afterwards: WebAssembly memory is never returned while a worker
  * lives, and on iPad Safari the models together otherwise exceed the tab's memory.
  */
-import { labelsFromLogits } from "./labels";
+import { labelsFromLogits, samMaskToPhoto } from "./labels";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const TRANSFORMERS_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js";
@@ -17,7 +17,9 @@ export type Task =
   | { task: "segment"; image: Img; model: string; outW: number; outH: number }
   | { task: "classify"; images: Img[]; labels: string[] }
   | { task: "removeBackground"; image: Img }
-  | { task: "inpaint"; image: Img; mask: Uint8Array };
+  | { task: "inpaint"; image: Img; mask: Uint8Array }
+  | { task: "samEmbed"; image: Img; model: string }
+  | { task: "samMask"; points: [number, number][]; labels: number[]; outW: number; outH: number };
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const progress = (message: string) => ctx.postMessage({ type: "progress", message });
@@ -133,7 +135,45 @@ async function inpaint({ image, mask }: Extract<Task, { task: "inpaint" }>) {
   return { result: { data: rgba, width: ow, height: oh }, transfer: [rgba.buffer] };
 }
 
-const handlers = { segment, classify, removeBackground, inpaint } as const;
+// Tap-to-select (Segment Anything). The photo is analysed once ("embedding");
+// every tap then only runs the small mask decoder, which takes a fraction of a second.
+let sam: { processor: any; model: any; sizes: { original_sizes: any; reshaped_input_sizes: any }; emb: any } | null = null;
+
+async function samEmbed({ image, model }: Extract<Task, { task: "samEmbed" }>) {
+  const t = await transformers();
+  progress("Selecteer-AI laden…");
+  const [processor, net] = await Promise.all([
+    t.AutoProcessor.from_pretrained(model),
+    t.SamModel.from_pretrained(model, {
+      dtype: { vision_encoder: "q8", prompt_encoder_mask_decoder: "fp32" },
+      progress_callback: onDownload("Selecteer-AI"),
+    }),
+  ]);
+  progress("Foto analyseren…");
+  const inputs = await processor(rawImage(t, image));
+  const emb = await net.get_image_embeddings(inputs);
+  inputs.pixel_values?.dispose?.();
+  sam = { processor, model: net, sizes: { original_sizes: inputs.original_sizes, reshaped_input_sizes: inputs.reshaped_input_sizes }, emb };
+  return { result: { ok: true }, transfer: [] };
+}
+
+async function samMask({ points, labels, outW, outH }: Extract<Task, { task: "samMask" }>) {
+  if (!sam) throw new Error("Selecteer-AI is niet voorbereid");
+  const { processor, model, sizes, emb } = sam;
+  const input_points = processor.reshape_input_points([points], sizes.original_sizes, sizes.reshaped_input_sizes);
+  const input_labels = processor.add_input_labels([labels], input_points);
+  const out = await model({ ...emb, input_points, input_labels });
+  const scores = out.iou_scores.data as Float32Array;
+  let best = 0;
+  for (let i = 1; i < scores.length; i++) if (scores[i] > scores[best]) best = i;
+  const [lh, lw] = (out.pred_masks.dims as number[]).slice(-2);
+  const logits = (out.pred_masks.data as Float32Array).subarray(best * lh * lw, (best + 1) * lh * lw);
+  const [rh, rw] = sizes.reshaped_input_sizes[0] as [number, number];
+  const mask = samMaskToPhoto(logits, rw, rh, outW, outH, lh, 1024);
+  return { result: { mask, score: scores[best] }, transfer: [mask.buffer] };
+}
+
+const handlers = { segment, classify, removeBackground, inpaint, samEmbed, samMask } as const;
 
 ctx.onmessage = async (e: MessageEvent<Task>) => {
   try {

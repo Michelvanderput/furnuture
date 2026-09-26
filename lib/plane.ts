@@ -21,14 +21,23 @@ export function localScale(plane: Quad, q: Pt): number {
  * perspective, the sides stay vertical (as in real photos), and the height
  * shrinks with distance just like the width does.
  */
-export function anchoredCorners(plane: Quad, a: FloorAnchor, aspect: number): Quad {
+export function anchoredCorners(plane: Quad, a: FloorAnchor, aspect: number, metric?: { sx: number; rho: number } | null): Quad {
   const h = planeToImage(plane);
   const rad = (a.angle * Math.PI) / 180;
-  const dx = (Math.cos(rad) * a.width) / 2;
-  const dy = (Math.sin(rad) * a.width) / 2;
+  let dx: number, dy: number, height: number;
+  if (a.widthCm && metric) {
+    // True size: half the real width along the (real) direction, converted to plane units.
+    dx = (Math.cos(rad) * a.widthCm) / 2 / metric.sx;
+    dy = (Math.sin(rad) * a.widthCm) / 2 / (metric.sx * metric.rho);
+    // Image pixels per cm at this spot; the photo's aspect gives the height.
+    height = (localScale(plane, [a.u, a.v]) / metric.sx) * a.widthCm * aspect;
+  } else {
+    dx = (Math.cos(rad) * a.width) / 2;
+    dy = (Math.sin(rad) * a.width) / 2;
+    height = localScale(plane, [a.u, a.v]) * a.width * aspect;
+  }
   const bl = project(h, [a.u - dx, a.v - dy]);
   const br = project(h, [a.u + dx, a.v + dy]);
-  const height = localScale(plane, [a.u, a.v]) * a.width * aspect;
   return [[bl[0], bl[1] - height], [br[0], br[1] - height], br, bl];
 }
 

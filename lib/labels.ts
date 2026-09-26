@@ -47,3 +47,42 @@ export function labelsFromLogits(
   }
   return out;
 }
+
+/**
+ * SAM predicts a 256×256 mask (logits) for its 1024×1024 input: the photo scaled
+ * so its long side is 1024 (rw×rh), padded at the right/bottom. Sample that mask
+ * straight into an outW×outH mask of the photo (bilinear, then > 0).
+ */
+export function samMaskToPhoto(
+  logits: Float32Array,
+  rw: number,
+  rh: number,
+  outW: number,
+  outH: number,
+  low = 256,
+  pad = 1024,
+): Uint8Array {
+  const out = new Uint8Array(outW * outH);
+  const k = low / pad;
+  for (let y = 0; y < outH; y++) {
+    const my = Math.min(low - 1, Math.max(0, ((y + 0.5) * rh) / outH * k - 0.5));
+    const y0 = Math.floor(my), y1 = Math.min(low - 1, y0 + 1), fy = my - y0;
+    for (let x = 0; x < outW; x++) {
+      const mx = Math.min(low - 1, Math.max(0, ((x + 0.5) * rw) / outW * k - 0.5));
+      const x0 = Math.floor(mx), x1 = Math.min(low - 1, x0 + 1), fx = mx - x0;
+      const v =
+        logits[y0 * low + x0] * (1 - fx) * (1 - fy) +
+        logits[y0 * low + x1] * fx * (1 - fy) +
+        logits[y1 * low + x0] * (1 - fx) * fy +
+        logits[y1 * low + x1] * fx * fy;
+      out[y * outW + x] = v > 0 ? 1 : 0;
+    }
+  }
+  return out;
+}
+
+/** Working resolution for recognition masks: long side 480 px. */
+export function workSize(w: number, h: number, side = 480): { w: number; h: number } {
+  const f = side / Math.max(w, h);
+  return { w: Math.round(w * f), h: Math.round(h * f) };
+}

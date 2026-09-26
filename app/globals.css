@@ -217,3 +217,23 @@ h3.group { margin-top: 28px; padding-bottom: 6px; border-bottom: 1px solid var(-
   .visualizer { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   input[type="range"] { height: 32px; }
 }
+
+/* --- measuring & sizes --- */
+.overlay .measure line { stroke: var(--accent); stroke-width: 3; stroke-dasharray: 10 6; vector-effect: non-scaling-stroke; }
+.overlay .measure.ruler line { stroke-dasharray: none; }
+.overlay .measure circle { fill: var(--accent); }
+.overlay .measure.selected line { stroke-width: 5; }
+.overlay .measure-label rect { fill: rgba(255, 255, 255, 0.92); stroke: rgba(0, 0, 0, 0.12); vector-effect: non-scaling-stroke; }
+.overlay .measure-label text { fill: #1f1d1a; font-weight: 600; font-family: system-ui, sans-serif; }
+.overlay .measure, .overlay .measure-label, .overlay .footprint { pointer-events: none; }
+.overlay .footprint polygon { fill: rgba(233, 96, 31, 0.12); stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; }
+.ruler-prompt { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 2px solid var(--accent); border-radius: 8px; background: var(--accent-soft); }
+.ruler-prompt input { width: 120px; }
+.ruler-prompt p { margin: 0; }
+.selection-bar { gap: 8px; }
+.cm-input { width: 72px; text-align: right; }
+.size-row { padding-bottom: 6px; border-bottom: 1px dashed var(--border); }
+.dims { display: flex; align-items: center; gap: 4px; font-size: 13px; }
+.dims input { width: 0; flex: 1; min-width: 0; padding: 4px 6px; text-align: center; }
+.banner { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; padding: 10px 12px; border-radius: 8px; background: #fff4d6; color: #5a4300; }
+@media (prefers-color-scheme: dark) { .banner { background: #3a3220; color: #f1dfa7; } }

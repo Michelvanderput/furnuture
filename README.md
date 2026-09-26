@@ -66,6 +66,23 @@ De app blijft volledig gratis: geen API-sleutels, geen proefperiodes. Om meubels
 
 Wat gratis in de browser niet kan: een productfoto blijft een foto van één kant, dus schuin zetten laat nooit de zijkant zien. Dat vraagt generatieve beeld-AI. Die kan gratis draaien op een eigen pc met een flinke videokaart (bijvoorbeeld ComfyUI met FLUX of Stable Diffusion), maar niet in de browser.
 
+## Afmetingen: meten en ware grootte
+
+- **Productmaten** (breedte × diepte × hoogte) worden uit de webshoppagina gehaald: JSON-LD (`width`/`depth`/`height`), specificaties ("Breedte: 220 cm") of de titel ("220x95x80 cm", "160 x 200"). Aan te passen op de productkaart.
+- **📏 Meten**: tik twee punten op de vloer en vul één keer in hoe lang dat is (bijvoorbeeld de kamerbreedte uit de Funda-plattegrond, of een deur van 83 cm). Daarna toont elke meetlijn direct zijn lengte, ook in de diepte.
+  - Hoe: de vloer is een rechthoek in perspectief. De brandpuntsafstand van de camera wordt geschat uit de twee verdwijnpunten van de vloerranden (of een gangbare groothoek van 75° als die niet zichtbaar zijn). Daarmee is de echte verhouding van de vloer bekend (`K⁻¹H = λ[sx·r1, sy·r2, t]`), en één bekende lijn geeft de schaal. Getest met een nagebootste camera.
+  - Er is geen herkende vloer? Dan tik je de 4 hoeken van een stuk vloer aan; dat vlak blijft onzichtbaar en dient alleen om te meten.
+- **Ware grootte**: op een gemeten vloer krijgt een meubel met bekende breedte automatisch zijn echte maat, ook als je het naar achteren schuift of draait.
+- **Past het?**: bij een geselecteerd meubel zie je de voetafdruk (breedte × diepte) op de vloer.
+- **Vloeren op echte maat**: planken en tegels van de ingebouwde vloersoorten krijgen op een gemeten vloer hun werkelijke formaat (planken van 20 cm, tegels van 60 × 60 cm…).
+- Meetlijnen staan ook op de foto die je opslaat of deelt.
+
+## Selecteren en stabiliteit
+
+- **Tik op een meubel**: SlimSAM (een lichte "Segment Anything", ± 15 MB) omlijnt precies wat je aantikt; met ➕/➖ tik je stukken erbij of eraf. De foto wordt één keer geanalyseerd, daarna is elke tik snel. Het werkproces sluit zichzelf na 90 seconden zonder gebruik.
+- **Betere herkenning**: overal SegFormer-B2; kussens en plaids worden bij de bank of het bed gevoegd, stukken van één meubel samengevoegd en gaten gedicht.
+- **Crash-vangnet**: loopt een tabblad vast op een AI-taak (iPad met te weinig geheugen), dan meldt de app dat bij de volgende start en zet hij de **lichte AI-modus** aan (kleinere modellen en beelden). In het Project-menu aan en uit te zetten.
+
 ## Gebruiksgemak en snelheid
 
 - **Ongedaan maken / opnieuw** (↶ ↷, ⌘/Ctrl+Z, ⌘/Ctrl+Shift+Z) per foto; slepen en schuifjes tellen als één stap.
@@ -80,4 +97,5 @@ Wat gratis in de browser niet kan: een productfoto blijft een foto van één kan
 
 - [ ] Visualisatie exporteren als afbeelding en een project delen met je partner
 - [ ] Browserextensie of deel-knop op de telefoon ("Delen → furnuture") om producten toe te voegen
+- [ ] Maten van de kamer uit de Funda-plattegrond halen als meetlat
 - [ ] Budget per ruimte en afmetingen van producten tegenover de plattegrond

@@ -1,4 +1,5 @@
 import { guessCategory, guessRoom } from "./categories";
+import { dimsFromJsonLd, dimsFromLabels, dimsFromTitle, mergeDims, pageText } from "./dimensions";
 import type { FundaResult, ProductInfo, RoomType } from "./types";
 
 /** Minimal HTML helpers: we only need meta tags, JSON-LD and URLs, so no DOM parser. */
@@ -265,9 +266,18 @@ export function parseProduct(html: string, pageUrl: string): ProductInfo {
     new URL(pageUrl).pathname.replace(/[-_/]/g, " "),
   );
 
+  const cleanTitle = decodeEntities(String(title)).replace(/\s+/g, " ").trim();
+  const dims = mergeDims(
+    dimsFromJsonLd(product),
+    dimsFromLabels(pageText(html)),
+    dimsFromTitle(cleanTitle),
+    dimsFromTitle(String(product?.description ?? meta.get("og:description")?.[0] ?? "")),
+  );
+
   return {
     url: pageUrl,
-    title: decodeEntities(String(title)).replace(/\s+/g, " ").trim() || shopName(pageUrl),
+    dims,
+    title: cleanTitle || shopName(pageUrl),
     image: images[0] ?? "",
     images,
     ...price,

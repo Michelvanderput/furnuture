@@ -1,20 +1,23 @@
 /**
  * Built-in floor textures, drawn on a canvas (no image downloads, seamless tiles).
  */
+/** `cm`: real width of one texture tile, so a measured floor gets planks and tiles at their true size. */
 export const FLOOR_PRESETS = [
-  { id: "eiken-licht", label: "Eiken planken, licht", group: "Hout" },
-  { id: "eiken-naturel", label: "Eiken planken, naturel", group: "Hout" },
-  { id: "noten-donker", label: "Noten planken, donker", group: "Hout" },
-  { id: "visgraat-naturel", label: "Visgraat, naturel eiken", group: "Hout" },
-  { id: "visgraat-licht", label: "Visgraat, licht eiken", group: "Hout" },
-  { id: "pvc-grijs", label: "PVC, grijs eiken", group: "PVC & laminaat" },
-  { id: "beton", label: "Betonlook / gietvloer", group: "Steen" },
-  { id: "tegel-60-grijs", label: "Tegel 60×60, grijs", group: "Steen" },
-  { id: "tegel-wit", label: "Tegel 30×30, wit", group: "Steen" },
-  { id: "portugees", label: "Cementtegels, zwart-wit", group: "Steen" },
-  { id: "terrazzo", label: "Terrazzo", group: "Steen" },
-  { id: "tapijt-beige", label: "Tapijt, beige", group: "Tapijt" },
+  { id: "eiken-licht", label: "Eiken planken, licht", group: "Hout", cm: 160 }, // 8 planks of 20 cm
+  { id: "eiken-naturel", label: "Eiken planken, naturel", group: "Hout", cm: 160 },
+  { id: "noten-donker", label: "Noten planken, donker", group: "Hout", cm: 160 },
+  { id: "visgraat-naturel", label: "Visgraat, naturel eiken", group: "Hout", cm: 57 }, // planks of 10 × 40 cm
+  { id: "visgraat-licht", label: "Visgraat, licht eiken", group: "Hout", cm: 57 },
+  { id: "pvc-grijs", label: "PVC, grijs eiken", group: "PVC & laminaat", cm: 160 },
+  { id: "beton", label: "Betonlook / gietvloer", group: "Steen", cm: 100 },
+  { id: "tegel-60-grijs", label: "Tegel 60×60, grijs", group: "Steen", cm: 120 }, // 2 × 2 tiles
+  { id: "tegel-wit", label: "Tegel 30×30, wit", group: "Steen", cm: 120 }, // 4 × 4 tiles
+  { id: "portugees", label: "Cementtegels, zwart-wit", group: "Steen", cm: 40 }, // 2 × 2 tiles of 20 cm
+  { id: "terrazzo", label: "Terrazzo", group: "Steen", cm: 60 },
+  { id: "tapijt-beige", label: "Tapijt, beige", group: "Tapijt", cm: 50 },
 ] as const;
+
+export const presetCm = (id: string): number | undefined => FLOOR_PRESETS.find((p) => p.id === id)?.cm;
 
 export type PresetId = (typeof FLOOR_PRESETS)[number]["id"];
 

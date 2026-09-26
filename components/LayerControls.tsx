@@ -1,18 +1,26 @@
 "use client";
 
+import { formatDims } from "@/lib/dimensions";
 import { centroid, rectQuad, rotateQuad, turnQuad } from "@/lib/geometry";
-import { FLOOR_PRESETS } from "@/lib/textures";
-import { isLowMemoryDevice } from "@/lib/worker";
-import type { CutoutMode, EraseLayer, Layer, Product, ProductLayer, SurfaceFill, SurfaceLayer } from "@/lib/types";
 import { fillFor, SURFACE_CATEGORIES, surfaceDefaults } from "@/lib/layers";
+import { formatCm, type FloorMetric } from "@/lib/metric";
+import { FLOOR_PRESETS } from "@/lib/textures";
+import type { CutoutMode, EraseLayer, Layer, MeasureLayer, Product, ProductLayer, SurfaceFill, SurfaceLayer } from "@/lib/types";
+import { isLowMemoryDevice } from "@/lib/worker";
+
+export type LayerPatch = Partial<ProductLayer> | Partial<SurfaceLayer> | Partial<EraseLayer> | Partial<MeasureLayer>;
 
 interface Props {
   layer: Layer;
   products: Product[];
   /** Floors in this photo that furniture can stand on. */
   floors: SurfaceLayer[];
+  /** Real-world scale of the relevant floor (the product's floor, the line's floor, or this floor). */
+  metric?: FloorMetric | null;
+  /** Length of the selected measuring line, when its floor is measured. */
+  lengthCm?: number | null;
   cutoutState?: string;
-  onChange: (patch: Partial<ProductLayer> | Partial<SurfaceLayer> | Partial<EraseLayer>) => void;
+  onChange: (patch: LayerPatch) => void;
   onPlaceOnFloor: (floorId: string) => void;
   onRemove: () => void;
   onReorder: (dir: number) => void;
@@ -20,9 +28,67 @@ interface Props {
 }
 
 const fillValue = (f: SurfaceFill) =>
-  f.type === "color" ? `color:${f.color}` : f.type === "texture" ? `tex:${f.productId}` : `preset:${f.preset}`;
+  f.type === "none" ? "none:" : f.type === "color" ? `color:${f.color}` : f.type === "texture" ? `tex:${f.productId}` : `preset:${f.preset}`;
 
-export function LayerControls({ layer, products, floors, cutoutState, onChange, onPlaceOnFloor, onRemove, onReorder, onDuplicate }: Props) {
+/** Number input that only reports on blur/enter (no re-render storm while typing). */
+function CmInput({ value, onCommit, label }: { value?: number; onCommit: (cm: number | undefined) => void; label: string }) {
+  return (
+    <label className="row">
+      {label}
+      <input
+        className="cm-input"
+        inputMode="decimal"
+        defaultValue={value ? String(Math.round(value)) : ""}
+        key={value ?? "none"}
+        placeholder="cm"
+        onBlur={(e) => {
+          const n = parseFloat(e.target.value.replace(",", "."));
+          onCommit(Number.isFinite(n) && n > 0 ? n : undefined);
+        }}
+        onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+      />
+      cm
+    </label>
+  );
+}
+
+export function LayerControls({
+  layer,
+  products,
+  floors,
+  metric,
+  lengthCm,
+  cutoutState,
+  onChange,
+  onPlaceOnFloor,
+  onRemove,
+  onReorder,
+  onDuplicate,
+}: Props) {
+  if (layer.kind === "measure") {
+    return (
+      <div className="layer-controls row wrap">
+        {layer.cm ? (
+          <>
+            <strong>📏 Meetlat</strong>
+            <CmInput label="Echte lengte" value={layer.cm} onCommit={(cm) => cm && onChange({ cm })} />
+            <span className="muted small">Hiermee kent de app de maat van deze vloer. Versleep de uiteinden precies op de randen.</span>
+          </>
+        ) : (
+          <>
+            <strong>📏 {lengthCm ? formatCm(lengthCm) : "Meting"}</strong>
+            {!metric && <span className="muted small">Geef één lijn een echte lengte om te kunnen meten.</span>}
+            <button onClick={() => onChange({ cm: lengthCm ? Math.round(lengthCm) : 100 })}>Maak dit de meetlat</button>
+          </>
+        )}
+        <button className="ghost" onClick={onRemove}>
+          🗑 Verwijderen
+        </button>
+      </div>
+    );
+  }
+
+
   if (layer.kind === "erase") {
     return (
       <div className="layer-controls row wrap">
@@ -59,6 +125,9 @@ export function LayerControls({ layer, products, floors, cutoutState, onChange, 
 
   if (layer.kind === "product") {
     const c = layer.corners;
+    const product = products.find((p) => p.id === layer.productId);
+    const dims = product?.dims;
+    const trueSize = !!layer.floor?.widthCm;
     const straighten = () => {
       const [cx, cy] = centroid(c);
       const width = (Math.hypot(c[1][0] - c[0][0], c[1][1] - c[0][1]) + Math.hypot(c[2][0] - c[3][0], c[2][1] - c[3][1])) / 2;
@@ -95,6 +164,27 @@ export function LayerControls({ layer, products, floors, cutoutState, onChange, 
           {cutoutState === "failed:plain" && <small className="error">Geen effen achtergrond — kies AI.</small>}
           {cutoutState === "failed" && <small className="error">Uitknippen mislukt.</small>}
         </div>
+        {layer.floor && (
+          <div className="row wrap size-row">
+            {metric ? (
+              <>
+                <label className="row" title="Teken het meubel op zijn echte maat, volgens de gemeten vloer">
+                  <input
+                    type="checkbox"
+                    checked={trueSize}
+                    onChange={(e) => onChange({ floor: { ...layer.floor!, widthCm: e.target.checked ? (dims?.w ?? 200) : undefined } })}
+                  />
+                  📐 Ware grootte
+                </label>
+                {trueSize && <CmInput label="Breedte" value={layer.floor.widthCm} onCommit={(cm) => cm && onChange({ floor: { ...layer.floor!, widthCm: cm } })} />}
+                {dims && <span className="muted small">Productmaat: {formatDims(dims)}</span>}
+                {trueSize && !dims?.w && <span className="muted small">Tip: vul bij Producten de maten in.</span>}
+              </>
+            ) : (
+              <span className="muted small">📏 Meet de vloer (knop Meten) om dit meubel op ware grootte te zetten.</span>
+            )}
+          </div>
+        )}
         {layer.floor ? (
           <div className="row wrap">
             <span className="small">✅ Staat op de vloer: schuif hem naar achteren en hij wordt vanzelf kleiner.</span>
@@ -158,7 +248,8 @@ export function LayerControls({ layer, products, floors, cutoutState, onChange, 
 
   const paints = products.filter((p) => p.color);
   const textures = products.filter((p) => p.image && SURFACE_CATEGORIES.has(p.category) && p.category !== "verf");
-  const isTexture = layer.fill.type !== "color";
+  const isTexture = layer.fill.type === "texture" || layer.fill.type === "preset";
+  const realSize = layer.fill.type === "preset" && layer.autoScale !== false && layer.perspective && !!metric;
 
   return (
     <div className="layer-controls">
@@ -169,12 +260,18 @@ export function LayerControls({ layer, products, floors, cutoutState, onChange, 
             const [type, value] = e.target.value.split(/:(.*)/s);
             const product = products.find((p) => p.id === value);
             const fill: SurfaceFill =
-              type === "preset"
-                ? { type: "preset", preset: value }
-                : type === "tex" && product
-                  ? fillFor(product)
-                  : { type: "color", color: value };
-            onChange({ fill, ...(fill.type !== layer.fill.type ? surfaceDefaults(fill) : {}) });
+              type === "none"
+                ? { type: "none" }
+                : type === "preset"
+                  ? { type: "preset", preset: value }
+                  : type === "tex" && product
+                    ? fillFor(product)
+                    : { type: "color", color: value };
+            onChange({
+              fill,
+              ...(fill.type !== layer.fill.type ? surfaceDefaults(fill) : {}),
+              perspective: !!(layer.plane || layer.points.length === 4) && (fill.type === "preset" || fill.type === "texture"),
+            });
           }}
         >
           {layer.fill.type === "color" && !paints.some((p) => p.color === (layer.fill as { color: string }).color) && (
@@ -198,6 +295,7 @@ export function LayerControls({ layer, products, floors, cutoutState, onChange, 
               ))}
             </optgroup>
           )}
+          {layer.role === "floor" && <option value="none:">Niets (alleen om te meten)</option>}
           <optgroup label="Vloersoorten">
             {FLOOR_PRESETS.map((f) => (
               <option key={f.id} value={`preset:${f.id}`}>
@@ -218,10 +316,19 @@ export function LayerControls({ layer, products, floors, cutoutState, onChange, 
       </div>
       <div className="row wrap">
         {isTexture && (
-          <label className="row">
-            Patroongrootte
-            <input type="range" min={30} max={1000} value={layer.scale} onChange={(e) => onChange({ scale: Number(e.target.value) })} />
+          <label className="row" title={realSize ? "Staat op ware maat (gemeten vloer). Schuiven zet dat uit." : undefined}>
+            Patroongrootte{realSize && " 📏"}
+            <input
+              type="range"
+              min={5}
+              max={1000}
+              value={layer.scale}
+              onChange={(e) => onChange({ scale: Number(e.target.value), autoScale: false })}
+            />
           </label>
+        )}
+        {layer.fill.type === "preset" && layer.autoScale === false && metric && (
+          <button onClick={() => onChange({ autoScale: true })}>📏 Op ware maat</button>
         )}
         {layer.fill.type === "texture" && (
           <label className="row" title="Gebruik alleen het midden van de productfoto (handig als het een sfeerfoto is)">
@@ -236,6 +343,7 @@ export function LayerControls({ layer, products, floors, cutoutState, onChange, 
             />
           </label>
         )}
+        {layer.fill.type !== "none" && (
         <label className="row">
           Dekking
           <input
@@ -247,6 +355,8 @@ export function LayerControls({ layer, products, floors, cutoutState, onChange, 
             onChange={(e) => onChange({ opacity: Number(e.target.value) })}
           />
         </label>
+        )}
+        {layer.fill.type !== "none" && (
         <label className="row">
           <input
             type="checkbox"
@@ -255,6 +365,7 @@ export function LayerControls({ layer, products, floors, cutoutState, onChange, 
           />
           Schaduw behouden
         </label>
+        )}
         {order}
       </div>
     </div>

@@ -9,23 +9,28 @@ import { cropCenter, loadImage, NoPlainBackground, proxied, removeBackground } f
 import { renderErased } from "@/lib/inpaint";
 import {
   cutoutKey,
+  floorMetric,
   isFloor,
   placeOnFloor,
   planeOf,
+  rulerOf,
   SURFACE_CATEGORIES,
   surfaceDefaults,
 } from "@/lib/layers";
+import { workSize } from "@/lib/labels";
+import { distanceCm, footprint, formatCm } from "@/lib/metric";
+import { Selector } from "@/lib/sam";
 import { photoLook, productFilter } from "@/lib/look";
 import { ensureMask, maskToDataUrl, polygonMask, readyMask, rememberMask } from "@/lib/masks";
 import { fitFloorQuad, fitWallQuad, imageToPlane, PLANE, planeToImage } from "@/lib/plane";
-import { furnitureMask, segmentMask, segmentRoom, type RoomSegmentation, type Segment } from "@/lib/segment";
+import { furnitureMask, segmentMask, segmentRoom, type RoomSegmentation, type Segment, type SegmentKind } from "@/lib/segment";
 import { presetTexture } from "@/lib/textures";
-import type { EraseLayer, FloorAnchor, Layer, Product, ProductLayer, Project, Pt, Quad, SurfaceFill, SurfaceLayer } from "@/lib/types";
+import type { EraseLayer, FloorAnchor, Layer, MeasureLayer, Product, ProductLayer, Project, Pt, Quad, SurfaceFill, SurfaceLayer } from "@/lib/types";
 import { newId } from "@/lib/useProject";
 import { useSceneEditor } from "@/lib/useSceneEditor";
 import { isLowMemoryDevice } from "@/lib/worker";
 import { Img } from "./Img";
-import { LayerControls } from "./LayerControls";
+import { LayerControls, type LayerPatch } from "./LayerControls";
 import { Palette } from "./visualizer/Palette";
 import { PhotoStrip } from "./visualizer/PhotoStrip";
 import { Shadow } from "./visualizer/Shadow";
@@ -40,7 +45,20 @@ interface Props {
 /** Rendered size of a product image before it is mapped onto its corners. */
 const PRODUCT_W = 1000;
 
-type Drawing = { kind: "surface" | "erase"; points: Pt[]; fill?: SurfaceFill };
+type Drawing = { kind: "surface" | "erase" | "measure"; points: Pt[]; fill?: SurfaceFill; thenMeasure?: boolean };
+
+/** What the user tapped: from the room recognition, or traced exactly by tap-to-select (SAM). */
+interface Selection {
+  kind: SegmentKind | "object";
+  label: string;
+  /** Mask at the recognition's working resolution. */
+  mask: Uint8Array;
+  w: number;
+  h: number;
+  url: string;
+  /** Taps so far (fractions of the photo), for adding or removing parts. */
+  points: { at: [number, number]; positive: boolean }[];
+}
 type Drag =
   | { type: "move"; id: string; from: Pt; start: Quad }
   | { type: "corner"; id: string; from: Pt; start: Quad; index: number; distort: boolean }
@@ -48,7 +66,6 @@ type Drag =
   | { type: "anchor-scale"; id: string; from: Pt; center: Pt; start: FloorAnchor }
   | { type: "vertex"; id: string; index: number }
   | { type: "plane"; id: string; index: number };
-type LayerPatch = Partial<ProductLayer> | Partial<SurfaceLayer> | Partial<EraseLayer>;
 
 // Room recognition results live in memory only (a few seconds to recompute).
 const segmentations = new Map<string, RoomSegmentation>();
@@ -91,7 +108,11 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   const [status, setStatus] = useState("");
   const [notice, setNotice] = useState("");
   const [segmentation, setSegmentation] = useState<RoomSegmentation | null>(null);
-  const [picked, setPicked] = useState<Segment | null>(null);
+  const [selection, setSelection] = useState<Selection | null>(null);
+  const [refine, setRefine] = useState<"add" | "remove" | null>(null);
+  const [rulerFor, setRulerFor] = useState<string | null>(null);
+  const selector = useRef<Selector | null>(null);
+  const selectRun = useRef(0);
   const [exporting, setExporting] = useState(false);
   const drag = useRef<Drag | null>(null);
   const pending = useRef<Pt | null>(null);
@@ -99,20 +120,26 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const coarse = useMemo(() => typeof window !== "undefined" && matchMedia("(pointer: coarse)").matches, []);
+  const handleRadius = () => (size ? Math.max(9, size.w / 110) : 10) * (coarse ? 1.7 : 1);
 
   useEffect(() => {
     setSize(null);
     setSelected(null);
     setDrawing(null);
     setErased(null);
-    setPicked(null);
+    setSelection(null);
+    setRefine(null);
+    setRulerFor(null);
     setNotice("");
     setSegmentation(photo ? (segmentations.get(photo.id) ?? null) : null);
+    selector.current?.close();
     if (!photo) return;
     measure(photo.url)
       .then(setSize)
       .catch(() => setSize({ w: 1440, h: 960 }));
   }, [photo?.id, photo?.url]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => () => selector.current?.close(), []);
 
   useEffect(() => {
     const el = stageRef.current;
@@ -125,7 +152,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   // Decode stored masks so taps can hit them.
   useEffect(() => {
     if (!size) return;
-    for (const l of layers) if (l.kind !== "product" && l.mask) ensureMask(l.mask, size.w, size.h).catch(() => undefined);
+    for (const l of layers) if ((l.kind === "surface" || l.kind === "erase") && l.mask) ensureMask(l.mask, size.w, size.h).catch(() => undefined);
   }, [layers, size]);
 
   // Background-free product images (simple colour flood fill, or AI).
@@ -224,52 +251,99 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     }
   }
 
-  function segmentLayerMask(seg: Segment): string | null {
-    if (!segmentation || !size) return null;
+  /** Working size of selection masks: the recognition's, or the same formula for tap-to-select. */
+  const maskSize = () => (segmentation ? { w: segmentation.w, h: segmentation.h } : workSize(size?.w ?? 1440, size?.h ?? 960));
+
+  function selectionFromSegment(seg: Segment): Selection | null {
+    if (!segmentation) return null;
     const mask = segmentMask(segmentation, seg.id);
-    const url = maskToDataUrl(mask, segmentation.w, segmentation.h);
-    if (segmentation.w === size.w && segmentation.h === size.h) rememberMask(url, size.w, size.h, mask);
+    return { kind: seg.kind, label: seg.label, mask, w: segmentation.w, h: segmentation.h, url: maskUrl(mask, segmentation.w, segmentation.h), points: [] };
+  }
+
+  function maskUrl(mask: Uint8Array, w: number, h: number) {
+    const url = maskToDataUrl(mask, w, h);
+    if (size && w === size.w && h === size.h) rememberMask(url, w, h, mask);
     return url;
   }
 
-  function eraseSegment(seg: Segment, method: "ai" | "simple") {
-    const mask = segmentLayerMask(seg);
-    if (!mask) return;
-    setLayers((ls) => [{ kind: "erase", id: newId(), points: [], mask, method, label: seg.label }, ...ls]);
-    setPicked(null);
+  function segmentAt(p: Pt): Segment | undefined {
+    if (!segmentation || !size) return undefined;
+    const sx = Math.min(segmentation.w - 1, Math.max(0, Math.round((p[0] * segmentation.w) / size.w)));
+    const sy = Math.min(segmentation.h - 1, Math.max(0, Math.round((p[1] * segmentation.h) / size.h)));
+    const id = segmentation.ids[sy * segmentation.w + sx];
+    return segmentation.segments.find((s) => s.id === id);
   }
 
-  /** Floor or wall from the recognition, with a fitted perspective plane. */
-  function surfaceFromSegment(seg: Segment, fill: SurfaceFill) {
-    if (!segmentation) return;
-    const mask = segmentMask(segmentation, seg.id);
-    const url = segmentLayerMask(seg);
-    if (!url) return;
-    const floor = seg.kind === "floor";
-    const occluder = furnitureMask(segmentation);
-    const fitted = floor
-      ? fitFloorQuad(mask, segmentation.w, segmentation.h, occluder)
-      : fitWallQuad(mask, segmentation.w, segmentation.h, occluder);
-    // Recognition runs at a lower resolution than the photo: scale the plane up.
-    const sx = (size?.w ?? segmentation.w) / segmentation.w;
-    const sy = (size?.h ?? segmentation.h) / segmentation.h;
+  /**
+   * Tap on the photo: floors and walls come from the recognition; furniture (or
+   * anything, when the room was not recognised) is traced exactly with tap-to-select.
+   */
+  async function selectAt(p: Pt, mode: "new" | "add" | "remove" = "new") {
+    if (!photo || !size) return;
+    const seg = segmentAt(p);
+    if (mode === "new" && seg && seg.kind !== "furniture") {
+      setSelection(selectionFromSegment(seg));
+      return;
+    }
+    const at: [number, number] = [p[0] / size.w, p[1] / size.h];
+    const points = mode === "new" || !selection ? [{ at, positive: true }] : [...selection.points, { at, positive: mode === "add" }];
+    const { w, h } = maskSize();
+    const run = ++selectRun.current;
+    selector.current ??= new Selector();
+    try {
+      const mask = await selector.current.select(photo.url, points, w, h, setStatus);
+      if (run !== selectRun.current) return; // a newer tap won
+      if (!mask.some(Boolean)) throw new Error("niets gevonden");
+      const base = mode === "new" ? seg : undefined;
+      setSelection({
+        kind: mode === "new" ? (seg ? "furniture" : "object") : (selection?.kind ?? "object"),
+        label: mode === "new" ? (base?.label ?? "Voorwerp") : (selection?.label ?? "Voorwerp"),
+        mask,
+        w,
+        h,
+        url: maskUrl(mask, w, h),
+        points,
+      });
+    } catch (e) {
+      if (run !== selectRun.current) return;
+      setStatus("");
+      if (seg) setSelection(selectionFromSegment(seg));
+      else setNotice(`Selecteren lukte niet (${e instanceof Error ? e.message : e}). Probeer ✨ Herken of 🧽 Zelf gummen.`);
+    }
+  }
+
+  function eraseSelection(sel: Selection, method: "ai" | "simple") {
+    setLayers((ls) => [{ kind: "erase", id: newId(), points: [], mask: sel.url, method, label: sel.label }, ...ls]);
+    setSelection(null);
+    setRefine(null);
+  }
+
+  /** Floor or wall from a selection, with a fitted perspective plane. */
+  function surfaceFromSelection(sel: Selection, fill: SurfaceFill, role: "floor" | "wall" = sel.kind === "floor" ? "floor" : "wall"): string {
+    const occluder = segmentation && segmentation.w === sel.w && segmentation.h === sel.h ? furnitureMask(segmentation) : undefined;
+    const fitted = role === "floor" ? fitFloorQuad(sel.mask, sel.w, sel.h, occluder) : fitWallQuad(sel.mask, sel.w, sel.h, occluder);
+    // Masks are at a lower resolution than the photo: scale the plane up.
+    const sx = (size?.w ?? sel.w) / sel.w;
+    const sy = (size?.h ?? sel.h) / sel.h;
     const plane = fitted && (fitted.map(([x, y]) => [x * sx, y * sy]) as Quad);
     const id = newId();
     insertSurface({
       kind: "surface",
       id,
       points: [],
-      mask: url,
+      mask: sel.url,
       plane: plane ?? undefined,
-      role: floor ? "floor" : "wall",
+      role,
       fill,
       ...surfaceDefaults(fill),
       scale: 350,
-      perspective: !!plane && fill.type !== "color",
+      perspective: !!plane && (fill.type === "preset" || fill.type === "texture"),
       crop: 1,
     });
-    setPicked(null);
+    setSelection(null);
+    setRefine(null);
     setSelected(id);
+    return id;
   }
 
   function insertSurface(layer: SurfaceLayer) {
@@ -309,7 +383,11 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     };
     // With a floor in the room, stand on it: perspective and depth come for free.
     const floor = floors.at(-1);
-    if (floor) layer = placeOnFloor(layer, floor, projectPoint(planeToImage(planeOf(floor)!), [PLANE / 2, PLANE * 0.65]));
+    if (floor) {
+      layer = placeOnFloor(layer, floor, projectPoint(planeToImage(planeOf(floor)!), [PLANE / 2, PLANE * 0.65]));
+      // Measured floor + known size: true size right away.
+      if (product.dims?.w && metricOf(floor.id) && layer.floor) layer.floor.widthCm = product.dims.w;
+    }
     setLayers((ls) => [...ls, layer]);
     setSelected(layer.id);
   }
@@ -319,8 +397,8 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     const current = layers.find((l) => l.id === selected);
     if (current?.kind === "surface") {
       patchLayer(current.id, { fill, ...surfaceDefaults(fill), perspective: !!planeOf(current) && fill.type !== "color" });
-    } else if (picked && picked.kind !== "furniture") {
-      surfaceFromSegment(picked, fill);
+    } else if (selection && selection.kind !== "furniture") {
+      surfaceFromSelection(selection, fill, selection.kind === "floor" || (selection.kind === "object" && fill.type !== "color") ? "floor" : "wall");
     } else {
       setSelected(null);
       setDrawing({ kind: "surface", points: [], fill });
@@ -335,7 +413,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   const onPickPhoto = useCallback((id: string) => setPhotoId(id), [setPhotoId]);
 
   function finishDrawing() {
-    if (!drawing || drawing.points.length < 3) return;
+    if (!drawing || drawing.points.length < 3 || drawing.kind === "measure") return;
     const id = newId();
     if (drawing.kind === "erase") {
       setLayers((ls) => [{ kind: "erase", id, points: drawing.points, method: "ai" }, ...ls]);
@@ -354,6 +432,11 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
         role: fill.type === "color" ? "wall" : drawing.fill ? "floor" : undefined,
       });
     }
+    if (drawing.thenMeasure) {
+      setSelected(null);
+      setDrawing({ kind: "measure", points: [] });
+      return;
+    }
     setDrawing(null);
     setSelected(id);
   }
@@ -366,7 +449,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
 
   function duplicateSelected() {
     const l = layers.find((x) => x.id === selected);
-    if (!l || l.kind === "erase") return;
+    if (!l || l.kind === "erase" || l.kind === "measure") return;
     const id = newId();
     const offset = (size?.w ?? 1000) * 0.04;
     const copy: Layer =
@@ -395,7 +478,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     if (mod && k === "z") (e.preventDefault(), e.shiftKey ? editor.redo() : editor.undo());
     else if (mod && k === "y") (e.preventDefault(), editor.redo());
     else if (mod && k === "d") (e.preventDefault(), duplicateSelected());
-    else if (k === "escape") (setDrawing(null), setSelected(null), setPicked(null));
+    else if (k === "escape") (setDrawing(null), setSelected(null), setSelection(null), setRefine(null), setRulerFor(null));
     else if ((k === "delete" || k === "backspace") && selected) (e.preventDefault(), removeSelected());
     else if (k === "enter" && drawing) finishDrawing();
     else if (k.startsWith("arrow") && selected) {
@@ -415,6 +498,11 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     if (!size) return undefined;
     const idx = Math.round(p[1]) * size.w + Math.round(p[0]);
     for (const l of [...layers].reverse()) {
+      if (l.kind === "measure") {
+        if (distanceToSegment(p, l.points[0], l.points[1]) < handleRadius() * 1.3) return l;
+        continue;
+      }
+      if (l.kind === "surface" && l.fill.type === "none") continue; // measure-only floor: never in the way
       if (l.kind === "product" && pointInPolygon(p, l.corners)) return l;
       if (l.kind !== "product") {
         if (l.mask) {
@@ -443,14 +531,21 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   function onPointerDown(e: React.PointerEvent) {
     const p = toPhoto(e);
     if (drawing) {
-      if (e.target === e.currentTarget) setDrawing({ ...drawing, points: [...drawing.points, p] });
+      if (e.target !== e.currentTarget) return;
+      const points = [...drawing.points, p];
+      if (drawing.kind === "measure" && points.length === 2) finishMeasure(points);
+      else setDrawing({ ...drawing, points });
       return;
     }
     if (e.target !== e.currentTarget) return; // handles
+    if (refine && selection) {
+      selectAt(p, refine);
+      return;
+    }
     const hit = hitLayer(p);
     if (hit) {
       setSelected(hit.id);
-      setPicked(null);
+      setSelection(null);
       if (hit.kind === "product") {
         const floor = hit.floor && layers.find((l) => l.id === hit.floor!.planeId);
         if (hit.floor && floor?.kind === "surface" && planeOf(floor)) {
@@ -462,13 +557,56 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
       }
       return;
     }
-    setSelected(null);
-    if (segmentation && showLayers) {
-      const sx = Math.min(segmentation.w - 1, Math.max(0, Math.round((p[0] * segmentation.w) / (size?.w ?? 1))));
-      const sy = Math.min(segmentation.h - 1, Math.max(0, Math.round((p[1] * segmentation.h) / (size?.h ?? 1))));
-      const id = segmentation.ids[sy * segmentation.w + sx];
-      setPicked(segmentation.segments.find((s) => s.id === id) ?? null);
+    // A tap next to a selected layer only deselects it; otherwise select what was tapped.
+    if (selected) {
+      setSelected(null);
+      return;
     }
+    if (showLayers) selectAt(p);
+  }
+
+  /** The floor a photo point lies on (its area or plane), else the most recent floor. */
+  function floorAt(p: Pt): SurfaceLayer | undefined {
+    const inside = floors.filter((f) => {
+      if (f.mask && size) return !!readyMask(f.mask, size.w, size.h)?.[Math.round(p[1]) * size.w + Math.round(p[0])];
+      const poly = f.points.length >= 3 ? f.points : planeOf(f);
+      return !!poly && pointInPolygon(p, poly);
+    });
+    return inside.at(-1) ?? floors.at(-1);
+  }
+
+  /** Start measuring: needs a floor with perspective; make one if there is none yet. */
+  function startMeasuring() {
+    setSelected(null);
+    setSelection(null);
+    setNotice("");
+    if (floors.length) {
+      setDrawing({ kind: "measure", points: [] });
+      return;
+    }
+    const floorSeg = segmentation?.segments.find((s) => s.kind === "floor");
+    if (floorSeg) {
+      const sel = selectionFromSegment(floorSeg)!;
+      surfaceFromSelection(sel, { type: "none" }, "floor");
+      setSelected(null);
+      setDrawing({ kind: "measure", points: [] });
+      return;
+    }
+    // No recognition: let the user mark four corners of a rectangular piece of floor.
+    setDrawing({ kind: "surface", points: [], fill: { type: "none" }, thenMeasure: true });
+  }
+
+  function finishMeasure(points: Pt[]) {
+    if (!size) return;
+    const floor = floorAt(points[0]);
+    setDrawing(null);
+    if (!floor) return;
+    const id = newId();
+    const hasRuler = !!rulerOf(layers, floor.id);
+    const line: MeasureLayer = { kind: "measure", id, points, floorId: floor.id, imageW: size.w, imageH: size.h };
+    setLayers((ls) => [...ls, line]);
+    setSelected(id);
+    if (!hasRuler) setRulerFor(id);
   }
 
   function applyDrag(p: Pt) {
@@ -483,8 +621,9 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
       const clamp = (v: number) => Math.min(PLANE * 1.2, Math.max(-PLANE * 0.2, v));
       patchLayer(d.id, { floor: { ...d.start, u: clamp(d.start.u + q[0] - d.q0[0]), v: clamp(d.start.v + q[1] - d.q0[1]) } });
     } else if (d.type === "anchor-scale") {
+      // Resizing by hand ends "true size": the width is now whatever you make it.
       const f = Math.hypot(p[0] - d.center[0], p[1] - d.center[1]) / Math.max(1, Math.hypot(d.from[0] - d.center[0], d.from[1] - d.center[1]));
-      patchLayer(d.id, { floor: { ...d.start, width: Math.max(10, d.start.width * f) } });
+      patchLayer(d.id, { floor: { ...d.start, widthCm: undefined, width: Math.max(10, d.start.width * f) } });
     } else if (d.type === "corner") {
       if (d.distort) {
         patchLayer(d.id, { corners: d.start.map((c, i) => (i === d.index ? p : c)) as Quad });
@@ -516,7 +655,18 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   };
 
   const selectedLayer = layers.find((l) => l.id === selected);
-  const pickedMask = useMemo(() => (picked ? segmentLayerMask(picked) : null), [picked]); // eslint-disable-line react-hooks/exhaustive-deps
+  const metricOf = (floorId: string) => floorMetric(layers, floorId);
+  const floorPlaneOf = (floorId: string) => {
+    const f = layers.find((l) => l.id === floorId);
+    return f?.kind === "surface" ? planeOf(f) : null;
+  };
+  /** Label of a measuring line: its known length (ruler) or its measured length. */
+  const measureText = (l: MeasureLayer): string => {
+    if (l.cm) return `${formatCm(l.cm)} · meetlat`;
+    const plane = floorPlaneOf(l.floorId);
+    const m = metricOf(l.floorId);
+    return plane && m ? formatCm(distanceCm(plane, m, l.points[0], l.points[1])) : "? (geen meetlat)";
+  };
 
   if (!photo) {
     return (
@@ -529,7 +679,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
 
   const hasErased = showLayers && erased && erased.key === eraseKey && !!eraseKey;
   const scale = size && displayWidth ? displayWidth / size.w : 0;
-  const handleR = (size ? Math.max(9, size.w / 110) : 10) * (coarse ? 1.7 : 1);
+  const handleR = handleRadius();
 
   const cutoutSrc = (l: ProductLayer): string | null => {
     const cut = cutouts[cutoutKey(l)];
@@ -582,6 +732,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
         },
         textureSrc,
         eraseMasks: eraseMaskUrls,
+        measureText,
       });
       await shareOrDownload(blob, exportFileName(project, photo.room));
     } catch (e) {
@@ -603,12 +754,19 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
           {drawing ? (
             <>
               <span className="hint">
-                {drawing.kind === "erase" ? "Tik rondom wat weg moet" : "Tik de hoeken van de vloer of muur aan — 4 hoeken geeft perspectief"} (
-                {drawing.points.length} punten)
+                {drawing.kind === "measure"
+                  ? `📏 Tik het begin en het eind van een lijn op de vloer${drawing.points.length ? " — nu het eind" : ""}`
+                  : drawing.kind === "erase"
+                    ? `Tik rondom wat weg moet (${drawing.points.length} punten)`
+                    : drawing.thenMeasure
+                      ? `Tik de 4 hoeken van een rechthoekig stuk vloer, bv. tussen de muren (${drawing.points.length}/4)`
+                      : `Tik de hoeken van de vloer of muur aan — 4 hoeken geeft perspectief (${drawing.points.length} punten)`}
               </span>
-              <button className="primary" disabled={drawing.points.length < 3} onClick={finishDrawing}>
-                {drawing.kind === "erase" ? "Weggummen" : "Vlak afmaken"}
-              </button>
+              {drawing.kind !== "measure" && (
+                <button className="primary" disabled={drawing.points.length < (drawing.thenMeasure ? 4 : 3)} onClick={finishDrawing}>
+                  {drawing.kind === "erase" ? "Weggummen" : "Vlak afmaken"}
+                </button>
+              )}
               <button onClick={() => setDrawing((d) => (d && d.points.length ? { ...d, points: d.points.slice(0, -1) } : d))} disabled={!drawing.points.length}>
                 ↶ Punt terug
               </button>
@@ -621,6 +779,9 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
               </button>
               <button onClick={() => (setDrawing({ kind: "surface", points: [] }), setSelected(null))}>🖌️ Zelf vlak</button>
               <button onClick={() => (setDrawing({ kind: "erase", points: [] }), setSelected(null))}>🧽 Zelf gummen</button>
+              <button onClick={startMeasuring} title="Meet op de vloer; met één bekende maat zet je meubels op ware grootte">
+                📏 Meten
+              </button>
               <span className="toolbar-spacer" />
               <button onClick={editor.undo} disabled={!editor.canUndo} title="Ongedaan maken (⌘/Ctrl + Z)" aria-label="Ongedaan maken">
                 ↶
@@ -654,19 +815,37 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
         {empty && (
           <ol className="help">
             <li>
-              Tik op <strong>✨ Herken</strong>: meubels, muren en vloer worden gevonden.
+              <strong>Tik op een meubel</strong> in de foto: de AI omlijnt het precies. Kies <strong>Weghalen</strong>.
             </li>
-            <li>Tik op een oude bank en kies <strong>Weghalen met AI</strong>.</li>
-            <li>Tik op de vloer of een muur en kies rechts een vloer of verfkleur.</li>
+            <li>
+              <strong>✨ Herken</strong> vindt ook vloer en muren: tik erop en kies rechts een vloer of verfkleur.
+            </li>
+            <li>
+              <strong>📏 Meten</strong>: tik twee punten op de vloer en vul in hoe lang dat is. Meubels staan dan op ware grootte.
+            </li>
             <li>Tik rechts op een meubel: het komt op de vloer te staan. Sleep het op zijn plek.</li>
           </ol>
+        )}
+
+        {rulerFor && (
+          <RulerPrompt
+            onCancel={() => setRulerFor(null)}
+            onSave={(cm) => {
+              patchLayer(rulerFor, { cm });
+              setRulerFor(null);
+            }}
+          />
         )}
 
         {found.length > 0 && !drawing && (
           <div className="found row wrap">
             <span className="muted small">Gevonden:</span>
             {found.map((s) => (
-              <button key={s.id} className={`chip ${s.kind} ${picked?.id === s.id ? "on" : ""}`} onClick={() => (setSelected(null), setPicked(s))}>
+              <button
+                key={s.id}
+                className={`chip ${s.kind} ${selection?.label === s.label ? "on" : ""}`}
+                onClick={() => (setSelected(null), setRefine(null), setSelection(selectionFromSegment(s)))}
+              >
                 {s.label}
               </button>
             ))}
@@ -684,7 +863,8 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
               )}
               {showLayers &&
                 layers.map((l) => {
-                  if (l.kind === "erase") return null;
+                  if (l.kind === "erase" || l.kind === "measure") return null;
+                  if (l.kind === "surface" && l.fill.type === "none") return null;
                   if (l.kind === "surface") {
                     const tex = textureSrc(l);
                     const plane = planeOf(l);
@@ -747,10 +927,11 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
               onPointerCancel={endDrag}
               onLostPointerCapture={endDrag}
             >
-              {pickedMask && <image className="highlight" href={pickedMask} width={size.w} height={size.h} preserveAspectRatio="none" />}
+              {selection && <image className="highlight" href={selection.url} width={size.w} height={size.h} preserveAspectRatio="none" />}
               {showLayers &&
                 selectedLayer &&
-                (selectedLayer.kind !== "product" && selectedLayer.mask ? (
+                selectedLayer.kind !== "measure" &&
+                ((selectedLayer.kind === "surface" || selectedLayer.kind === "erase") && selectedLayer.mask ? (
                   <image className="highlight selected-area" href={selectedLayer.mask} width={size.w} height={size.h} preserveAspectRatio="none" />
                 ) : (
                   <polygon
@@ -758,6 +939,49 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
                     points={(selectedLayer.kind === "product" ? selectedLayer.corners : selectedLayer.points).map((p) => p.join(",")).join(" ")}
                   />
                 ))}
+
+              {/* "Past het?": the product's footprint on a measured floor. */}
+              {showLayers &&
+                selectedLayer?.kind === "product" &&
+                selectedLayer.floor &&
+                (() => {
+                  const a = selectedLayer.floor!;
+                  const plane = floorPlaneOf(a.planeId);
+                  const m = metricOf(a.planeId);
+                  if (!plane || !m) return null;
+                  const dims = productById.get(selectedLayer.productId)?.dims;
+                  const widthCm = a.widthCm ?? a.width * m.sx;
+                  const depthCm = dims?.d ?? widthCm * 0.45;
+                  const fp = footprint(plane, m, a.u, a.v, widthCm, depthCm, a.angle);
+                  const [, , br, bl] = fp;
+                  return (
+                    <g className="footprint">
+                      <polygon points={fp.map((p) => p.join(",")).join(" ")} />
+                      <MeasureLabel
+                        at={[(br[0] + bl[0]) / 2, (br[1] + bl[1]) / 2 + size.w / 45]}
+                        text={`${Math.round(widthCm)} × ${Math.round(depthCm)} cm${dims?.d ? "" : " (diepte geschat)"}`}
+                        size={size.w}
+                      />
+                    </g>
+                  );
+                })()}
+
+              {/* Measuring lines with their length. */}
+              {showLayers &&
+                layers
+                  .filter((l): l is MeasureLayer => l.kind === "measure")
+                  .map((l) => (
+                    <g key={l.id} className={`measure ${l.cm ? "ruler" : ""} ${selected === l.id ? "selected" : ""}`}>
+                      <line x1={l.points[0][0]} y1={l.points[0][1]} x2={l.points[1][0]} y2={l.points[1][1]} />
+                      {l.points.map((p, i) => (
+                        <circle key={i} cx={p[0]} cy={p[1]} r={size.w / 260} />
+                      ))}
+                      <MeasureLabel at={[(l.points[0][0] + l.points[1][0]) / 2, (l.points[0][1] + l.points[1][1]) / 2]} text={measureText(l)} size={size.w} />
+                    </g>
+                  ))}
+              {drawing?.kind === "measure" && drawing.points.length === 1 && (
+                <circle className="handle draft-point" cx={drawing.points[0][0]} cy={drawing.points[0][1]} r={handleR * 0.7} />
+              )}
               {showLayers &&
                 layers
                   .filter((l): l is EraseLayer => l.kind === "erase" && !l.mask && l.id !== selected)
@@ -778,7 +1002,11 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
                       if (selectedLayer.floor) {
                         const c2 = selectedLayer.corners;
                         const center: Pt = [(c2[2][0] + c2[3][0]) / 2, (c2[2][1] + c2[3][1]) / 2];
-                        startDrag({ type: "anchor-scale", id: selectedLayer.id, from, center, start: selectedLayer.floor }, e);
+                        // From true size (cm) back to plane units, so scaling starts from what you see.
+                        const a = selectedLayer.floor;
+                        const m = a.widthCm ? metricOf(a.planeId) : null;
+                        const start = m && a.widthCm ? { ...a, width: (a.widthCm * Math.cos((a.angle * Math.PI) / 180)) / m.sx || a.width } : a;
+                        startDrag({ type: "anchor-scale", id: selectedLayer.id, from, center, start }, e);
                       } else {
                         startDrag(
                           { type: "corner", id: selectedLayer.id, index: i, from, start: selectedLayer.corners, distort: selectedLayer.distort },
@@ -810,7 +1038,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
               {showLayers &&
                 selectedLayer &&
                 selectedLayer.kind !== "product" &&
-                !selectedLayer.mask &&
+                !(selectedLayer.kind !== "measure" && selectedLayer.mask) &&
                 selectedLayer.points.map((p, i) => (
                   <circle
                     key={i}
@@ -839,37 +1067,53 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
           <div className="stage loading">Foto laden…</div>
         )}
 
-        {picked && !selectedLayer && (
-          <div className="layer-controls row wrap">
-            <strong>{picked.label}</strong>
-            {picked.kind === "furniture" ? (
-              <>
-                <button className="primary" onClick={() => eraseSegment(picked, "ai")}>
-                  🧽 Weghalen met AI
-                </button>
-                <button onClick={() => eraseSegment(picked, "simple")}>Snel weghalen</button>
-              </>
-            ) : picked.kind === "floor" ? (
-              <>
-                <button className="primary" onClick={() => surfaceFromSegment(picked, { type: "preset", preset: "eiken-naturel" })}>
-                  🪵 Nieuwe vloer leggen
-                </button>
-                <span className="muted small">of kies rechts een vloer</span>
-              </>
-            ) : (
-              <>
-                <button
-                  className="primary"
-                  onClick={() => surfaceFromSegment(picked, { type: "color", color: products.find((p) => p.color)?.color ?? "#d8cfc4" })}
-                >
-                  🎨 Verven
-                </button>
-                <span className="muted small">of kies rechts een kleur, behang of tegels</span>
-              </>
+        {selection && !selectedLayer && (
+          <div className="layer-controls selection-bar">
+            <div className="row wrap">
+              <strong>{selection.label}</strong>
+              {selection.kind === "furniture" || selection.kind === "object" ? (
+                <>
+                  <button className="primary" onClick={() => eraseSelection(selection, "ai")}>
+                    🧽 Weghalen met AI
+                  </button>
+                  <button onClick={() => eraseSelection(selection, "simple")}>Snel weghalen</button>
+                </>
+              ) : selection.kind === "floor" ? (
+                <>
+                  <button className="primary" onClick={() => surfaceFromSelection(selection, { type: "preset", preset: "eiken-naturel" }, "floor")}>
+                    🪵 Nieuwe vloer leggen
+                  </button>
+                  <span className="muted small">of kies rechts een vloer</span>
+                </>
+              ) : (
+                <>
+                  <button
+                    className="primary"
+                    onClick={() => surfaceFromSelection(selection, { type: "color", color: products.find((p) => p.color)?.color ?? "#d8cfc4" }, "wall")}
+                  >
+                    🎨 Verven
+                  </button>
+                  <span className="muted small">of kies rechts een kleur, behang of tegels</span>
+                </>
+              )}
+              <button className="ghost" onClick={() => (setSelection(null), setRefine(null))}>
+                Sluiten
+              </button>
+            </div>
+            {(selection.kind === "furniture" || selection.kind === "object") && (
+              <div className="row wrap">
+                <span className="muted small">Niet helemaal goed?</span>
+                <div className="segmented" role="group" aria-label="Selectie aanpassen">
+                  <button className={refine === "add" ? "on" : ""} onClick={() => setRefine((r) => (r === "add" ? null : "add"))}>
+                    ➕ Stuk erbij
+                  </button>
+                  <button className={refine === "remove" ? "on" : ""} onClick={() => setRefine((r) => (r === "remove" ? null : "remove"))}>
+                    ➖ Stuk eraf
+                  </button>
+                </div>
+                {refine && <span className="small">Tik nu op het stuk dat {refine === "add" ? "erbij moet" : "eraf moet"}.</span>}
+              </div>
             )}
-            <button className="ghost" onClick={() => setPicked(null)}>
-              Sluiten
-            </button>
           </div>
         )}
 
@@ -878,11 +1122,32 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
             layer={selectedLayer}
             products={products}
             floors={floors}
+            metric={
+              selectedLayer.kind === "product"
+                ? selectedLayer.floor && metricOf(selectedLayer.floor.planeId)
+                : selectedLayer.kind === "measure"
+                  ? metricOf(selectedLayer.floorId)
+                  : selectedLayer.kind === "surface"
+                    ? metricOf(selectedLayer.id)
+                    : null
+            }
+            lengthCm={(() => {
+              if (selectedLayer.kind !== "measure") return null;
+              const plane = floorPlaneOf(selectedLayer.floorId);
+              const m = metricOf(selectedLayer.floorId);
+              return plane && m ? distanceCm(plane, m, selectedLayer.points[0], selectedLayer.points[1]) : null;
+            })()}
             cutoutState={selectedLayer.kind === "product" ? cutouts[cutoutKey(selectedLayer)] : undefined}
             onChange={(patch) => patchLayer(selectedLayer.id, patch)}
             onPlaceOnFloor={(floorId) => {
               const floor = floors.find((f) => f.id === floorId);
-              if (floor && selectedLayer.kind === "product") setLayers((ls) => ls.map((l) => (l.id === selectedLayer.id ? placeOnFloor(selectedLayer, floor) : l)));
+              if (floor && selectedLayer.kind === "product") {
+                const placed = placeOnFloor(selectedLayer, floor);
+                // On a measured floor, a product with known size goes straight to true size.
+                const w = productById.get(selectedLayer.productId)?.dims?.w;
+                if (w && metricOf(floor.id) && placed.floor) placed.floor.widthCm = w;
+                setLayers((ls) => ls.map((l) => (l.id === selectedLayer.id ? placed : l)));
+              }
             }}
             onRemove={removeSelected}
             onDuplicate={duplicateSelected}
@@ -902,5 +1167,57 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
 
       <Palette furniture={furniture} surfaces={surfaces} onAddProduct={onAddProduct} onFill={onFill} />
     </section>
+  );
+}
+
+function distanceToSegment(p: Pt, a: Pt, b: Pt): number {
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy || 1)));
+  return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+}
+
+/** Length label on the photo: readable at any zoom, with a light background. */
+function MeasureLabel({ at, text, size }: { at: Pt; text: string; size: number }) {
+  const fs = size / 55;
+  const w = text.length * fs * 0.56 + fs;
+  return (
+    <g className="measure-label" transform={`translate(${at[0]} ${at[1]})`}>
+      <rect x={-w / 2} y={-fs * 0.85} width={w} height={fs * 1.6} rx={fs * 0.4} />
+      <text textAnchor="middle" dominantBaseline="middle" fontSize={fs} y={-fs * 0.05}>
+        {text}
+      </text>
+    </g>
+  );
+}
+
+/** After the first line on a floor: how long is it in reality? */
+function RulerPrompt({ onSave, onCancel }: { onSave: (cm: number) => void; onCancel: () => void }) {
+  const [value, setValue] = useState("");
+  const cm = parseFloat(value.replace(",", "."));
+  const valid = Number.isFinite(cm) && cm > 0;
+  return (
+    <form
+      className="ruler-prompt"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (valid) onSave(cm);
+      }}
+    >
+      <strong>📏 Hoe lang is deze lijn in het echt?</strong>
+      <div className="row wrap">
+        <input autoFocus inputMode="decimal" placeholder="bv. 420" value={value} onChange={(e) => setValue(e.target.value)} aria-label="Lengte in cm" />
+        <span>cm</span>
+        <button className="primary" disabled={!valid}>
+          Opslaan
+        </button>
+        <button type="button" className="ghost" onClick={onCancel}>
+          Later
+        </button>
+      </div>
+      <p className="muted small">
+        Tip: neem een maat uit de plattegrond van Funda (bijvoorbeeld de breedte van de kamer, langs de voet van de muur) of een
+        binnendeur: die is meestal 83 cm breed. Hoe langer de lijn, hoe nauwkeuriger.
+      </p>
+    </form>
   );
 }

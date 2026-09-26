@@ -1,6 +1,8 @@
 import { project } from "./geometry";
+import { calibrate, type FloorMetric } from "./metric";
 import { anchoredCorners, imageToPlane, localScale, PLANE } from "./plane";
-import type { Layer, Product, ProductLayer, Pt, Quad, SurfaceFill, SurfaceLayer } from "./types";
+import { presetCm } from "./textures";
+import type { Layer, MeasureLayer, Product, ProductLayer, Pt, Quad, SurfaceFill, SurfaceLayer } from "./types";
 
 /** Categories that are laid on a floor or wall instead of placed as an object. */
 export const SURFACE_CATEGORIES = new Set(["vloeren", "behang", "tegels", "verf"]);
@@ -16,6 +18,7 @@ export function fillFor(product: Product): SurfaceFill {
 }
 
 export function surfaceDefaults(fill: SurfaceFill): Pick<SurfaceLayer, "blend" | "opacity"> {
+  if (fill.type === "none") return { blend: "normal", opacity: 1 };
   return fill.type === "color" ? { blend: "multiply", opacity: 0.75 } : { blend: "normal", opacity: 0.95 };
 }
 
@@ -30,14 +33,45 @@ export const planeOf = (l: SurfaceLayer): Quad | null => l.plane ?? (l.points.le
 export const isFloor = (l: Layer): l is SurfaceLayer =>
   l.kind === "surface" && !!planeOf(l) && (l.role === "floor" || (l.role === undefined && l.fill.type !== "color"));
 
-/** Recomputes the corners of products that stand on a floor (after the floor or the product changed). */
+/** The ruler of a floor: its first measuring line with a known length. */
+export const rulerOf = (layers: Layer[], floorId: string): MeasureLayer | undefined =>
+  layers.find((l): l is MeasureLayer => l.kind === "measure" && l.floorId === floorId && !!l.cm);
+
+/** Real-world scale of a floor, if it has been measured. */
+export function floorMetric(layers: Layer[], floorId: string): FloorMetric | null {
+  const floor = layers.find((l) => l.id === floorId);
+  const plane = floor?.kind === "surface" ? planeOf(floor) : null;
+  const ruler = rulerOf(layers, floorId);
+  if (!plane || !ruler || ruler.points.length < 2) return null;
+  return calibrate(plane, ruler.points[0], ruler.points[1], ruler.cm!, ruler.imageW, ruler.imageH);
+}
+
+/**
+ * Keeps derived geometry up to date after any change: products standing on a
+ * floor follow its perspective (and its real size once measured), and floor
+ * textures get their real tile size on a measured floor.
+ */
 export function syncAnchors(layers: Layer[]): Layer[] {
+  const metrics = new Map<string, FloorMetric | null>();
+  const metricOf = (id: string) => {
+    if (!metrics.has(id)) metrics.set(id, floorMetric(layers, id));
+    return metrics.get(id)!;
+  };
   return layers.map((l) => {
+    if (l.kind === "surface" && l.fill.type === "preset" && l.autoScale !== false && l.perspective) {
+      const m = metricOf(l.id);
+      const cm = presetCm(l.fill.preset);
+      if (m && cm) {
+        const scale = Math.max(5, Math.round(cm / m.sx));
+        return scale === l.scale ? l : { ...l, scale };
+      }
+      return l;
+    }
     if (l.kind !== "product" || !l.floor) return l;
     const floor = layers.find((f) => f.id === l.floor!.planeId);
     const plane = floor?.kind === "surface" ? planeOf(floor) : null;
     if (!plane) return { ...l, floor: undefined };
-    return { ...l, corners: anchoredCorners(plane, l.floor, l.aspect) };
+    return { ...l, corners: anchoredCorners(plane, l.floor, l.aspect, metricOf(floor!.id)) };
   });
 }
 

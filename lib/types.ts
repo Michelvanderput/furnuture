@@ -61,6 +61,14 @@ export interface Product {
   color?: string;
   /** Which room it is meant for (budget per room). */
   room?: RoomType;
+  /** Size in cm: width, depth, height. */
+  dims?: Dims;
+}
+
+export interface Dims {
+  w?: number;
+  d?: number;
+  h?: number;
 }
 
 export type Pt = [number, number];
@@ -106,9 +114,12 @@ export interface FloorAnchor {
   width: number;
   /** Rotation on the floor in degrees (0 = facing the camera). */
   angle: number;
+  /** Real width in cm: with a measured floor the product is drawn at true size. */
+  widthCm?: number;
 }
 
 export type SurfaceFill =
+  | { type: "none" }
   | { type: "color"; color: string }
   | { type: "texture"; productId: string }
   | { type: "preset"; preset: string };
@@ -133,6 +144,8 @@ export interface SurfaceLayer {
   /** Perspective plane (top-left, top-right, bottom-right, bottom-left); defaults to the 4 points. */
   plane?: Quad;
   role?: "floor" | "wall";
+  /** Preset textures follow the measured floor's real size unless the user set a size. */
+  autoScale?: boolean;
 }
 
 /** An area of the photo that is painted out (existing furniture removed). */
@@ -147,7 +160,24 @@ export interface EraseLayer {
   label?: string;
 }
 
-export type Layer = ProductLayer | SurfaceLayer | EraseLayer;
+/**
+ * A measuring line on a floor. The first line with `cm` is the floor's ruler:
+ * it gives the floor its real size, every other line then shows its length.
+ */
+export interface MeasureLayer {
+  kind: "measure";
+  id: string;
+  /** Start and end, in photo pixels. */
+  points: Pt[];
+  floorId: string;
+  /** Known real length: this line calibrates the floor. */
+  cm?: number;
+  /** Photo size, needed to estimate the camera (focal length). */
+  imageW: number;
+  imageH: number;
+}
+
+export type Layer = ProductLayer | SurfaceLayer | EraseLayer | MeasureLayer;
 
 export interface Scene {
   photoId: string;
@@ -171,6 +201,7 @@ export interface FundaResult {
 /** Response shape of /api/product */
 export interface ProductInfo {
   url: string;
+  dims?: Dims;
   title: string;
   image: string;
   images: string[];

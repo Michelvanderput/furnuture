@@ -39,3 +39,46 @@ describe("buildSegments", () => {
     expect(seg.ids[4 * w + 3]).toBe(chair.id);
   });
 });
+
+describe("cleaning up recognition", () => {
+  const labels = { 0: "wall", 3: "floor", 23: "sofa", 39: "cushion" };
+  const W = 60, H = 30;
+  const room = () => {
+    const map = new Uint8Array(W * H);
+    for (let y = 20; y < H; y++) for (let x = 0; x < W; x++) map[y * W + x] = 3;
+    for (let y = 10; y < 22; y++) for (let x = 10; x < 40; x++) map[y * W + x] = 23;
+    return map;
+  };
+
+  it("joins a sofa split by a thin shadow", () => {
+    const map = room();
+    for (let y = 10; y < 22; y++) map[y * W + 25] = 0; // 1 px gap
+    const seg = buildSegments(map, W, H, labels);
+    expect(seg.segments.filter((s) => s.className === "sofa")).toHaveLength(1);
+  });
+
+  it("adds cushions to the sofa and fills holes", () => {
+    const map = room();
+    for (let y = 12; y < 15; y++) for (let x = 14; x < 20; x++) map[y * W + x] = 39; // cushion on the sofa
+    for (let y = 16; y < 18; y++) for (let x = 30; x < 33; x++) map[y * W + x] = 0; // wall seen through
+    const seg = buildSegments(map, W, H, labels);
+    expect(seg.segments.map((s) => s.label).sort()).toEqual(["Bank", "Muur", "Vloer"]);
+    const sofa = seg.segments.find((s) => s.label === "Bank")!;
+    expect(seg.ids[13 * W + 16]).toBe(sofa.id);
+    expect(seg.ids[16 * W + 31]).toBe(sofa.id);
+  });
+});
+
+import { samMaskToPhoto } from "@/lib/labels";
+
+describe("samMaskToPhoto", () => {
+  it("maps SAM's padded low-res mask onto the photo", () => {
+    // Photo 2:1 -> SAM input 1024×512 (padded to 1024²) -> low-res 256×128 used.
+    const low = new Float32Array(256 * 256).fill(-5);
+    for (let y = 0; y < 128; y++) for (let x = 128; x < 256; x++) low[y * 256 + x] = 5; // right half of the photo
+    const m = samMaskToPhoto(low, 1024, 512, 200, 100);
+    expect(m[50 * 200 + 20]).toBe(0);
+    expect(m[50 * 200 + 180]).toBe(1);
+    expect(m[99 * 200 + 180]).toBe(1); // bottom row still inside the photo part, not the padding
+  });
+});

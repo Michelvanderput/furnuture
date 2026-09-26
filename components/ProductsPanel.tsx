@@ -4,7 +4,7 @@ import { memo, useCallback, useState } from "react";
 import { CATEGORIES, ROOMS } from "@/lib/categories";
 import { shareOrDownload } from "@/lib/exportImage";
 import { euro, extractLinks, parsePrice, shoppingListCsv, shoppingListText, totalsPerRoom } from "@/lib/shopping";
-import type { Category, Product, ProductInfo, ProductStatus, Project, RoomType } from "@/lib/types";
+import type { Category, Dims, Product, ProductInfo, ProductStatus, Project, RoomType } from "@/lib/types";
 import { newId } from "@/lib/useProject";
 import { Img } from "./Img";
 import { PasteButton } from "./PasteButton";
@@ -281,6 +281,7 @@ const ProductCard = memo(function ProductCard({
             ))}
           </select>
         </div>
+        {p.category !== "verf" && <DimsInput dims={p.dims} onChange={(dims) => set({ dims })} />}
         {(p.category === "verf" || p.color) && (
           <label className="row small">
             Kleur <input type="color" value={p.color ?? "#d8cfc4"} onChange={(e) => set({ color: e.target.value })} />
@@ -302,3 +303,32 @@ const ProductCard = memo(function ProductCard({
     </article>
   );
 });
+
+/** Width × depth × height in cm (read from the shop when possible). Saved when a field loses focus. */
+function DimsInput({ dims, onChange }: { dims?: Dims; onChange: (d: Dims | undefined) => void }) {
+  const field = (key: keyof Dims, label: string) => (
+    <input
+      key={`${key}:${dims?.[key] ?? ""}`}
+      inputMode="decimal"
+      placeholder={label}
+      aria-label={label}
+      title={label}
+      defaultValue={dims?.[key] ? String(Math.round(dims[key]!)) : ""}
+      onBlur={(e) => {
+        const n = parseFloat(e.target.value.replace(",", "."));
+        const next = { ...dims, [key]: Number.isFinite(n) && n > 0 ? n : undefined };
+        onChange(next.w || next.d || next.h ? next : undefined);
+      }}
+    />
+  );
+  return (
+    <div className="dims" title="Breedte × diepte × hoogte in cm">
+      {field("w", "B")}
+      <span>×</span>
+      {field("d", "D")}
+      <span>×</span>
+      {field("h", "H")}
+      <span className="muted">cm</span>
+    </div>
+  );
+}

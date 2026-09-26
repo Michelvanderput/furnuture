@@ -3,7 +3,7 @@ import { loadImage } from "./images";
 import { planeOf } from "./layers";
 import { productFilter } from "./look";
 import { PLANE } from "./plane";
-import type { Layer, ProductLayer, Pt, Quad, SurfaceLayer } from "./types";
+import type { Layer, MeasureLayer, ProductLayer, Pt, Quad, SurfaceLayer } from "./types";
 
 /**
  * Renders the design to a JPEG, the same way the stage shows it (which uses CSS
@@ -109,6 +109,8 @@ export interface DesignInput {
   productSrc: (l: ProductLayer) => string | null;
   textureSrc: (l: SurfaceLayer) => string | null;
   eraseMasks: string[];
+  /** Label for a measuring line ("3,42 m"). */
+  measureText?: (l: MeasureLayer) => string;
 }
 
 export async function renderDesign(input: DesignInput): Promise<Blob> {
@@ -120,7 +122,8 @@ export async function renderDesign(input: DesignInput): Promise<Blob> {
   const eraseImgs = await Promise.all(input.eraseMasks.map((m) => loadImage(m)));
 
   for (const l of layers) {
-    if (l.kind === "erase") continue;
+    if (l.kind === "erase" || l.kind === "measure") continue;
+    if (l.kind === "surface" && l.fill.type === "none") continue;
 
     if (l.kind === "surface") {
       const layer = canvasOf(W, H);
@@ -214,6 +217,40 @@ export async function renderDesign(input: DesignInput): Promise<Blob> {
     pctx.drawImage(img, 0, 0, prepared.width, prepared.height);
     drawWarped(ctx, prepared, l.corners, 12);
     free(prepared);
+  }
+
+  // Measuring lines on top, so a shared photo shows the sizes too.
+  for (const l of layers) {
+    if (l.kind !== "measure" || !input.measureText) continue;
+    const [a, b] = l.points;
+    const fs = W / 55;
+    ctx.save();
+    ctx.strokeStyle = "#e9601f";
+    ctx.fillStyle = "#e9601f";
+    ctx.lineWidth = Math.max(2, W / 450);
+    ctx.setLineDash(l.cm ? [] : [W / 120, W / 200]);
+    ctx.beginPath();
+    ctx.moveTo(a[0], a[1]);
+    ctx.lineTo(b[0], b[1]);
+    ctx.stroke();
+    for (const p of l.points) {
+      ctx.beginPath();
+      ctx.arc(p[0], p[1], W / 260, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const text = input.measureText(l);
+    ctx.font = `600 ${fs}px system-ui, sans-serif`;
+    const tw = ctx.measureText(text).width + fs;
+    const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    ctx.beginPath();
+    ctx.roundRect?.(mx - tw / 2, my - fs * 0.85, tw, fs * 1.6, fs * 0.4);
+    ctx.fill();
+    ctx.fillStyle = "#1f1d1a";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, mx, my - fs * 0.05);
+    ctx.restore();
   }
 
   const blob = await new Promise<Blob | null>((resolve) => out.toBlob(resolve, "image/jpeg", 0.92));
