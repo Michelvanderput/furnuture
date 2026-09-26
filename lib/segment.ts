@@ -95,6 +95,11 @@ const FURNITURE: Record<string, string> = {
   "ashcan": "Prullenbak",
   "towel": "Handdoek",
   "apparel": "Kleding",
+  oven: "Oven",
+  microwave: "Magnetron",
+  dishwasher: "Vaatwasser",
+  fireplace: "Openhaard",
+  bar: "Bar",
 };
 
 const KIND: Record<string, SegmentKind> = { floor: "floor", wall: "wall", ceiling: "ceiling" };
@@ -226,10 +231,20 @@ function close(mask: Uint8Array, w: number, h: number, r: number): Uint8Array {
   return out;
 }
 
-const HOSTS = new Set(["sofa", "armchair", "swivel chair", "chair", "bed", "bench", "ottoman", "stool"]);
-const ACCESSORIES = new Set(["cushion", "pillow", "blanket"]);
+/** Furniture that other, smaller objects can rest on and are merged into. */
+const HOSTS = new Set([
+  "sofa", "armchair", "swivel chair", "chair", "bed", "bench", "ottoman", "stool",
+  "table", "coffee table", "desk", "pool table", "cabinet", "wardrobe", "chest of drawers",
+  "bookcase", "shelf", "buffet", "kitchen island",
+]);
+/**
+ * Small objects merged into whatever they rest on (a cushion on a sofa, a vase on a
+ * table): selecting or erasing the host takes them along. Without this, erasing a
+ * coffee table leaves its vase floating over the new floor.
+ */
+const ACCESSORIES = new Set(["cushion", "pillow", "blanket", "vase", "bottle", "tray"]);
 
-/** Cushions and plaids on a sofa or bed belong to it: selecting the sofa should take them along. */
+/** Cushions, plaids and small tabletop items merge into the furniture they rest on. */
 function mergeAccessories(segments: Segment[], ids: Int32Array, w: number, h: number) {
   const byId = new Map(segments.map((s) => [s.id, s]));
   for (const acc of segments.filter((s) => ACCESSORIES.has(s.className ?? ""))) {

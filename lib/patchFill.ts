@@ -95,10 +95,48 @@ function rng(seed: number) {
   return () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296);
 }
 
-function solveLevel(l: Level, nnf: Int32Array, em: number, rand: () => number, sharp = false, coarsest = false) {
+/**
+ * Local variance of each pixel's 7×7 neighbourhood (mean of squares minus mean
+ * squared, summed over channels): near zero on a flat surface (a plain white
+ * tabletop), large where there is real texture (grain, a rug's weave, an edge).
+ */
+function patchVariance(img: Float32Array, w: number, h: number): Float32Array {
+  const n = w * h;
+  const v = new Float32Array(n);
+  const win = 2 * R + 1;
+  const count = win * win * 3;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let sum = 0, sumSq = 0;
+      for (let dy = -R; dy <= R; dy++) {
+        const sy = Math.min(h - 1, Math.max(0, y + dy)) * w;
+        for (let dx = -R; dx <= R; dx++) {
+          const i = (sy + Math.min(w - 1, Math.max(0, x + dx))) * 3;
+          for (let c = 0; c < 3; c++) {
+            const val = img[i + c];
+            sum += val;
+            sumSq += val * val;
+          }
+        }
+      }
+      const mean = sum / count;
+      v[y * w + x] = Math.max(0, sumSq / count - mean * mean);
+    }
+  }
+  return v;
+}
+
+function solveLevel(l: Level, nnf: Int32Array, em: number, rand: () => number, coarsest = false): void {
   const { w, h, img, hole, labels } = l;
   const n = w * h;
   const notSource = grow(hole, w, h, R);
+  // A flat, texture-less source patch (a plain tabletop, an evenly lit stretch of wall)
+  // has low SSD against almost anything and, left unchecked, becomes a magnet: every
+  // target converges to it and the whole hole ends up a bland, textureless copy of
+  // that one patch. Penalising low-variance sources pushes matches back towards
+  // patches that actually carry the room's real texture.
+  const variance = patchVariance(img, w, h);
+  const LOW_VARIANCE_PENALTY = 150_000;
   // Region of each possible source patch: its label when the whole patch is one region, else 0.
   const region = new Uint8Array(n);
   if (labels) {
@@ -145,9 +183,19 @@ function solveLevel(l: Level, nnf: Int32Array, em: number, rand: () => number, s
   // blend; a smooth start makes smooth patches win, and the result stays blurry.
   if (coarsest) for (const p of targets) if (hole[p]) for (let c = 0; c < 3; c++) img[p * 3 + c] = img[nnf[p] * 3 + c];
 
+  // Bias matches toward nearby source patches. Real photos are busy: a doorway or a
+  // brick wall far across the room can look, patch by patch, roughly as good a match
+  // for a floor pixel as the correct nearby floor patch (JPEG noise flattens the gap
+  // that a simpler, cleaner test scene would show). The correct material for a hole is
+  // overwhelmingly found close to it, so a distant match must be clearly better, not
+  // merely tied, to win — otherwise the vote among several such "fine, but wrong"
+  // matches just averages toward a flat, textureless blend.
+  const POSITION_WEIGHT = 0.12;
   const dist = (p: number, q: number, best: number) => {
     const px = p % w, py = (p / w) | 0, qx = q % w, qy = (q / w) | 0;
-    let d = 0;
+    const dpx = px - qx, dpy = py - qy;
+    let d = (dpx * dpx + dpy * dpy) * POSITION_WEIGHT + LOW_VARIANCE_PENALTY / (variance[q] + 50);
+    if (d >= best) return d;
     for (let dy = -R; dy <= R; dy++) {
       const sy = Math.min(h - 1, Math.max(0, py + dy)) * w;
       const ty = (qy + dy) * w;
@@ -229,14 +277,29 @@ function solveLevel(l: Level, nnf: Int32Array, em: number, rand: () => number, s
       img[t * 3 + 2] = acc[t * 3 + 2] / wsum[t];
     }
   }
-  if (!sharp) return;
-  // Finest level: averaging overlapping patches blurs plank edges and grain. Take
-  // each pixel from its own best match instead, blended lightly with the average.
+  // Every level: averaging overlapping patches blurs plank edges and grain. Take
+  // each pixel mostly from its own best match instead, blended with the average —
+  // but only where that match is actually good. A hole that spans two different
+  // textures (a rug edge crossing onto the floor) or messy detail (a rug's fringe)
+  // has no clean match anywhere nearby; forcing "sharp" there does not recover
+  // detail, it prints whatever unrelated patch happened to look locally cheapest,
+  // as a confident-looking but wrong streak. Trust the match in proportion to how
+  // much better it is than a typical match for this hole, so a genuinely uncertain
+  // pixel falls back towards the smoother multi-patch average instead.
   const avg = img.slice();
+  let sum = 0, count = 0;
+  for (const p of targets) {
+    if (!hole[p]) continue;
+    sum += cost[p];
+    count++;
+  }
+  const typical = count ? Math.max(1, sum / count) : 1;
   for (const p of targets) {
     if (!hole[p]) continue;
     const q = nnf[p];
-    for (let c = 0; c < 3; c++) img[p * 3 + c] = 0.75 * img[q * 3 + c] + 0.25 * avg[p * 3 + c];
+    const confidence = Math.exp(-cost[p] / (2 * typical));
+    const amount = 0.3 + 0.55 * confidence; // 0.3 (uncertain) .. 0.85 (confident)
+    for (let c = 0; c < 3; c++) img[p * 3 + c] = amount * img[q * 3 + c] + (1 - amount) * avg[p * 3 + c];
   }
 }
 
@@ -283,7 +346,7 @@ export function patchFill(rgba: Uint8ClampedArray, mask: Uint8Array, w: number, 
         }
       }
     }
-    solveLevel(l, nnf, li === levels.length - 1 ? 6 : li === 0 ? 3 : 4, rand, li === 0, li === levels.length - 1);
+    solveLevel(l, nnf, li === levels.length - 1 ? 16 : li === 0 ? 6 : 8, rand, li === levels.length - 1);
     prev = { nnf, w: l.w, h: l.h };
   }
   seamless(base, mask, labels);

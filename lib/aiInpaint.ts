@@ -18,7 +18,18 @@ type Solver = (image: Img, hole: Uint8Array, labels: Uint8Array | undefined) => 
  * low. The result is blended back with a soft edge, so no seam shows.
  * `floor` (photo pixels) separates floor from wall for the content-aware fill.
  */
-async function cropInpaint(canvas: HTMLCanvasElement, mask: Uint8Array, maxSide: number, solve: Solver, floor?: Pt[]): Promise<void> {
+async function cropInpaint(
+  canvas: HTMLCanvasElement,
+  mask: Uint8Array,
+  maxSide: number,
+  solve: Solver,
+  floor?: Pt[],
+  /** How much wider than the hole the crop is. PatchMatch (unlike a trained AI model)
+   * needs real surrounding texture to copy from, and degrades badly once the hole is
+   * a large share of its working image — a bigger crop (downscaled to the same
+   * `maxSide`) gives it proportionally more of that at every pyramid level. */
+  contextFactor = 2,
+): Promise<void> {
   const W = canvas.width;
   const H = canvas.height;
   let x0 = W, y0 = H, x1 = -1, y1 = -1;
@@ -33,7 +44,7 @@ async function cropInpaint(canvas: HTMLCanvasElement, mask: Uint8Array, maxSide:
   if (x1 < 0) return;
 
   // Crop with context around the object, clamped to the photo.
-  const side = Math.max(x1 - x0, y1 - y0) * 2;
+  const side = Math.max(x1 - x0, y1 - y0) * contextFactor;
   const cw = Math.min(W, Math.max(256, side));
   const ch = Math.min(H, Math.max(256, side));
   const cx = Math.round(Math.min(Math.max(0, (x0 + x1) / 2 - cw / 2), W - cw));
@@ -202,5 +213,5 @@ export async function patchInpaint(canvas: HTMLCanvasElement, mask: Uint8Array, 
     }
   }
   if (!rest.some(Boolean)) return;
-  await cropInpaint(canvas, rest, PATCH_CROP, runFill, floor);
+  await cropInpaint(canvas, rest, PATCH_CROP, runFill, floor, 4);
 }

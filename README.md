@@ -24,7 +24,7 @@ npm run typecheck
 | Productlinks lezen | JSON-LD `Product`, Open Graph en `product:price`-metatags (bijna elke webshop heeft deze) | Nee |
 | Categorie bepalen | Trefwoorden in titel, breadcrumbs en URL (NL + EN) | Nee |
 | Achtergrond weghalen | Snel: flood fill vanaf de rand die stopt bij randen in de foto (instelbare gevoeligheid). Nauwkeurig: RMBG-1.4 in de browser | Optioneel, gratis |
-| Meubels weggummen | Push-pull-invulling vanuit de omgeving (werkt goed op muren en vloeren) | Nee |
+| Meubels weggummen | Content-aware fill (PatchMatch): kopieert passende stukjes textuur uit de rest van de foto, met een aparte doorrekening voor de vloer in perspectief | Nee |
 | Meubel in perspectief | Vier losse hoeken, homografie als CSS `matrix3d` | Nee |
 | Vloer leggen | Ingebouwde vloersoorten (canvas, naadloos) of de productfoto van een vloerlink, in perspectief op de vier aangeklikte hoeken | Nee |
 | Muur verven | Zelf getekend vlak met kleur, `mix-blend-mode: multiply` behoudt de schaduwen | Nee |
@@ -109,8 +109,24 @@ Grenzen: een productfoto laat één kant zien, dus de zijkant van een meubel wor
 ## Selecteren en stabiliteit
 
 - **Tik op een meubel**: SlimSAM (een lichte "Segment Anything", ± 15 MB) omlijnt precies wat je aantikt; met ➕/➖ tik je stukken erbij of eraf. De foto wordt één keer geanalyseerd, daarna is elke tik snel. Het werkproces sluit zichzelf na 90 seconden zonder gebruik.
-- **Betere herkenning**: overal SegFormer-B2; kussens en plaids worden bij de bank of het bed gevoegd, stukken van één meubel samengevoegd en gaten gedicht.
+- **Betere herkenning**: overal SegFormer-B2; kussens en plaids worden bij de bank of het bed gevoegd, stukken van één meubel samengevoegd en gaten gedicht. Kleine spullen die duidelijk ergens op staan (een vaas, een fles, een dienblad op een tafel of kast) gaan ook mee: weg je de tafel, dan verdwijnt de vaas niet zwevend achter — die was namelijk het bekende, onrealistische resultaat zonder deze koppeling. Ook herkent de app nu oven, magnetron, vaatwasser, openhaard en bar als meubel-achtige objecten.
 - **Crash-vangnet**: loopt een tabblad vast op een AI-taak (iPad met te weinig geheugen), dan meldt de app dat bij de volgende start en zet hij de **lichte AI-modus** aan (kleinere modellen en beelden). In het Project-menu aan en uit te zetten.
+
+### Weggummen zonder AI: wat het wel en niet goed kan
+
+Geen AI beschikbaar (download geblokkeerd, te weinig geheugen, of "Snel weghalen" gekozen)?
+Dan vult content-aware fill het gat met stukjes die het elders in de foto vindt — geen
+vage waas, maar (bijvoorbeeld) echt doorlopende plankenvloer. Getest tegen een gefotografeerde
+kamer (niet alleen gemaakte testbeelden):
+
+- **Met een vloer aangegeven** (getekend, of via "✨ Herken meubels, muren & vloer"): de
+  vloer wordt in bovenaanzicht rechtgetrokken vóór het invullen, zodat planken en tegels
+  ook in perspectief kloppend doorlopen. Dit geeft duidelijk het beste resultaat.
+- **Zonder vloer, op een rommelige plek** (bijvoorbeeld een meubel dat deels op een vloerkleed
+  en deels op de vloer staat): zonder enig houvast over wat waar hoort, kan de invulling
+  vervagen tot een vlakke, weinig overtuigende vlek — een bekende, inherente grens van deze
+  aanpak zonder AI op een drukke, echte foto. AI-gum (MI-GAN) is hier sterker; geef anders
+  eerst de vloer aan of herken de kamer voordat je gumt.
 
 ## Gebruiksgemak en snelheid
 
