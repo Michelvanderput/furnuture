@@ -5,7 +5,7 @@ import { removeBackgroundAI } from "@/lib/ai";
 import { exportFileName } from "@/lib/backup";
 import { renderDesign, shareOrDownload } from "@/lib/exportImage";
 import { centroid, pointInPolygon, project as projectPoint, quadToMatrix3d, rectQuad } from "@/lib/geometry";
-import { cropCenter, loadImage, NoPlainBackground, proxied, removeBackground } from "@/lib/images";
+import { cropCenter, loadImage, NoPlainBackground, proxied, releaseUrl, removeBackground } from "@/lib/images";
 import { renderErased } from "@/lib/inpaint";
 import {
   cutoutKey,
@@ -23,7 +23,7 @@ import { Selector } from "@/lib/sam";
 import { linkedView, linkFromPoints, photoToPlan, planLayersFor, scanFurniture } from "@/lib/floorplan";
 import { defaultSize, planForPhoto, plansOf, updateItem, updatePlan } from "@/lib/plans";
 import { photoLook, productFilter } from "@/lib/look";
-import { ensureMask, maskToDataUrl, polygonMask, readyMask, rememberMask } from "@/lib/masks";
+import { loadHitMask, maskHit, maskToDataUrl, polygonMask, rememberMask } from "@/lib/masks";
 import { fitFloorQuad, fitWallQuad, imageToPlane, PLANE, planeToImage } from "@/lib/plane";
 import { furnitureMask, segmentMask, segmentRoom, type RoomSegmentation, type Segment, type SegmentKind } from "@/lib/segment";
 import { presetTexture } from "@/lib/textures";
@@ -76,7 +76,43 @@ type Drag =
 // Room recognition results live in memory only (a few seconds to recompute).
 const segmentations = new Map<string, RoomSegmentation>();
 // Mask PNGs for drawn erase areas, so floors and walls can also cover them.
+// Made at working size (CSS scales them) and bounded: they used to be photo-sized and kept forever.
 const polygonMaskUrls = new Map<string, string>();
+function polygonMaskUrl(points: Pt[], w: number, h: number): string {
+  const key = `${w}x${h}:${JSON.stringify(points)}`;
+  let url = polygonMaskUrls.get(key);
+  if (!url) {
+    const ws = workSize(w, h);
+    const f = ws.w / w;
+    url = maskToDataUrl(polygonMask(points.map(([x, y]) => [x * f, y * f]), ws.w, ws.h), ws.w, ws.h);
+    polygonMaskUrls.set(key, url);
+    while (polygonMaskUrls.size > 30) polygonMaskUrls.delete(polygonMaskUrls.keys().next().value!);
+  }
+  return url;
+}
+
+/**
+ * Short identity of an erase layer. Layers are immutable, so this is cached per
+ * object: stringifying every mask PNG on each render (60× a second while
+ * dragging) used to churn through megabytes of strings.
+ */
+const eraseKeys = new WeakMap<EraseLayer, string>();
+let eraseSeq = 0;
+const eraseContent = new Map<string, string>();
+function eraseLayerKey(l: EraseLayer): string {
+  let key = eraseKeys.get(l);
+  if (!key) {
+    const content = `${l.method}:${l.mask ?? JSON.stringify(l.points.map((p) => p.map(Math.round)))}`;
+    key = eraseContent.get(content);
+    if (!key) {
+      key = `e${++eraseSeq}`;
+      eraseContent.set(content, key);
+      while (eraseContent.size > 100) eraseContent.delete(eraseContent.keys().next().value!);
+    }
+    eraseKeys.set(l, key);
+  }
+  return key;
+}
 
 /** Natural size of a photo, loaded directly (fast) with the proxy as fallback. */
 function measure(url: string): Promise<{ w: number; h: number }> {
@@ -160,10 +196,46 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
 
   // Decode stored masks so taps can hit them.
   useEffect(() => {
-    if (!size) return;
-    for (const l of layers) if ((l.kind === "surface" || l.kind === "erase") && l.mask) ensureMask(l.mask, size.w, size.h).catch(() => undefined);
-  }, [layers, size]);
+    for (const l of layers) if ((l.kind === "surface" || l.kind === "erase") && l.mask) loadHitMask(l.mask).catch(() => undefined);
+  }, [layers]);
 
+
+  // Free a replaced erased photo (object URLs stay in memory until revoked).
+  useEffect(() => () => releaseUrl(erased?.url), [erased]);
+
+  // Cut-outs and textures that no scene uses any more (an old tolerance, a deleted
+  // layer) are freed; they used to pile up for as long as the tab was open.
+  const usedImages = useMemo(() => {
+    const keys = new Set<string>();
+    for (const l of [...Object.values(project.scenes).flatMap((sc) => sc.layers), ...layers]) {
+      if (l.kind === "product" && l.cutout !== "off") keys.add(cutoutKey(l));
+      if (l.kind === "surface" && l.fill.type === "texture") keys.add(`${l.fill.productId}:${l.crop}`);
+    }
+    // Furniture on the floor plans is cut out the same way (see planLayersFor).
+    for (const it of (project.plans ?? []).flatMap((pl) => pl.items)) {
+      if (it.cutout !== "off") keys.add(it.cutout === "ai" ? `${it.productId}:ai` : `${it.productId}:simple:${it.tolerance}`);
+    }
+    return keys;
+  }, [project.scenes, project.plans, layers]);
+  useEffect(() => {
+    const prune = (map: Record<string, string>) => {
+      const stale = Object.keys(map).filter((k) => !usedImages.has(k));
+      if (!stale.length) return map;
+      const next = { ...map };
+      for (const k of stale) (releaseUrl(next[k]), delete next[k]);
+      return next;
+    };
+    setCutouts(prune);
+    setTextures(prune);
+  }, [usedImages]);
+  const imagesRef = useRef({ cutouts, textures });
+  imagesRef.current = { cutouts, textures };
+  useEffect(
+    () => () => {
+      for (const u of [...Object.values(imagesRef.current.cutouts), ...Object.values(imagesRef.current.textures)]) releaseUrl(u);
+    },
+    [],
+  );
 
   // Product photos used as texture, cropped to their centre.
   useEffect(() => {
@@ -175,7 +247,12 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
       if (!product?.image || textures[key]) continue;
       setTextures((t) => ({ ...t, [key]: "pending" }));
       cropCenter(product.image, layer.crop)
-        .then((url) => setTextures((t) => ({ ...t, [key]: url })))
+        .then((url) =>
+          setTextures((t) => {
+            if (!(key in t)) return (releaseUrl(url), t);
+            return { ...t, [key]: url };
+          }),
+        )
         .catch(() => setTextures((t) => ({ ...t, [key]: proxied(product.image) })));
     }
   }, [layers, project.products, textures]);
@@ -185,9 +262,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     () => layers.filter((l): l is EraseLayer => l.kind === "erase" && (!!l.mask || l.points.length >= 3)),
     [layers],
   );
-  const eraseKey = eraseLayers.length
-    ? JSON.stringify(eraseLayers.map((l) => [l.method, l.mask ?? l.points.map((p) => p.map(Math.round))]))
-    : "";
+  const eraseKey = useMemo(() => eraseLayers.map(eraseLayerKey).join("|"), [eraseLayers]);
   useEffect(() => {
     if (!photo || !eraseKey) return;
     let cancelled = false;
@@ -255,8 +330,14 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   );
   const allLayers = useMemo(() => [...layers, ...planLayers], [layers, planLayers]);
 
-  // Background-free product images (simple colour flood fill, or AI).
+  // Background-free product images (simple colour flood fill, or AI). Started after
+  // a short pause, so dragging the tolerance slider does not start a job per step.
   useEffect(() => {
+    const timer = setTimeout(() => startCutouts(), 250);
+    return () => clearTimeout(timer);
+  }, [allLayers, project.products, cutouts]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function startCutouts() {
     for (const layer of allLayers) {
       if (layer.kind !== "product" || layer.cutout === "off") continue;
       const key = cutoutKey(layer);
@@ -270,10 +351,16 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
           ? removeBackgroundAI(product.image, setStatus).finally(() => setStatus(""))
           : removeBackground(product.image, layer.tolerance);
       job
-        .then((png) => setCutouts((c) => ({ ...c, [key]: png })))
+        .then((png) =>
+          setCutouts((c) => {
+            if (!(key in c)) return (releaseUrl(png), c); // no longer needed
+            releaseUrl(c[key]);
+            return { ...c, [key]: png };
+          }),
+        )
         .catch((e) => setCutouts((c) => ({ ...c, [key]: e instanceof NoPlainBackground ? "failed:plain" : "failed" })));
     }
-  }, [allLayers, project.products, cutouts]);
+  }
 
 
   /** Links this photo to the plan from the two far floor corners tapped on it. */
@@ -338,7 +425,10 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     setNotice("");
     try {
       const seg = await segmentRoom(photo.url, setStatus);
+      segmentations.delete(photo.id);
       segmentations.set(photo.id, seg);
+      // Keep only the most recent photos' recognition (each is ~1 MB).
+      while (segmentations.size > 6) segmentations.delete(segmentations.keys().next().value!);
       setSegmentation(seg);
       if (!seg.segments.length) setNotice("Geen meubels, muren of vloer herkend op deze foto.");
       return seg;
@@ -360,7 +450,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
 
   function maskUrl(mask: Uint8Array, w: number, h: number) {
     const url = maskToDataUrl(mask, w, h);
-    if (size && w === size.w && h === size.h) rememberMask(url, w, h, mask);
+    rememberMask(url, w, h, mask);
     return url;
   }
 
@@ -641,7 +731,6 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   /** Topmost layer under a point. */
   function hitLayer(p: Pt): Layer | undefined {
     if (!size) return undefined;
-    const idx = Math.round(p[1]) * size.w + Math.round(p[0]);
     for (const l of [...allLayers].reverse()) {
       if (l.kind === "measure") {
         if (distanceToSegment(p, l.points[0], l.points[1]) < handleRadius() * 1.3) return l;
@@ -651,7 +740,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
       if (l.kind === "product" && pointInPolygon(p, l.corners)) return l;
       if (l.kind !== "product") {
         if (l.mask) {
-          if (readyMask(l.mask, size.w, size.h)?.[idx]) return l;
+          if (maskHit(l.mask, p[0], p[1], size.w, size.h)) return l;
         } else if (l.points.length >= 3 && pointInPolygon(p, l.points)) return l;
       }
     }
@@ -716,7 +805,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   /** The floor a photo point lies on (its area or plane), else the most recent floor. */
   function floorAt(p: Pt): SurfaceLayer | undefined {
     const inside = floors.filter((f) => {
-      if (f.mask && size) return !!readyMask(f.mask, size.w, size.h)?.[Math.round(p[1]) * size.w + Math.round(p[0])];
+      if (f.mask && size) return !!maskHit(f.mask, p[0], p[1], size.w, size.h);
       const poly = f.points.length >= 3 ? f.points : planeOf(f);
       return !!poly && pointInPolygon(p, poly);
     });
@@ -849,9 +938,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   const eraseMaskUrls = size
     ? eraseLayers.map((l) => {
         if (l.mask) return l.mask;
-        const key = `${size.w}x${size.h}:${JSON.stringify(l.points)}`;
-        if (!polygonMaskUrls.has(key)) polygonMaskUrls.set(key, maskToDataUrl(polygonMask(l.points, size.w, size.h), size.w, size.h));
-        return polygonMaskUrls.get(key)!;
+        return polygonMaskUrl(l.points, size.w, size.h);
       })
     : [];
 

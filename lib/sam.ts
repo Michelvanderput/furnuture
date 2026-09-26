@@ -1,4 +1,4 @@
-import { AiSession, imagePixels, type Progress } from "./worker";
+import { AiSession, imagePixels, isLightMode, type Progress } from "./worker";
 
 /**
  * Tap-to-select with SlimSAM (a slimmed-down Segment Anything, ~15 MB, free in
@@ -6,7 +6,9 @@ import { AiSession, imagePixels, type Progress } from "./worker";
  * (+) or remove (−) parts. The photo is analysed once per photo, in a worker that
  * closes itself after 90 seconds without taps.
  */
-const MODEL = "Xenova/slimsam-77-uniform";
+/** SlimSAM-50 keeps twice the weights of SlimSAM-77 and traces edges better; 77 in light mode or as fallback. */
+const MODELS = ["Xenova/slimsam-50-uniform", "Xenova/slimsam-77-uniform"];
+const MODELS_LIGHT = ["Xenova/slimsam-77-uniform"];
 /** SAM looks at 1024 px; sending more only costs memory. */
 const INPUT_SIDE = 1024;
 
@@ -19,7 +21,7 @@ export class Selector {
     if (this.photo === photoUrl && this.session.active) return;
     const image = await imagePixels(photoUrl, INPUT_SIDE);
     this.dims = { w: image.width, h: image.height };
-    await this.session.run({ task: "samEmbed", image, model: MODEL }, onProgress, [image.data.buffer]);
+    await this.session.run({ task: "samEmbed", image, models: isLightMode() ? MODELS_LIGHT : MODELS }, onProgress, [image.data.buffer]);
     this.photo = photoUrl;
   }
 

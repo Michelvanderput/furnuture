@@ -1,7 +1,7 @@
 import type { Progress } from "./ai";
 import { loadImage, proxied } from "./images";
 import { aiInpaint } from "./aiInpaint";
-import { dilate, ensureMask, polygonMask } from "./masks";
+import { decodeMask, dilate, polygonMask } from "./masks";
 import type { EraseLayer } from "./types";
 
 /**
@@ -89,28 +89,73 @@ export function pushPullFill(rgb: Uint8ClampedArray, mask: Uint8Array, w: number
   }
 }
 
+/** Largest side the erased photo is worked on: bigger photos only cost memory (the screen scales it). */
+const MAX_SIDE = 2048;
+
+const layerKey = (l: EraseLayer) => `${l.method}:${l.mask ?? JSON.stringify(l.points.map((p) => p.map(Math.round)))}`;
+
 /**
- * Returns the photo with every erase layer painted out, as a JPEG data URL.
- * AI layers use MI-GAN; if that cannot run (download blocked, too little memory)
- * they fall back to the push-pull fill.
+ * The last result, so adding one erase layer only processes that layer instead
+ * of redoing every earlier one (each AI layer starts a worker with a 27 MB model).
+ */
+let last: { photoUrl: string; keys: string[]; blob: Blob } | null = null;
+
+/** Fills `mask` (1 = fill) in the canvas from its surroundings, working only on the area around it. */
+function simpleFill(ctx: CanvasRenderingContext2D, mask: Uint8Array, w: number, h: number) {
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let i = 0; i < w * h; i++) {
+    if (!mask[i]) continue;
+    const x = i % w, y = (i / w) | 0;
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+  }
+  if (x1 < 0) return;
+  // Enough context around the hole; the whole photo is not needed (and costs ~16 bytes per pixel).
+  const m = Math.max(48, Math.round(Math.max(x1 - x0, y1 - y0) * 0.5));
+  const cx = Math.max(0, x0 - m), cy = Math.max(0, y0 - m);
+  const cw = Math.min(w, x1 + m + 1) - cx, ch = Math.min(h, y1 + m + 1) - cy;
+  const part = ctx.getImageData(cx, cy, cw, ch);
+  const sub = new Uint8Array(cw * ch);
+  for (let y = 0; y < ch; y++) sub.set(mask.subarray((cy + y) * w + cx, (cy + y) * w + cx + cw), y * cw);
+  pushPullFill(part.data, sub, cw, ch);
+  ctx.putImageData(part, cx, cy);
+}
+
+/**
+ * Returns the photo with every erase layer painted out, as an object URL (the
+ * caller revokes it). AI layers use MI-GAN; if that cannot run (download
+ * blocked, too little memory) they fall back to the push-pull fill.
+ * `layers` is newest first, as in the scene.
  */
 export async function renderErased(
   photoUrl: string,
   layers: EraseLayer[],
   onProgress?: Progress,
 ): Promise<{ url: string; aiFailed: boolean }> {
+  const ordered = [...layers].reverse(); // oldest first
+  const keys = ordered.map(layerKey);
+  const reuse = last && last.photoUrl === photoUrl && last.keys.length <= keys.length && last.keys.every((k, i) => k === keys[i]) ? last : null;
+
   const img = await loadImage(proxied(photoUrl));
-  const w = img.naturalWidth;
-  const h = img.naturalHeight;
+  const f = Math.min(1, MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+  const w = Math.round(img.naturalWidth * f);
+  const h = Math.round(img.naturalHeight * f);
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
-  ctx.drawImage(img, 0, 0);
+  if (reuse) {
+    const bitmap = await createImageBitmap(reuse.blob);
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close();
+  } else ctx.drawImage(img, 0, 0, w, h);
+  img.src = "";
   let aiFailed = false;
 
-  for (const layer of layers) {
-    const area = layer.mask ? await ensureMask(layer.mask, w, h) : polygonMask(layer.points, w, h);
+  for (const layer of ordered.slice(reuse ? reuse.keys.length : 0)) {
+    const area = layer.mask ? (await decodeMask(layer.mask, w, h)).mask : polygonMask(layer.points.map(([x, y]) => [x * f, y * f]), w, h);
     // Grow the area a little so outlines and contact shadows go too.
     const mask = dilate(area, w, h, Math.round(Math.max(3, w / 200)));
     if (layer.method === "ai") {
@@ -122,12 +167,13 @@ export async function renderErased(
         aiFailed = true;
       }
     }
-    const photo = ctx.getImageData(0, 0, w, h);
-    pushPullFill(photo.data, mask, w, h);
-    ctx.putImageData(photo, 0, 0);
+    simpleFill(ctx, mask, w, h);
   }
   onProgress?.("");
-  const url = canvas.toDataURL("image/jpeg", 0.92);
+  const blob = await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Gummen mislukt"))), "image/jpeg", 0.94),
+  );
   canvas.width = canvas.height = 0; // free the backing store right away (Safari keeps it otherwise)
-  return { url, aiFailed };
+  last = { photoUrl, keys, blob };
+  return { url: URL.createObjectURL(blob), aiFailed };
 }

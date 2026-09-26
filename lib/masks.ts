@@ -83,43 +83,66 @@ export function maskToDataUrl(mask: Uint8Array, w: number, h: number): string {
   return canvas.toDataURL("image/png");
 }
 
-const decoded = new Map<string, Promise<{ w: number; h: number; mask: Uint8Array }>>();
-
-/** PNG mask back to a binary mask, resized to w×h (cached). */
-export function decodeMask(url: string, w: number, h: number): Promise<{ w: number; h: number; mask: Uint8Array }> {
-  const key = `${w}x${h}:${url}`;
-  if (!decoded.has(key)) {
-    decoded.set(
-      key,
-      new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement("canvas");
-          canvas.width = w;
-          canvas.height = h;
-          const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
-          ctx.drawImage(img, 0, 0, w, h);
-          const d = ctx.getImageData(0, 0, w, h).data;
-          const mask = new Uint8Array(w * h);
-          for (let i = 0; i < w * h; i++) mask[i] = d[i * 4 + 3] > 127 ? 1 : 0;
-          resolve({ w, h, mask });
-        };
-        img.onerror = reject;
-        img.src = url;
-      }),
-    );
-  }
-  return decoded.get(key)!;
+/** Decodes a PNG mask to a binary mask of w×h (default: the PNG's own size). Not cached. */
+export function decodeMask(url: string, w?: number, h?: number): Promise<{ w: number; h: number; mask: Uint8Array }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const W = w ?? img.naturalWidth;
+      const H = h ?? img.naturalHeight;
+      const canvas = document.createElement("canvas");
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+      ctx.drawImage(img, 0, 0, W, H);
+      const d = ctx.getImageData(0, 0, W, H).data;
+      canvas.width = canvas.height = 0; // free the backing store right away (Safari keeps it otherwise)
+      const mask = new Uint8Array(W * H);
+      for (let i = 0; i < W * H; i++) mask[i] = d[i * 4 + 3] > 127 ? 1 : 0;
+      resolve({ w: W, h: H, mask });
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
 }
 
-/** Synchronous lookup for masks that were decoded (or created) before. */
-const ready = new Map<string, Uint8Array>();
-export const rememberMask = (url: string, w: number, h: number, mask: Uint8Array) => ready.set(`${w}x${h}:${url}`, mask);
-export const readyMask = (url: string, w: number, h: number) => ready.get(`${w}x${h}:${url}`);
-export async function ensureMask(url: string, w: number, h: number): Promise<Uint8Array> {
-  const hit = readyMask(url, w, h);
-  if (hit) return hit;
-  const { mask } = await decodeMask(url, w, h);
-  rememberMask(url, w, h, mask);
-  return mask;
+/**
+ * Masks for hit-testing, kept at their own (small, ~480 px) size in a bounded
+ * cache. Decoding them at photo size and keeping them forever used to cost
+ * several MB per mask and grew with every photo visited.
+ */
+type Hit = { w: number; h: number; mask: Uint8Array };
+const MAX_HITS = 40;
+const hits = new Map<string, Hit>();
+const pendingHits = new Map<string, Promise<Hit>>();
+
+function remember(url: string, hit: Hit) {
+  hits.delete(url);
+  hits.set(url, hit);
+  while (hits.size > MAX_HITS) hits.delete(hits.keys().next().value!);
+}
+
+export const rememberMask = (url: string, w: number, h: number, mask: Uint8Array) => remember(url, { w, h, mask });
+
+/** Loads a mask into the hit cache (no-op when it is there already). */
+export function loadHitMask(url: string): Promise<Hit> {
+  const hit = hits.get(url);
+  if (hit) return Promise.resolve(hit);
+  let p = pendingHits.get(url);
+  if (!p) {
+    p = decodeMask(url)
+      .then((m) => (remember(url, m), m))
+      .finally(() => pendingHits.delete(url));
+    pendingHits.set(url, p);
+  }
+  return p;
+}
+
+/** Is photo point (x, y) of a W×H photo inside the mask? Undefined while the mask is not decoded yet. */
+export function maskHit(url: string, x: number, y: number, W: number, H: number): boolean | undefined {
+  const m = hits.get(url);
+  if (!m) return undefined;
+  const mx = Math.min(m.w - 1, Math.max(0, Math.floor((x * m.w) / W)));
+  const my = Math.min(m.h - 1, Math.max(0, Math.floor((y * m.h) / H)));
+  return !!m.mask[my * m.w + mx];
 }

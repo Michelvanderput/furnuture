@@ -4,6 +4,30 @@ export function proxied(url: string): string {
   return `/api/image?url=${encodeURIComponent(url)}`;
 }
 
+/**
+ * Canvas to an object URL (and frees the canvas). Blob URLs keep the image as
+ * compact bytes outside the JS heap; multi-MB data-URL strings in React state
+ * were a main cause of tabs running out of memory. Revoke with `releaseUrl`.
+ */
+export function canvasToUrl(canvas: HTMLCanvasElement, type = "image/png", quality?: number): Promise<string> {
+  return new Promise((resolve, reject) =>
+    canvas.toBlob(
+      (blob) => {
+        canvas.width = canvas.height = 0; // free the backing store right away (Safari keeps it otherwise)
+        if (blob) resolve(URL.createObjectURL(blob));
+        else reject(new Error("Afbeelding maken mislukt"));
+      },
+      type,
+      quality,
+    ),
+  );
+}
+
+/** Frees an object URL made by `canvasToUrl` (other URLs are ignored). */
+export function releaseUrl(url: string | undefined | null): void {
+  if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
+}
+
 export function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -100,7 +124,7 @@ export async function removeBackground(src: string, tolerance = 18): Promise<str
     if (edge) px[i * 4 + 3] = 170;
   }
   ctx.putImageData(data, 0, 0);
-  return canvas.toDataURL("image/png");
+  return canvasToUrl(canvas);
 }
 
 /** The centre part of an image (fraction 0..1 of each side), e.g. to use a floor photo as texture. */
@@ -116,5 +140,5 @@ export async function cropCenter(src: string, fraction: number, maxSide = 800): 
   canvas
     .getContext("2d")!
     .drawImage(img, (img.naturalWidth - sw) / 2, (img.naturalHeight - sh) / 2, sw, sh, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.9);
+  return canvasToUrl(canvas, "image/jpeg", 0.9);
 }

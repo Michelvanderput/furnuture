@@ -1,5 +1,5 @@
 import { components, dilate } from "./masks";
-import { imagePixels, isLightMode, runAi, type Progress } from "./worker";
+import { imagePixels, isLightMode, runAi, gpuEnabled, type Progress } from "./worker";
 
 /**
  * Room recognition with SegFormer trained on ADE20K (150 indoor/outdoor classes),
@@ -10,6 +10,8 @@ import { imagePixels, isLightMode, runAi, type Progress } from "./worker";
  */
 const MODEL = "Xenova/segformer-b2-finetuned-ade-512-512";
 const MODEL_LIGHT = "Xenova/segformer-b0-finetuned-ade-512-512";
+/** SegFormer-B5 at 640 px: the strongest ADE20K model, only on a GPU with half precision (see ai.worker.ts). */
+const MODEL_GPU = "Xenova/segformer-b5-finetuned-ade-640-640";
 
 export type SegmentKind = "floor" | "wall" | "ceiling" | "furniture";
 
@@ -103,12 +105,13 @@ const WORK_SIDE = 480;
 export async function segmentRoom(photoUrl: string, onProgress?: Progress): Promise<RoomSegmentation> {
   onProgress?.("Foto voorbereiden…");
   // The model looks at 512×512 pixels; a larger photo only costs memory.
-  const image = await imagePixels(photoUrl, 512);
+  const gpu = gpuEnabled();
+  const image = await imagePixels(photoUrl, gpu ? 640 : 512);
   const f = WORK_SIDE / Math.max(image.width, image.height);
   const outW = Math.round(image.width * f);
   const outH = Math.round(image.height * f);
   const { classMap, id2label } = await runAi<{ classMap: Uint8Array; id2label: Record<number, string> }>(
-    { task: "segment", image, model: isLightMode() ? MODEL_LIGHT : MODEL, outW, outH },
+    { task: "segment", image, models: [isLightMode() ? MODEL_LIGHT : MODEL], gpuModels: gpu ? [MODEL_GPU] : undefined, outW, outH },
     onProgress,
     [image.data.buffer],
   );

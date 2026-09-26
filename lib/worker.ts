@@ -42,6 +42,17 @@ function read(key: string): string | null {
 export const isLightMode = () => read(LIGHT_KEY) === "1";
 export const setLightMode = (on: boolean) => store(LIGHT_KEY, on ? "1" : null);
 
+// WebGPU: models run on the graphics card. Many times faster, and the weights do
+// not live in WebAssembly memory (which is never returned and is what made tabs
+// crash). Off in light mode and on low-memory devices, and switched off for good
+// once it failed on this device.
+const NO_GPU_KEY = "furnuture:no-gpu";
+export function gpuEnabled(): boolean {
+  if (typeof navigator === "undefined" || !("gpu" in navigator)) return false;
+  return !isLightMode() && !isLowMemoryDevice() && read(NO_GPU_KEY) !== "1";
+}
+const gpuFailed = () => store(NO_GPU_KEY, "1");
+
 const TASK_LABELS: Record<string, string> = {
   segment: "het herkennen van de kamer",
   sam: "het selecteren van een meubel",
@@ -88,7 +99,8 @@ export function runAi<T>(job: Task, onProgress?: Progress, transfer: Transferabl
       jobEnded();
       onProgress?.("");
     };
-    worker.onmessage = (e: MessageEvent<{ type: string; message?: string; result?: T }>) => {
+    worker.onmessage = (e: MessageEvent<{ type: string; message?: string; result?: T; gpuFailed?: boolean }>) => {
+      if (e.data.gpuFailed) gpuFailed();
       if (e.data.type === "progress") onProgress?.(e.data.message ?? "");
       else if (e.data.type === "done") (finish(), resolve(e.data.result as T));
       else (finish(), reject(new Error(e.data.message)));
@@ -97,7 +109,7 @@ export function runAi<T>(job: Task, onProgress?: Progress, transfer: Transferabl
       finish();
       reject(new Error(e.message || "De AI is gestopt (te weinig geheugen?)"));
     };
-    worker.postMessage(job, transfer);
+    worker.postMessage({ gpu: gpuEnabled(), ...job }, transfer);
   });
 }
 
@@ -130,7 +142,8 @@ export class AiSession {
             onProgress?.("");
             this.idle = setTimeout(() => this.close(), this.idleMs);
           };
-          w.onmessage = (e: MessageEvent<{ type: string; message?: string; result?: T }>) => {
+          w.onmessage = (e: MessageEvent<{ type: string; message?: string; result?: T; gpuFailed?: boolean }>) => {
+            if (e.data.gpuFailed) gpuFailed();
             if (e.data.type === "progress") onProgress?.(e.data.message ?? "");
             else if (e.data.type === "done") (done(), resolve(e.data.result as T));
             else (done(), reject(new Error(e.data.message)));
@@ -140,7 +153,7 @@ export class AiSession {
             this.close();
             reject(new Error(e.message || "De AI is gestopt (te weinig geheugen?)"));
           };
-          w.postMessage(job, transfer);
+          w.postMessage({ gpu: gpuEnabled(), ...job }, transfer);
         }),
     );
     this.queue = next.catch(() => undefined);

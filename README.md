@@ -50,6 +50,18 @@ Alles hieronder draait gratis in de browser van de gebruiker (geen server, geen 
 
 **Geheugen (iPad/Safari):** elk AI-model draait in een eigen Web Worker die na de taak wordt afgesloten. WebAssembly-geheugen wordt anders nooit teruggegeven, en Safari op iPad sluit een tabblad dat te veel geheugen gebruikt. De modellen krijgen alleen een verkleinde foto (512 px), het resultaat wordt op 480 px verwerkt, en op iPad/iPhone worden de lichtste modellen gebruikt.
 
+**Geheugen in de app zelf:**
+
+- Uitgeknipte productfoto's, vloertexturen en de gegumde foto zijn blob-URL's (bytes buiten de JavaScript-heap) in plaats van data-URL-strings van meerdere MB. Wat geen enkele foto of plattegrond meer gebruikt (een oude gevoeligheid, een verwijderde laag), wordt vrijgegeven.
+- De gevoeligheid-schuif start pas een nieuwe uitsnede als je even stopt met schuiven.
+- Maskers voor het aantikken blijven op hun eigen formaat (± 480 px) in een begrensde cache; ze werden eerder op fotoformaat gedecodeerd en nooit opgeruimd.
+- Gummen verwerkt alleen de nieuwe laag (de vorige uitkomst wordt hergebruikt), op maximaal 2048 px, en de snelle gum rekent alleen rond het gat.
+- Herkenningen van kamers worden voor de laatste 6 foto's bewaard.
+
+**WebGPU:** op computers met WebGPU draaien de transformers.js-modellen op de videokaart: veel sneller, en de gewichten staan niet in het WebAssembly-geheugen. Lukt dat niet, dan doet de app dezelfde taak op de processor en onthoudt hij dat voor dit apparaat. In lichte modus en op iPad/iPhone blijft alles op de processor.
+
+**Sterkere modellen, met terugval:** kamers sorteren gebruikt CLIP ViT-B/16 (was B/32, even groot), tik-om-te-selecteren SlimSAM-50 (was 77), en kamerherkenning op een videokaart met half-precision SegFormer-B5 op 640 px (was B2). Kan een model niet laden, dan valt de app terug op het vorige model.
+
 Zo werkt het:
 
 1. **✨ Herken meubels, muren & vloer**: elke pixel krijgt een klasse (bank, stoel, muur, vloer…). Meubels en muren worden losse objecten die je aanklikt.
