@@ -239,6 +239,10 @@ export function LayerControls({
             Warmte
             <input type="range" min={0} max={0.5} step={0.01} value={layer.warmth ?? 0} onChange={(e) => onChange({ warmth: Number(e.target.value) })} />
           </label>
+          <label className="row" title="De kant van het meubel die van het raam af staat, wordt donkerder">
+            Zijlicht
+            <input type="range" min={0} max={1.5} step={0.05} value={layer.sideLight ?? 0.8} onChange={(e) => onChange({ sideLight: Number(e.target.value) })} />
+          </label>
           <button onClick={() => onChange({ flip: !layer.flip })}>↔ Spiegelen</button>
           {order}
         </div>
@@ -312,6 +316,11 @@ export function LayerControls({
             <input type="checkbox" checked={layer.perspective} onChange={(e) => onChange({ perspective: e.target.checked })} />
             Perspectief
           </label>
+        )}
+        {isTexture && (
+          <button onClick={() => onChange({ rotate: !layer.rotate })} title="Planken of patroon een kwartslag draaien" aria-pressed={!!layer.rotate} className={layer.rotate ? "on" : ""}>
+            ↻ Richting
+          </button>
         )}
       </div>
       <div className="row wrap">

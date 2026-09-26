@@ -24,7 +24,7 @@ npm run typecheck
 | Productlinks lezen | JSON-LD `Product`, Open Graph en `product:price`-metatags (bijna elke webshop heeft deze) | Nee |
 | Categorie bepalen | Trefwoorden in titel, breadcrumbs en URL (NL + EN) | Nee |
 | Achtergrond weghalen | Snel: flood fill vanaf de rand die stopt bij randen in de foto (instelbare gevoeligheid). Nauwkeurig: RMBG-1.4 in de browser | Optioneel, gratis |
-| Meubels weggummen | Push-pull-invulling vanuit de omgeving (werkt goed op muren en vloeren) | Nee |
+| Meubels weggummen | Content-aware fill (PatchMatch): kopieert passende stukjes textuur uit de rest van de foto, met een aparte doorrekening voor de vloer in perspectief | Nee |
 | Meubel in perspectief | Vier losse hoeken, homografie als CSS `matrix3d` | Nee |
 | Vloer leggen | Ingebouwde vloersoorten (canvas, naadloos) of de productfoto van een vloerlink, in perspectief op de vier aangeklikte hoeken | Nee |
 | Muur verven | Zelf getekend vlak met kleur, `mix-blend-mode: multiply` behoudt de schaduwen | Nee |
@@ -49,6 +49,18 @@ Alles hieronder draait gratis in de browser van de gebruiker (geen server, geen 
 | Foto's per ruimte sorteren | CLIP ViT-B/32 via transformers.js | ± 90 MB | MIT |
 
 **Geheugen (iPad/Safari):** elk AI-model draait in een eigen Web Worker die na de taak wordt afgesloten. WebAssembly-geheugen wordt anders nooit teruggegeven, en Safari op iPad sluit een tabblad dat te veel geheugen gebruikt. De modellen krijgen alleen een verkleinde foto (512 px), het resultaat wordt op 480 px verwerkt, en op iPad/iPhone worden de lichtste modellen gebruikt.
+
+**Geheugen in de app zelf:**
+
+- Uitgeknipte productfoto's, vloertexturen en de gegumde foto zijn blob-URL's (bytes buiten de JavaScript-heap) in plaats van data-URL-strings van meerdere MB. Wat geen enkele foto of plattegrond meer gebruikt (een oude gevoeligheid, een verwijderde laag), wordt vrijgegeven.
+- De gevoeligheid-schuif start pas een nieuwe uitsnede als je even stopt met schuiven.
+- Maskers voor het aantikken blijven op hun eigen formaat (± 480 px) in een begrensde cache; ze werden eerder op fotoformaat gedecodeerd en nooit opgeruimd.
+- Gummen verwerkt alleen de nieuwe laag (de vorige uitkomst wordt hergebruikt), op maximaal 2048 px, en de snelle gum rekent alleen rond het gat.
+- Herkenningen van kamers worden voor de laatste 6 foto's bewaard.
+
+**WebGPU:** op computers met WebGPU draaien de transformers.js-modellen op de videokaart: veel sneller, en de gewichten staan niet in het WebAssembly-geheugen. Lukt dat niet, dan doet de app dezelfde taak op de processor en onthoudt hij dat voor dit apparaat. In lichte modus en op iPad/iPhone blijft alles op de processor.
+
+**Sterkere modellen, met terugval:** kamers sorteren gebruikt CLIP ViT-B/16 (was B/32, even groot), tik-om-te-selecteren SlimSAM-50 (was 77), en kamerherkenning op een videokaart met half-precision SegFormer-B5 op 640 px (was B2). Kan een model niet laden, dan valt de app terug op het vorige model.
 
 Zo werkt het:
 
@@ -97,8 +109,24 @@ Grenzen: een productfoto laat één kant zien, dus de zijkant van een meubel wor
 ## Selecteren en stabiliteit
 
 - **Tik op een meubel**: SlimSAM (een lichte "Segment Anything", ± 15 MB) omlijnt precies wat je aantikt; met ➕/➖ tik je stukken erbij of eraf. De foto wordt één keer geanalyseerd, daarna is elke tik snel. Het werkproces sluit zichzelf na 90 seconden zonder gebruik.
-- **Betere herkenning**: overal SegFormer-B2; kussens en plaids worden bij de bank of het bed gevoegd, stukken van één meubel samengevoegd en gaten gedicht.
+- **Betere herkenning**: overal SegFormer-B2; kussens en plaids worden bij de bank of het bed gevoegd, stukken van één meubel samengevoegd en gaten gedicht. Kleine spullen die duidelijk ergens op staan (een vaas, een fles, een dienblad op een tafel of kast) gaan ook mee: weg je de tafel, dan verdwijnt de vaas niet zwevend achter — die was namelijk het bekende, onrealistische resultaat zonder deze koppeling. Ook herkent de app nu oven, magnetron, vaatwasser, openhaard en bar als meubel-achtige objecten.
 - **Crash-vangnet**: loopt een tabblad vast op een AI-taak (iPad met te weinig geheugen), dan meldt de app dat bij de volgende start en zet hij de **lichte AI-modus** aan (kleinere modellen en beelden). In het Project-menu aan en uit te zetten.
+
+### Weggummen zonder AI: wat het wel en niet goed kan
+
+Geen AI beschikbaar (download geblokkeerd, te weinig geheugen, of "Snel weghalen" gekozen)?
+Dan vult content-aware fill het gat met stukjes die het elders in de foto vindt — geen
+vage waas, maar (bijvoorbeeld) echt doorlopende plankenvloer. Getest tegen een gefotografeerde
+kamer (niet alleen gemaakte testbeelden):
+
+- **Met een vloer aangegeven** (getekend, of via "✨ Herken meubels, muren & vloer"): de
+  vloer wordt in bovenaanzicht rechtgetrokken vóór het invullen, zodat planken en tegels
+  ook in perspectief kloppend doorlopen. Dit geeft duidelijk het beste resultaat.
+- **Zonder vloer, op een rommelige plek** (bijvoorbeeld een meubel dat deels op een vloerkleed
+  en deels op de vloer staat): zonder enig houvast over wat waar hoort, kan de invulling
+  vervagen tot een vlakke, weinig overtuigende vlek — een bekende, inherente grens van deze
+  aanpak zonder AI op een drukke, echte foto. AI-gum (MI-GAN) is hier sterker; geef anders
+  eerst de vloer aan of herken de kamer voordat je gumt.
 
 ## Gebruiksgemak en snelheid
 
@@ -109,6 +137,20 @@ Grenzen: een productfoto laat één kant zien, dus de zijkant van een meubel wor
 - **Budget per ruimte** en een **boodschappenlijst** (kopiëren of als Excel/CSV), filter op favorieten, prijs zelf invullen als een shop die niet meegeeft, dubbele links worden herkend.
 - **Plakknoppen** voor links (handig op iPad), **back-up** downloaden/terugzetten via het Project-menu, installeerbaar als app (**Zet op beginscherm**).
 - **Snelheid**: tijdens slepen wordt alleen de visualizer bijgewerkt (één keer per schermverversing) en pas bij loslaten opgeslagen; foto's komen direct van Funda/de shop (de server is alleen reserve) en in overzichten in kleinere maten; beelden via de server worden door Vercel's CDN bewaard; vloertexturen worden gemaakt als de browser niets te doen heeft; de tabbladen Producten en Inrichten laden pas als je ze opent; opslaan gebeurt ook direct als je de app verlaat, en de app vraagt de browser om de gegevens te bewaren.
+
+## Inrichten met meubels van internet
+
+- **Link plakken in Inrichten**: plak een productlink rechtsboven; het product wordt opgehaald, bij Producten gezet (met de ruimte van de foto) en meteen in de kamer gezet. Een vloer, verf of behang wordt als vlak toegepast. Een link die er al is, wordt hergebruikt.
+- **In dit ontwerp**: welke producten in deze foto staan, hoe vaak, met prijs, een link naar de winkel en het totaal. Verf en vloeren tellen één keer. Met "Alles favoriet" komen ze op je boodschappenlijst.
+- **Zoeken en per ruimte**: bij meer dan 6 meubels een zoekveld; producten voor deze ruimte eerst, of alleen die.
+- **Eigen productfoto**: blokkeert een webshop het ophalen, of is de foto een sfeerfoto, kies dan een eigen foto of screenshot op de productkaart (📷).
+- **Automatisch AI-uitknippen**: vindt de snelle uitsnede geen effen achtergrond, dan knipt de AI het meubel uit (niet op iPad/iPhone).
+
+## Opslaan en AI zonder crashes
+
+- **Opslaan per onderdeel**: woning, producten, plattegronden en het ontwerp van elke foto zijn losse records. Alleen wat veranderde wordt geschreven, als de browser even niets te doen heeft (en direct bij het verlaten van de app). Oude opslag wordt bij de eerste keer omgezet.
+- **AI-uitkomsten worden bewaard**: uitsnedes, gegumde foto's en kamerherkenningen staan in een eigen cache (maximaal 300 stuks / 250 MB, de oudste gaan eerst). Een foto die je opnieuw opent, toont zijn herkende objecten en gegumde versie direct, zonder AI.
+- **Eén AI-taak tegelijk**: taken wachten op elkaar in plaats van tegelijk modellen te laden. Opeenvolgende taken van dezelfde soort (drie uitsnedes) delen één geladen model; bij een andere soort, of kort na de laatste, wordt de worker gesloten zodat het geheugen echt vrijkomt. Op iPad wordt ook de selecteer-AI gesloten voordat een ander model start.
 
 ## Mogelijke volgende stappen
 

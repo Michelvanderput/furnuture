@@ -270,3 +270,17 @@ h3.group { margin-top: 28px; padding-bottom: 6px; border-bottom: 1px solid var(-
 button.on { background: var(--accent-soft); border-color: var(--accent); }
 .room-name { width: 180px; }
 @media (max-width: 900px) { .plan-panel { grid-template-columns: 1fr; } }
+
+/* Inrichten: link plakken en "In dit ontwerp" */
+.link-adder .row { gap: 4px; }
+.link-adder .row button { flex: 1; min-width: 0; white-space: normal; }
+.design-list { border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 8px; background: var(--surface); font-size: 13px; }
+.design-list summary { cursor: pointer; display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
+.design-row { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center; padding: 3px 0; border-top: 1px solid var(--border); }
+.design-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.design-price { color: var(--muted); }
+.design-list button { margin-top: 6px; }
+.card .thumb-actions { position: absolute; top: 6px; right: 6px; }
+label.button.small { padding: 3px 8px; font-size: 13px; }
+.overlay.preview > * { display: none; }
+.overlay.preview { cursor: zoom-out; }

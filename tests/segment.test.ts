@@ -69,6 +69,30 @@ describe("cleaning up recognition", () => {
   });
 });
 
+describe("tabletop objects merge into their table", () => {
+  const labels = { 0: "wall", 3: "floor", 15: "coffee table", 45: "vase" };
+  const W = 60, H = 30;
+
+  it("takes a vase along when the coffee table it stands on is selected", () => {
+    const map = new Uint8Array(W * H);
+    for (let y = 20; y < H; y++) for (let x = 0; x < W; x++) map[y * W + x] = 3; // floor
+    for (let y = 14; y < 22; y++) for (let x = 15; x < 40; x++) map[y * W + x] = 15; // coffee table
+    for (let y = 10; y < 15; y++) for (let x = 24; x < 30; x++) map[y * W + x] = 45; // vase resting on it
+    const seg = buildSegments(map, W, H, labels);
+    expect(seg.segments.map((s) => s.label).sort()).toEqual(["Muur", "Salontafel", "Vloer"]);
+    const table = seg.segments.find((s) => s.label === "Salontafel")!;
+    expect(seg.ids[12 * W + 27]).toBe(table.id); // pixel inside the vase
+  });
+
+  it("leaves a vase on the floor on its own (nothing to merge it into)", () => {
+    const map = new Uint8Array(W * H);
+    for (let y = 20; y < H; y++) for (let x = 0; x < W; x++) map[y * W + x] = 3; // floor
+    for (let y = 15; y < 20; y++) for (let x = 5; x < 10; x++) map[y * W + x] = 45; // vase standing on the floor
+    const seg = buildSegments(map, W, H, labels);
+    expect(seg.segments.map((s) => s.label).sort()).toEqual(["Muur", "Vaas", "Vloer"]);
+  });
+});
+
 import { samMaskToPhoto } from "@/lib/labels";
 
 describe("samMaskToPhoto", () => {

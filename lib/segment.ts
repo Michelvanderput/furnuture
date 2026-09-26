@@ -1,5 +1,6 @@
+import { fingerprint, getCached, putCached } from "./aiCache";
 import { components, dilate } from "./masks";
-import { imagePixels, isLightMode, runAi, type Progress } from "./worker";
+import { imagePixels, isLightMode, runAi, gpuEnabled, type Progress } from "./worker";
 
 /**
  * Room recognition with SegFormer trained on ADE20K (150 indoor/outdoor classes),
@@ -10,6 +11,8 @@ import { imagePixels, isLightMode, runAi, type Progress } from "./worker";
  */
 const MODEL = "Xenova/segformer-b2-finetuned-ade-512-512";
 const MODEL_LIGHT = "Xenova/segformer-b0-finetuned-ade-512-512";
+/** SegFormer-B5 at 640 px: the strongest ADE20K model, only on a GPU with half precision (see ai.worker.ts). */
+const MODEL_GPU = "Xenova/segformer-b5-finetuned-ade-640-640";
 
 export type SegmentKind = "floor" | "wall" | "ceiling" | "furniture";
 
@@ -92,6 +95,11 @@ const FURNITURE: Record<string, string> = {
   "ashcan": "Prullenbak",
   "towel": "Handdoek",
   "apparel": "Kleding",
+  oven: "Oven",
+  microwave: "Magnetron",
+  dishwasher: "Vaatwasser",
+  fireplace: "Openhaard",
+  bar: "Bar",
 };
 
 const KIND: Record<string, SegmentKind> = { floor: "floor", wall: "wall", ceiling: "ceiling" };
@@ -100,18 +108,36 @@ const PLAIN_LABEL: Record<SegmentKind, string> = { floor: "Vloer", wall: "Muur",
 /** Working resolution of the recognition result (plenty for selecting and masks). */
 const WORK_SIDE = 480;
 
+type Stored = { classMap: Uint8Array; id2label: Record<number, string>; w: number; h: number; model: string };
+/** Strongest first: a better recognition from earlier is always welcome. */
+const TIERS = [MODEL_GPU, MODEL, MODEL_LIGHT];
+const cacheKey = (photoUrl: string, model: string) => `seg:${model.split("/").pop()}:${fingerprint(photoUrl)}`;
+
+/** A recognition made before for this photo (no AI), or null. */
+export async function cachedSegmentation(photoUrl: string): Promise<RoomSegmentation | null> {
+  for (const model of TIERS) {
+    const hit = await getCached<Stored>(cacheKey(photoUrl, model));
+    if (hit?.classMap) return buildSegments(hit.classMap, hit.w, hit.h, hit.id2label);
+  }
+  return null;
+}
+
 export async function segmentRoom(photoUrl: string, onProgress?: Progress): Promise<RoomSegmentation> {
+  const cached = await cachedSegmentation(photoUrl);
+  if (cached) return cached;
   onProgress?.("Foto voorbereiden…");
-  // The model looks at 512×512 pixels; a larger photo only costs memory.
-  const image = await imagePixels(photoUrl, 512);
+  // The model looks at 512×512 pixels (B5: 640); a larger photo only costs memory.
+  const gpu = gpuEnabled();
+  const image = await imagePixels(photoUrl, gpu ? 640 : 512);
   const f = WORK_SIDE / Math.max(image.width, image.height);
   const outW = Math.round(image.width * f);
   const outH = Math.round(image.height * f);
-  const { classMap, id2label } = await runAi<{ classMap: Uint8Array; id2label: Record<number, string> }>(
-    { task: "segment", image, model: isLightMode() ? MODEL_LIGHT : MODEL, outW, outH },
+  const { classMap, id2label, model } = await runAi<{ classMap: Uint8Array; id2label: Record<number, string>; model: string }>(
+    { task: "segment", image, models: [isLightMode() ? MODEL_LIGHT : MODEL], gpuModels: gpu ? [MODEL_GPU] : undefined, outW, outH },
     onProgress,
     [image.data.buffer],
   );
+  putCached(cacheKey(photoUrl, model), { classMap, id2label, w: outW, h: outH, model } satisfies Stored);
   return buildSegments(classMap, outW, outH, id2label, onProgress);
 }
 
@@ -205,10 +231,20 @@ function close(mask: Uint8Array, w: number, h: number, r: number): Uint8Array {
   return out;
 }
 
-const HOSTS = new Set(["sofa", "armchair", "swivel chair", "chair", "bed", "bench", "ottoman", "stool"]);
-const ACCESSORIES = new Set(["cushion", "pillow", "blanket"]);
+/** Furniture that other, smaller objects can rest on and are merged into. */
+const HOSTS = new Set([
+  "sofa", "armchair", "swivel chair", "chair", "bed", "bench", "ottoman", "stool",
+  "table", "coffee table", "desk", "pool table", "cabinet", "wardrobe", "chest of drawers",
+  "bookcase", "shelf", "buffet", "kitchen island",
+]);
+/**
+ * Small objects merged into whatever they rest on (a cushion on a sofa, a vase on a
+ * table): selecting or erasing the host takes them along. Without this, erasing a
+ * coffee table leaves its vase floating over the new floor.
+ */
+const ACCESSORIES = new Set(["cushion", "pillow", "blanket", "vase", "bottle", "tray"]);
 
-/** Cushions and plaids on a sofa or bed belong to it: selecting the sofa should take them along. */
+/** Cushions, plaids and small tabletop items merge into the furniture they rest on. */
 function mergeAccessories(segments: Segment[], ids: Int32Array, w: number, h: number) {
   const byId = new Map(segments.map((s) => [s.id, s]));
   for (const acc of segments.filter((s) => ACCESSORIES.has(s.className ?? ""))) {
