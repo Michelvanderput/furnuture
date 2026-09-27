@@ -11,6 +11,7 @@ import { ArrowSquareOut, ArrowsClockwise, Copy, Plus, Star, Trash } from "@phosp
 import { useApp } from "./app";
 import { I, STATUS_ICON } from "./icons";
 import { Img } from "./Img";
+import { DeliveryFields } from "./Delivery";
 import { ProductFinder } from "./ProductFinder";
 import { ItemThumb, Price } from "./ItemRow";
 import { EuroInput, Sheet, Stepper } from "./ui";
@@ -61,6 +62,8 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
       dims: got.dims ?? item.dims,
       category: got.category !== "overig" ? got.category : item.category,
       priceHistory: got.priceHistory,
+      leadDays: got.leadDays ?? item.leadDays,
+      leadText: got.leadText,
       thumb: undefined,
       source: "link",
       status: item.status === "idee" ? "gekozen" : item.status,
@@ -236,6 +239,8 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
         </div>
       </div>
 
+      {!main && <DeliveryFields item={item} />}
+
       <div className="stack tight">
         {item.url ? (
           <div className="row wrap-row">
@@ -253,7 +258,7 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
 
       <label className="field">
         Notitie
-        <textarea rows={2} placeholder="Kleur, maat, levertijd, korting…" value={item.note} onChange={(e) => set({ note: e.target.value })} />
+        <textarea rows={2} placeholder="Kleur, maat, ordernummer, korting…" value={item.note} onChange={(e) => set({ note: e.target.value })} />
       </label>
 
       <details>

@@ -1,5 +1,6 @@
 import { guessCategory, guessRoom } from "./categories";
 import { dimsFromJsonLd, dimsFromLabels, dimsFromNamedMeasures, dimsFromTitle, mergeDims, pageText } from "./dimensions";
+import { leadFromJsonLd, parseLeadTime } from "./leadTime";
 import type { FundaResult, HouseFacts, ProductInfo, RoomType } from "./types";
 
 /** Minimal HTML helpers: we only need meta tags, JSON-LD and URLs, so no DOM parser. */
@@ -389,9 +390,14 @@ export function parseProduct(html: string, pageUrl: string): ProductInfo {
     dimsFromTitle(String(product?.description ?? meta.get("og:description")?.[0] ?? "")),
   );
 
+  // Delivery time: structured data first, else the page's own words ("Levertijd: 4 - 6 weken").
+  const lead = leadFromJsonLd(product?.offers) ?? leadFromJsonLd(variants.map((v) => v.offers).flat()) ?? parseLeadTime(pageText(html));
+
   return {
     url: pageUrl,
     dims,
+    leadDays: lead?.days,
+    leadText: lead?.text,
     title: cleanTitle || shopName(pageUrl),
     image: images[0] ?? "",
     images,

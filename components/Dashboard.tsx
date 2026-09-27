@@ -1,7 +1,7 @@
 "use client";
 
-import { ArrowRight, Check, CheckCircle, Couch, Hammer, Scales, TrendDown, Tray, Wallet, Warning } from "@phosphor-icons/react";
-import { daysBetween, KINDS, lateTasks, renovationOf, renoTotals, today } from "@/lib/renovation";
+import { ArrowRight, Check, CheckCircle, Couch, Hammer, Scales, TrendDown, Tray, Wallet } from "@phosphor-icons/react";
+import { renovationOf, renoTotals } from "@/lib/renovation";
 import { patchItem } from "@/lib/items";
 import { priceChange } from "@/lib/products";
 import { roomPhotos } from "@/lib/rooms";
@@ -10,7 +10,8 @@ import { euro, isBought, itemsIn, lineCost, mainItems, suggestSplit, totals } fr
 import type { Project } from "@/lib/types";
 import { useApp } from "./app";
 import { HouseHero } from "./HouseView";
-import { I, RenoIcon, RoomIcon } from "./icons";
+import { PlanningCard } from "./Delivery";
+import { I, RoomIcon } from "./icons";
 import { Img } from "./Img";
 import { ItemRow } from "./ItemRow";
 import { RoomDetect, roomsRecognised } from "./RoomDetect";
@@ -72,7 +73,7 @@ export function Dashboard() {
         </div>
       </div>
 
-      <RenovationCard />
+      <PlanningCard />
 
       <div className="grid two" style={{ alignItems: "start" }}>
         <div className="card stack" style={{ gap: 20 }}>
@@ -265,62 +266,6 @@ function NextSteps({ project }: { project: Project }) {
           );
         })}
       </div>
-    </div>
-  );
-}
-
-/** Renovation at a glance: days to the key, what is next, and what will not be ready in time. */
-function RenovationCard() {
-  const { project, openTask } = useApp();
-  const r = renovationOf(project);
-  if (!r.tasks.length && !r.keyDate) return null;
-  const rt = renoTotals(r.tasks);
-  const late = lateTasks(r);
-  const next = r.tasks
-    .filter((x) => x.status !== "klaar")
-    .sort((a, b) => (a.start ?? "9999").localeCompare(b.start ?? "9999") || KINDS[a.kind].phase - KINDS[b.kind].phase)[0];
-  const toKey = r.keyDate ? daysBetween(today(), r.keyDate) : undefined;
-  const toMove = r.moveDate ? daysBetween(today(), r.moveDate) : undefined;
-  return (
-    <div className="card stack">
-      <div className="section-head">
-        <div className="row" style={{ gap: 10 }}>
-          <span className="icon-badge accent">
-            <I icon={Hammer} size={20} />
-          </span>
-          <div>
-            <h2 style={{ fontSize: 21 }}>Verbouwing</h2>
-            <p className="tiny muted">
-              {toKey !== undefined && toKey > 0 ? `Nog ${toKey} dagen tot de sleutel` : toMove !== undefined && toMove >= 0 ? `Nog ${toMove} dagen tot de verhuizing` : `${rt.doneCount} van ${rt.count} klussen klaar`}
-            </p>
-          </div>
-        </div>
-        <a className="small strong row" style={{ gap: 4 }} href="#/verbouwing">
-          Naar de verbouwing <I icon={ArrowRight} size={14} />
-        </a>
-      </div>
-      {rt.count > 0 && (
-        <div className="bar" aria-label={`${rt.doneCount} van ${rt.count} klussen klaar`}>
-          <span className="spent" style={{ width: `${(rt.doneCount / rt.count) * 100}%` }} />
-        </div>
-      )}
-      {next && (
-        <button className="suggestion next-task" onClick={() => openTask(next.id)}>
-          <span className="icon-badge">
-            <RenoIcon kind={next.kind} size={20} />
-          </span>
-          <span className="grow stack tight" style={{ textAlign: "left" }}>
-            <span className="tiny muted">Eerstvolgende klus</span>
-            <strong className="small">{next.title}</strong>
-          </span>
-          <span className="small muted nowrap">{next.start ? new Date(`${next.start}T12:00:00Z`).toLocaleDateString("nl-NL", { day: "numeric", month: "short" }) : "nog plannen"}</span>
-        </button>
-      )}
-      {late.length > 0 && (
-        <p className="small error row" style={{ gap: 6 }}>
-          <I icon={Warning} size={16} weight="bold" /> {late.length} {late.length === 1 ? "klus is" : "klussen zijn"} niet klaar vóór de verhuizing
-        </p>
-      )}
     </div>
   );
 }

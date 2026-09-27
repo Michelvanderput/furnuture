@@ -115,6 +115,14 @@ export interface Item {
   why?: string;
   /** The AI suggestion this item came from (it stays when a real product is chosen). */
   suggestion?: string;
+  /** Delivery time in calendar days (from the shop, or typed in). */
+  leadDays?: number;
+  /** The delivery time as the shop words it ("2 – 4 weken"). */
+  leadText?: string;
+  /** When it was ordered (YYYY-MM-DD); set when the status becomes "besteld". */
+  orderedAt?: string;
+  /** Expected delivery (YYYY-MM-DD), e.g. from the order confirmation; else ordered + delivery time. */
+  deliveryDate?: string;
 }
 
 export interface Dims {
@@ -222,4 +230,6 @@ export interface ProductInfo {
   shop: string;
   category: Category;
   color?: string;
+  leadDays?: number;
+  leadText?: string;
 }

@@ -8,6 +8,7 @@ import { priceChange } from "@/lib/products";
 import { euro, isBought, lineCost, nextStatus, shortName, statusLabel } from "@/lib/shopping";
 import type { Item } from "@/lib/types";
 import { useApp } from "./app";
+import { DeliveryChip } from "./Delivery";
 import { CategoryIcon, I } from "./icons";
 import { Img } from "./Img";
 import { StatusPill } from "./ui";
@@ -90,6 +91,7 @@ export function ItemRow({ item, alternatives = 0, showRoom, alt, check }: { item
               {change < 0 ? `${euro(-change)} goedkoper` : `${euro(change)} duurder`}
             </span>
           )}
+          {!alt && <DeliveryChip item={item} />}
           {alt && <span className="chip">optie</span>}
         </span>
       </button>

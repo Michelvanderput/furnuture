@@ -5,8 +5,16 @@ type P = Project;
 
 export const patchItem = (id: string, patch: Partial<Item>) => (p: P): P => ({
   ...p,
-  items: p.items.map((i) => (i.id === id ? { ...i, ...patch } : i)),
+  items: p.items.map((i) => (i.id === id ? withOrderDate(i, { ...i, ...patch }) : i)),
 });
+
+/** Ordering sets the order date (the delivery planning counts from it); going back to "idea" or "chosen" clears it. */
+function withOrderDate(before: Item, after: Item): Item {
+  if (after.status === before.status) return after;
+  if (after.status === "besteld" && !after.orderedAt) return { ...after, orderedAt: new Date().toISOString().slice(0, 10) };
+  if (after.status === "idee" || after.status === "gekozen") return { ...after, orderedAt: undefined, deliveryDate: undefined };
+  return after;
+}
 
 export const addItems = (items: Item[]) => (p: P): P => ({ ...p, items: [...p.items, ...items] });
 

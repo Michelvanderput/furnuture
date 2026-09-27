@@ -50,6 +50,8 @@ export async function itemFromLink(url: string, roomId: string | null): Promise<
         category: p.category,
         dims: p.dims,
         color: p.color,
+        leadDays: p.leadDays,
+        leadText: p.leadText,
         priceHistory: p.priceValue ? [{ at: new Date().toISOString().slice(0, 10), value: p.priceValue }] : undefined,
       },
     };
@@ -88,6 +90,8 @@ export interface Found {
   images: string[];
   dims?: Item["dims"];
   category?: Item["category"];
+  leadDays?: number;
+  leadText?: string;
   /** Read from the shop's page (photo and price are real), not only the AI's word. */
   verified: boolean;
 }
@@ -102,7 +106,7 @@ export async function verifyFound(options: { title: string; shop: string; url: s
     options.map(async (o): Promise<Found | null> => {
       try {
         const p = await readProduct(o.url);
-        return { ...o, title: p.title || o.title, shop: p.shop || o.shop, url: p.url || o.url, price: p.priceValue ?? o.price, image: p.image, images: p.images ?? [], dims: p.dims, category: p.category, verified: true };
+        return { ...o, title: p.title || o.title, shop: p.shop || o.shop, url: p.url || o.url, price: p.priceValue ?? o.price, image: p.image, images: p.images ?? [], dims: p.dims, category: p.category, leadDays: p.leadDays, leadText: p.leadText, verified: true };
       } catch (e) {
         // 404 / not a product page: a dead or invented link.
         if (e instanceof ProductError && (e.status === 400 || e.status === 404 || e.status === 410 || e.status === 422)) return null;
