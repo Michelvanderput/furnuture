@@ -10,7 +10,7 @@ import { eraseLayerId, renderErased } from "@/lib/inpaint";
 import { regionMap, type RegionMap } from "@/lib/regions";
 import { fingerprint, fingerprintOf, getCached, putCached } from "@/lib/aiCache";
 import { categoryLabel } from "@/lib/categories";
-import { confirmCost, euroCents, FAL_COST, falEnabled } from "@/lib/fal";
+import { confirmCost, euroCents, FAL_COST, falEnabled, falReady } from "@/lib/fal";
 import { changedArea, falRender, falSuggestSpots, falSurfaces, type Spot } from "@/lib/falTasks";
 import {
   floorMetric,
@@ -822,7 +822,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
         const id = newId();
         updatePlan(update, linkedPlan.id, (pl) => ({
           ...pl,
-          items: [...pl.items, { id, productId: product.id, x: spot[0], y: spot[1], angle, ...defaultSize(product), flip: false, cutout: "simple", tolerance: 18, shadow: 0.5, ...look }],
+          items: [...pl.items, { id, productId: product.id, x: spot[0], y: spot[1], angle, ...defaultSize(product), flip: false, cutout: falReady() ? "ai" : "simple", tolerance: 18, shadow: 0.5, ...look }],
         }));
         setSelected(`plan:${id}`);
         return;
@@ -845,7 +845,8 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
       corners: rectQuad(size.w / 2 - width / 2, size.h * 0.6 - height / 2, width, height),
       aspect,
       flip: false,
-      cutout: "simple",
+      // With fal the best cut-out (± 1 cent, once per product photo: it is cached).
+      cutout: falReady() ? "ai" : "simple",
       tolerance: 18,
       distort: false,
       // Match the room's light, and add a soft shadow.

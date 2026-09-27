@@ -46,6 +46,7 @@ export class Selector {
         return await falSelect(photoUrl, points, outW, outH, onProgress, box);
       } catch (e) {
         console.warn("fal select failed, selecting here", e);
+        onProgress?.(`fal: ${e instanceof Error ? e.message : e} — nu zelf selecteren…`);
       }
     }
     const ask = () =>

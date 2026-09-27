@@ -78,6 +78,7 @@ export async function removeBackgroundAI(src: string, onProgress?: Progress): Pr
       return await falCutout(src, onProgress);
     } catch (e) {
       console.warn("fal cut-out failed, cutting out here", e);
+      onProgress?.(`fal: ${e instanceof Error ? e.message : e} — nu de gratis manier…`);
     }
   }
   const image = await imagePixels(src, 1024);

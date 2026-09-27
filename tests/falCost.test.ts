@@ -56,3 +56,15 @@ describe("fal costs", () => {
     expect(fal.falStopped()).toMatch(/tegoed/);
   });
 });
+
+describe("fal selection", () => {
+  it("accepts a mask right next to the tap, not one far away", async () => {
+    const { nearTap } = await import("@/lib/falTasks");
+    const w = 200, h = 100;
+    const mask = new Uint8Array(w * h);
+    for (let y = 40; y < 60; y++) for (let x = 50; x < 90; x++) mask[y * w + x] = 1;
+    expect(nearTap(mask, w, h, [0.35, 0.5])).toBe(true); // inside
+    expect(nearTap(mask, w, h, [0.35, 0.62])).toBe(true); // 2 px below the edge
+    expect(nearTap(mask, w, h, [0.8, 0.5])).toBe(false); // elsewhere
+  });
+});

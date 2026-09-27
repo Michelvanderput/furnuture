@@ -220,6 +220,7 @@ export async function renderErased(
       } catch (e) {
         // Not tried again by itself (that could cost again): the built-in way does this layer.
         console.warn("fal erase failed, using the built-in way", e);
+        onProgress?.(`fal: ${e instanceof Error ? e.message : e} — nu de gratis manier…`);
         falFailed.add(eraseLayerId(layer));
         aiFailed = true;
       }

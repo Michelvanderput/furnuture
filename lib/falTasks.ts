@@ -132,9 +132,21 @@ export async function falSelect(
     if (v > 127) (mask[i] = 1), on++;
   }
   const first = points.find((p) => p.positive) ?? points[0];
-  const tapped = mask[Math.min(outH - 1, Math.floor(first.at[1] * outH)) * outW + Math.min(outW - 1, Math.floor(first.at[0] * outW))];
-  if (!tapped || on < outW * outH * 0.001 || on > outW * outH * 0.9) throw new Error("fal-selectie klopt niet");
+  if (!nearTap(mask, outW, outH, first.at) || on < outW * outH * 0.001 || on > outW * outH * 0.9) throw new Error("fal-selectie klopt niet");
   return mask;
+}
+
+/**
+ * Does the mask lie at the tap (a fraction of the photo)? A finger is not a pixel: a tap
+ * just below a cushion's edge rightly gives the cushion, so a little distance is allowed.
+ */
+export function nearTap(mask: Uint8Array, w: number, h: number, at: [number, number]): boolean {
+  const cx = Math.min(w - 1, Math.floor(at[0] * w)), cy = Math.min(h - 1, Math.floor(at[1] * h));
+  const r = Math.max(3, Math.round(w * 0.02));
+  for (let y = Math.max(0, cy - r); y <= Math.min(h - 1, cy + r); y++)
+    for (let x = Math.max(0, cx - r); x <= Math.min(w - 1, cx + r); x++)
+      if (mask[y * w + x] && (x - cx) ** 2 + (y - cy) ** 2 <= r * r) return true;
+  return false;
 }
 
 /** Product photo without background (BiRefNet v2 on fal): a transparent PNG as an object URL. */
