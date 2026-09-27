@@ -1,5 +1,5 @@
 import { project } from "./geometry";
-import { calibrate, type FloorMetric } from "./metric";
+import { calibrate, estimateMetric, type FloorMetric } from "./metric";
 import { anchoredCorners, imageToPlane, localScale, PLANE } from "./plane";
 import { presetCm } from "./textures";
 import type { Layer, MeasureLayer, Product, ProductLayer, Pt, Quad, SurfaceFill, SurfaceLayer } from "./types";
@@ -39,7 +39,11 @@ export function floorMetric(layers: Layer[], floorId: string): FloorMetric | nul
   const floor = layers.find((l) => l.id === floorId);
   const plane = floor?.kind === "surface" ? planeOf(floor) : null;
   const ruler = rulerOf(layers, floorId);
-  if (!plane || !ruler || ruler.points.length < 2) return null;
+  if (!plane) return null;
+  if (!ruler || ruler.points.length < 2) {
+    // Not measured: estimated from the perspective (a usual camera height), when the photo size is known.
+    return floor?.kind === "surface" && floor.imageW && floor.imageH && isFloor(floor) ? estimateMetric(plane, floor.imageW, floor.imageH) : null;
+  }
   return calibrate(plane, ruler.points[0], ruler.points[1], ruler.cm!, ruler.imageW, ruler.imageH);
 }
 

@@ -2,7 +2,8 @@ import type { FloorPlan, PlanItem, Product, Project } from "./types";
 
 type Update = (fn: (p: Project) => Project) => void;
 
-export const plansOf = (p: Project) => p.plans ?? [];
+/** The plans of this house (plans whose photo is gone belong to an earlier house). */
+export const plansOf = (p: Project) => (p.plans ?? []).filter((plan) => p.listing?.photos.some((ph) => ph.id === plan.photoId));
 
 /** The floor plan a photo is linked to, if any. */
 export const planForPhoto = (p: Project, photoId: string | undefined) =>

@@ -261,3 +261,44 @@ export function firstWorkingThumb(urls: string[]): Promise<{ image: string; thum
   thumbQueue = job.catch(() => null);
   return job;
 }
+
+/**
+ * A cut-out trimmed to the object itself (plus a hair of margin): the empty,
+ * transparent border of a product photo made furniture stand above the floor
+ * line, with its feet in the air. Returns the new image and its height/width.
+ */
+export async function trimToContent(url: string): Promise<{ url: string; aspect: number }> {
+  const img = await loadImage(url);
+  const W = img.naturalWidth, H = img.naturalHeight;
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext("2d", { willReadFrequently: true })!;
+  ctx.drawImage(img, 0, 0);
+  const d = ctx.getImageData(0, 0, W, H).data;
+  let x0 = W, y0 = H, x1 = -1, y1 = -1;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (d[(y * W + x) * 4 + 3] < 40) continue; // faint packshot shadow and noise do not count
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+  }
+  const pad = Math.round(Math.max(x1 - x0, y1 - y0) * 0.01);
+  x0 = Math.max(0, x0 - pad), y0 = Math.max(0, y0 - pad), x1 = Math.min(W - 1, x1 + pad), y1 = Math.min(H - 1, y1 + pad);
+  const w = x1 - x0 + 1, h = y1 - y0 + 1;
+  if (x1 < 0 || (w >= W * 0.98 && h >= H * 0.98)) {
+    c.width = c.height = 0;
+    return { url, aspect: H / W };
+  }
+  const out = document.createElement("canvas");
+  out.width = w;
+  out.height = h;
+  out.getContext("2d")!.drawImage(c, x0, y0, w, h, 0, 0, w, h);
+  c.width = c.height = 0;
+  const trimmed = await canvasToUrl(out);
+  releaseUrl(url);
+  return { url: trimmed, aspect: h / w };
+}

@@ -5,10 +5,13 @@ import { removeBackgroundAI } from "@/lib/ai";
 import { exportFileName } from "@/lib/backup";
 import { renderDesign, shareOrDownload } from "@/lib/exportImage";
 import { centroid, pointInPolygon, project as projectPoint, quadToMatrix3d, rectQuad } from "@/lib/geometry";
-import { cropCenter, loadImage, NoPlainBackground, proxied, releaseUrl, removeBackground, rotatedTexture } from "@/lib/images";
+import { cropCenter, loadImage, NoPlainBackground, proxied, releaseUrl, removeBackground, rotatedTexture, trimToContent } from "@/lib/images";
 import { eraseLayerId, renderErased } from "@/lib/inpaint";
 import { regionMap, type RegionMap } from "@/lib/regions";
-import { fingerprintOf, getCached, putCached } from "@/lib/aiCache";
+import { fingerprint, fingerprintOf, getCached, putCached } from "@/lib/aiCache";
+import { categoryLabel } from "@/lib/categories";
+import { euroCents, FAL_COST, falEnabled } from "@/lib/fal";
+import { falRender, falSuggestSpots, type Spot } from "@/lib/falTasks";
 import {
   floorMetric,
   isFloor,
@@ -137,6 +140,8 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   const [drawing, setDrawing] = useState<Drawing | null>(null);
   const [showLayers, setShowLayers] = useState(true);
   const [cutouts, setCutouts] = useState<Record<string, string>>({});
+  /** Height/width of each trimmed cut-out (see trimToContent): the product's shape without its photo's margins. */
+  const [cutAspects, setCutAspects] = useState<Record<string, number>>({});
   const [textures, setTextures] = useState<Record<string, string>>({});
   const [erased, setErased] = useState<{ key: string; url: string } | null>(null);
   const [lightSide, setLightSide] = useState(0);
@@ -158,6 +163,20 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   const [aspects, setAspects] = useState<Record<string, number>>({});
   const selectRun = useRef(0);
   const [exporting, setExporting] = useState(false);
+  // fal.ai (paid, optional): photo-realistic render and AI placement suggestions.
+  const [fal, setFal] = useState(false);
+  useEffect(() => void falEnabled().then(setFal), []);
+  const [spots, setSpots] = useState<{ layerId: string; list: Spot[] } | null>(null);
+  const [render, setRender] = useState<{ url: string; blob: Blob; design: string } | null>(null);
+  const [compare, setCompare] = useState(false);
+  // Floors made before the photo size was stored with them: add it (for the estimated true size).
+  useEffect(() => {
+    if (!size || !layers.some((l) => l.kind === "surface" && !l.imageW)) return;
+    setLayers((ls) => ls.map((l) => (l.kind === "surface" && !l.imageW ? { ...l, imageW: size.w, imageH: size.h } : l)));
+  }, [size, layers]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Suggested spots belong to the selected product: gone when something else is selected.
+  useEffect(() => setSpots((sp) => (sp && sp.layerId !== selected ? null : sp)), [selected]);
+  const [rendering, setRendering] = useState(false);
   const drag = useRef<Drag | null>(null);
   const pending = useRef<Pt | null>(null);
   const frame = useRef(0);
@@ -173,6 +192,8 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     setErased(null);
     setSelection(null);
     setRefine(null);
+    setSpots(null);
+    setRender(null);
     setRulerFor(null);
     setLinking(false);
     setNotice("");
@@ -230,7 +251,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
       if (l.kind === "surface" && l.fill.type === "texture") keys.add(`${l.fill.productId}:${l.crop}`);
     }
     // Furniture on the floor plans is cut out the same way (see planLayersFor).
-    for (const it of (project.plans ?? []).flatMap((pl) => pl.items)) {
+    for (const it of plansOf(project).flatMap((pl) => pl.items)) {
       if (it.cutout !== "off") keys.add(cutKey(it.productId, it));
     }
     return keys;
@@ -412,6 +433,26 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     return () => clearTimeout(timer);
   }, [allLayers, project.products, cutouts]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A product stands with its own shape: the trimmed cut-out's proportions, or the whole photo's without a cut-out.
+  useEffect(() => {
+    const want = (l: ProductLayer) => (l.cutout === "off" ? origAspects[l.productId] : cutAspects[layerCutKey(l)]);
+    if (!layers.some((l) => l.kind === "product" && want(l) && Math.abs(want(l)! - l.aspect) > 0.005)) return;
+    setLayers((ls) => ls.map((l) => (l.kind === "product" && want(l) && Math.abs(want(l)! - l.aspect) > 0.005 ? { ...l, aspect: want(l)! } : l)));
+  }, [cutAspects, layers]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The whole product photo's proportions (for "Laten staan": no cut-out).
+  const [origAspects, setOrigAspects] = useState<Record<string, number>>({});
+  useEffect(() => {
+    for (const l of layers) {
+      if (l.kind !== "product" || l.cutout !== "off" || origAspects[l.productId]) continue;
+      const image = productById.get(l.productId)?.image;
+      if (!image) continue;
+      setOrigAspects((a) => ({ ...a, [l.productId]: 0 }));
+      loadImage(proxied(image))
+        .then((img) => setOrigAspects((a) => ({ ...a, [l.productId]: img.naturalHeight / img.naturalWidth })))
+        .catch(() => undefined);
+    }
+  }, [layers]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function startCutouts() {
     for (const layer of allLayers) {
       if (layer.kind !== "product" || layer.cutout === "off") continue;
@@ -421,13 +462,15 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
       if (!product?.image) continue;
       setCutouts((c) => ({ ...c, [key]: "pending" }));
       makeCutout(product.image, layer.cutout, layer.tolerance)
-        .then((url) =>
+        .then(trimToContent)
+        .then(({ url, aspect }) => {
+          setCutAspects((a) => ({ ...a, [key]: aspect }));
           setCutouts((c) => {
             if (!(key in c)) return (releaseUrl(url), c); // no longer needed
             releaseUrl(c[key]);
             return { ...c, [key]: url };
-          }),
-        )
+          });
+        })
         .catch((e) => setCutouts((c) => (key in c ? { ...c, [key]: e instanceof NoPlainBackground ? "failed:plain" : "failed" } : c)));
     }
   }
@@ -475,7 +518,8 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     const lenPx = Math.hypot(R[0] - L[0], R[1] - L[1]);
     const metric = floorMetric(layers, floor.id);
     // Scale travels both ways: a measured photo scales the plan, a scaled plan measures the photo.
-    const cmPerPx = plan.cmPerPx ?? (metric ? distanceCm(quad, metric, quad[0], quad[1]) / lenPx : undefined);
+    // (An estimated scale does not go to the plan: only a measured one.)
+    const cmPerPx = plan.cmPerPx ?? (metric && !metric.estimated ? distanceCm(quad, metric, quad[0], quad[1]) / lenPx : undefined);
     if (plan.cmPerPx && !rulerOf(layers, floor.id)) {
       setLayers((ls) => [...ls, { kind: "measure", id: newId(), points: [quad[0], quad[1]], floorId: floor.id, cm: Math.round(lenPx * plan.cmPerPx!), imageW: size.w, imageH: size.h }]);
     }
@@ -706,7 +750,9 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
         return ids[0];
       }
     }
-    const fitted = role === "floor" ? fitFloorQuad(sel.mask, sel.w, sel.h, occluder) : fitWallQuad(sel.mask, sel.w, sel.h, occluder);
+    const fit = (occ?: Uint8Array) => (role === "floor" ? fitFloorQuad(sel.mask, sel.w, sel.h, occ) : fitWallQuad(sel.mask, sel.w, sel.h, occ));
+    // Much furniture can hide every edge: then fit on the mask alone (a rough plane beats none).
+    const fitted = fit(occluder) ?? (occluder ? fit() : null);
     const plane = fitted && up(fitted);
     const id = newId();
     insertSurface({
@@ -729,6 +775,8 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   }
 
   function insertSurface(layer: SurfaceLayer) {
+    // The photo's size goes along: it is what the estimated true size is computed in.
+    if (size) layer = { ...layer, imageW: size.w, imageH: size.h };
     // Surfaces go below products so furniture stands "on" the new floor.
     setLayers((ls) => {
       const firstProduct = ls.findIndex((l) => l.kind === "product");
@@ -1124,7 +1172,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     if (l.cm) return `${formatCm(l.cm)} · meetlat`;
     const plane = floorPlaneOf(l.floorId);
     const m = metricOf(l.floorId);
-    return plane && m ? formatCm(distanceCm(plane, m, l.points[0], l.points[1])) : "? (geen meetlat)";
+    return plane && m ? `${m.estimated ? "≈ " : ""}${formatCm(distanceCm(plane, m, l.points[0], l.points[1]))}` : "? (geen meetlat)";
   };
 
   if (!photo) {
@@ -1183,32 +1231,94 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     return style;
   };
 
+  /** The design as a picture. `forAi`: without measuring lines; `without`: leave one layer out. */
+  function designBlob(opts: { forAi?: boolean; without?: string } = {}) {
+    return renderDesign({
+      width: size!.w,
+      height: size!.h,
+      background: hasErased ? erased!.url : proxied(photo!.url),
+      layers: drawn.filter((l) => l.id !== opts.without && !(opts.forAi && l.kind === "measure")),
+      productSrc: (l) => {
+        const p = productById.get(l.productId);
+        return cutoutSrc(l) ?? (p?.image ? proxied(p.image) : null);
+      },
+      textureSrc,
+      eraseMasks: eraseMaskUrls,
+      shading: (l) => shading[l.id],
+      lightSide,
+      measureText,
+    });
+  }
+
   async function exportDesign() {
     if (!size || !photo) return;
     setExporting(true);
     setNotice("");
     try {
-      const blob = await renderDesign({
-        width: size.w,
-        height: size.h,
-        background: hasErased ? erased!.url : proxied(photo.url),
-        layers: drawn,
-        productSrc: (l) => {
-          const p = productById.get(l.productId);
-          return cutoutSrc(l) ?? (p?.image ? proxied(p.image) : null);
-        },
-        textureSrc,
-        eraseMasks: eraseMaskUrls,
-        shading: (l) => shading[l.id],
-        lightSide,
-        measureText,
-      });
-      await shareOrDownload(blob, exportFileName(project, photo.room));
+      await shareOrDownload(await designBlob(), exportFileName(project, photo.room));
     } catch (e) {
       setNotice(`Opslaan mislukt: ${e instanceof Error ? e.message : e}`);
     } finally {
       setExporting(false);
     }
+  }
+
+  /** ✨ The design as one photo-realistic picture (fal, see falRender). The same design twice is free (cached). */
+  async function makeRealistic() {
+    if (!size || !photo || rendering) return;
+    setRendering(true);
+    setNotice("");
+    setSpots(null);
+    try {
+      const design = await designBlob({ forAi: true });
+      const designUrl = URL.createObjectURL(design);
+      const refs = [...new Set(drawn.flatMap((l) => (l.kind === "product" ? [productById.get(l.productId)?.image ?? ""] : [])))]
+        .filter((u) => /^https?:/.test(u) || (u.startsWith("data:") && u.length < 700_000));
+      const key = `render1:${fingerprint(photo.url)}:${fingerprint(JSON.stringify(drawn))}`;
+      const hit = await getCached<Blob>(key);
+      const blob = hit instanceof Blob ? hit : await falRender(design, refs, setStatus);
+      if (!(hit instanceof Blob)) putCached(key, blob);
+      setRender((r) => (r && (URL.revokeObjectURL(r.url), URL.revokeObjectURL(r.design)), { url: URL.createObjectURL(blob), blob, design: designUrl }));
+    } catch (e) {
+      setNotice(`Fotorealistisch maken mislukt: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setStatus("");
+      setRendering(false);
+    }
+  }
+
+  /** 📍 Where would this product go well? A vision model looks at the room (fal, see falSuggestSpots). */
+  async function suggestSpots(layerId: string) {
+    const layer = layers.find((l): l is ProductLayer => l.id === layerId && l.kind === "product");
+    const product = layer && productById.get(layer.productId);
+    const floor = layer?.floor && layers.find((l) => l.id === layer.floor!.planeId);
+    const plane = floor?.kind === "surface" ? planeOf(floor) : null;
+    if (!size || !layer || !product || !plane) return;
+    setNotice("");
+    try {
+      const list = await falSuggestSpots(await designBlob({ forAi: true, without: layerId }), size, { title: product.title, category: categoryLabel(product.category), dims: product.dims }, setStatus);
+      // Only points on this floor (its plane, extended like the texture) are usable.
+      const area = extendedPlane(plane, "floor")?.quad ?? plane;
+      const ok = list.filter((s) => pointInPolygon(s.at, area));
+      if (!ok.length) setNotice("De AI vond geen vrije plek op de vloer. Schuif het meubel zelf, of probeer het nog eens.");
+      setSpots(ok.length ? { layerId, list: ok } : null);
+    } catch (e) {
+      setNotice(`Plekken zoeken mislukt: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setStatus("");
+    }
+  }
+
+  /** Puts a floor-standing product at a suggested spot (its front edge on that floor point). */
+  function moveToSpot(layerId: string, at: Pt) {
+    const layer = layers.find((l): l is ProductLayer => l.id === layerId && l.kind === "product");
+    const floor = layer?.floor && layers.find((l) => l.id === layer.floor!.planeId);
+    const plane = floor?.kind === "surface" ? planeOf(floor) : null;
+    if (!layer?.floor || !plane) return;
+    const [u, v] = projectPoint(imageToPlane(plane), at);
+    patchLayer(layerId, { floor: { ...layer.floor, u, v } });
+    setSelected(layerId);
+    setSpots(null);
   }
 
   const found = segmentation?.segments ?? [];
@@ -1283,6 +1393,16 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
               <button onClick={exportDesign} disabled={exporting || !size} title="Bewaar of deel dit ontwerp als foto">
                 {exporting ? "Bezig…" : "📷 Opslaan / delen"}
               </button>
+              {fal && layers.length > 0 && (
+                <button
+                  className="primary"
+                  onClick={makeRealistic}
+                  disabled={rendering || !size}
+                  title={`Maak van dit ontwerp één echte foto: nieuwe meubels met schaduw en het licht van de kamer (fal.ai, ${euroCents(FAL_COST.render)} per keer; hetzelfde ontwerp opnieuw is gratis)`}
+                >
+                  {rendering ? "Bezig…" : "✨ Fotorealistisch"}
+                </button>
+              )}
               {layers.length > 0 && (
                 <button className="ghost" onClick={() => (setLayers(() => []), setSelected(null))} title="Alles van deze foto wissen (ongedaan te maken)">
                   Alles wissen
@@ -1309,6 +1429,37 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
           </ol>
         )}
 
+        {render && (
+          <div className="render-panel">
+            <div className="row wrap between">
+              <strong>✨ Fotorealistisch</strong>
+              <div className="row wrap">
+                <button
+                  onPointerDown={() => setCompare(true)}
+                  onPointerUp={() => setCompare(false)}
+                  onPointerLeave={() => setCompare(false)}
+                  onContextMenu={(e) => e.preventDefault()}
+                  title="Houd ingedrukt om je ontwerp te zien"
+                >
+                  👁 Vergelijk
+                </button>
+                <button onClick={() => shareOrDownload(render.blob, exportFileName(project, photo?.room ?? "overig").replace(/(\.\w+)$/, "-ai$1"))}>
+                  📷 Opslaan / delen
+                </button>
+                <button className="ghost" onClick={() => (URL.revokeObjectURL(render.url), URL.revokeObjectURL(render.design), setRender(null))}>
+                  Sluiten
+                </button>
+              </div>
+            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={compare ? render.design : render.url} alt="Fotorealistisch ontwerp" />
+            <p className="muted small">
+              Gemaakt door AI op basis van je ontwerp: licht en schaduw zijn realistisch, maar controleer details en maten. Je ontwerp zelf
+              blijft gewoon bewerkbaar.
+            </p>
+          </div>
+        )}
+
         {linking && plan && size && (
           <LinkPanel
             plan={plan}
@@ -1328,6 +1479,14 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
 
         {rulerFor && (
           <RulerPrompt
+            tip={(() => {
+              const line = layers.find((l): l is MeasureLayer => l.id === rulerFor && l.kind === "measure");
+              const plane = line && floorPlaneOf(line.floorId);
+              const m = line && metricOf(line.floorId);
+              return line && plane && m?.estimated
+                ? `Geschat uit het perspectief: ≈ ${formatCm(distanceCm(plane, m, line.points[0], line.points[1]))}. Weet je de echte lengte? Vul die in; Annuleren houdt de schatting.`
+                : undefined;
+            })()}
             onCancel={() => setRulerFor(null)}
             onSave={(cm) => {
               patchLayer(rulerFor, { cm });
@@ -1582,6 +1741,22 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
                     <MeasureLabel at={[p[0], p[1] - handleR * 2.2]} text={i ? "R" : "L"} size={size.w * 1.3} />
                   </g>
                 ))}
+              {spots?.list.map((sp, i) => (
+                <g
+                  key={i}
+                  className="spot"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    moveToSpot(spots.layerId, sp.at);
+                  }}
+                >
+                  <circle cx={sp.at[0]} cy={sp.at[1]} r={handleR * 1.5} />
+                  <text x={sp.at[0]} y={sp.at[1] + handleR * 0.55} fontSize={handleR * 1.5} textAnchor="middle">
+                    {i + 1}
+                  </text>
+                  {sp.why && <MeasureLabel at={[sp.at[0], sp.at[1] - handleR * 3]} text={`${i + 1}. ${sp.why}`} size={size.w} />}
+                </g>
+              ))}
               {drawing?.kind === "measure" && drawing.points.length === 1 && (
                 <circle className="handle draft-point" cx={drawing.points[0][0]} cy={drawing.points[0][1]} r={handleR * 0.7} />
               )}
@@ -1708,6 +1883,12 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
             })()}
             cutoutState={selectedLayer.kind === "product" ? cutouts[layerCutKey(selectedLayer)] : undefined}
             onChange={(patch) => patchLayer(selectedLayer.id, patch)}
+            onSuggestSpots={
+              fal && selectedLayer.kind === "product" && selectedLayer.floor && !selectedLayer.planItem
+                ? () => suggestSpots(selectedLayer.id)
+                : undefined
+            }
+            spotsShown={!!spots && spots.layerId === selectedLayer.id}
             onPlaceOnFloor={(floorId) => {
               const floor = floors.find((f) => f.id === floorId);
               if (floor && selectedLayer.kind === "product") {

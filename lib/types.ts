@@ -156,6 +156,9 @@ export interface SurfaceLayer {
   autoScale?: boolean;
   /** Texture turned a quarter (planks running into the room instead of across). */
   rotate?: boolean;
+  /** Size of the photo the plane is drawn on (pixels): for the estimated true size (metric.ts). */
+  imageW?: number;
+  imageH?: number;
 }
 
 /** An area of the photo that is painted out (existing furniture removed). */

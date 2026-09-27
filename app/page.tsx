@@ -8,6 +8,9 @@ import { shareOrDownload } from "@/lib/exportImage";
 import { useProject } from "@/lib/useProject";
 import { anyDeviceAiOff, isLightMode, resetDeviceAi, setLightMode, takeCrashReport } from "@/lib/worker";
 import { AiServerSetting } from "@/components/AiServerSetting";
+import { FalSetting } from "@/components/FalSetting";
+import { falEnabled } from "@/lib/fal";
+import { plansOf } from "@/lib/plans";
 import { cloudUrl } from "@/lib/cloud";
 
 // Loaded when the tab is first opened: a faster first start, especially on an iPad.
@@ -56,6 +59,7 @@ export default function Home() {
   // Did an AI job take the tab down last time (iPad out of memory)? Then use the light models.
   useEffect(() => {
     setCrashed(takeCrashReport());
+    void falEnabled(); // known before the first AI job (see lib/fal.ts)
     setLight(isLightMode());
     setAiOff(anyDeviceAiOff());
     setCloud(!!cloudUrl());
@@ -64,7 +68,9 @@ export default function Home() {
   // Safari reloads background tabs; come back where you were.
   useEffect(() => {
     const t = recall("furnuture:tab") as Tab | null;
-    if (t && TABS.includes(t)) setTab(t);
+    // A house sent by the bookmarklet is read in the Woning tab (see ListingPanel).
+    if (window.location.hash.startsWith("#import=")) setTab("woning");
+    else if (t && TABS.includes(t)) setTab(t);
     setPhotoId(recall("furnuture:photo"));
   }, []);
   useEffect(() => remember("furnuture:tab", tab), [tab]);
@@ -73,7 +79,7 @@ export default function Home() {
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: "woning", label: "🏠 Woning", count: project.listing?.photos.length },
     { id: "producten", label: "🛋️ Producten", count: project.products.length },
-    { id: "plattegrond", label: "🗺️ Plattegrond", count: project.plans?.reduce((n, p) => n + p.items.length, 0) },
+    { id: "plattegrond", label: "🗺️ Plattegrond", count: plansOf(project).reduce((n, p) => n + p.items.length, 0) },
     { id: "visualiseren", label: "🪄 Inrichten" },
   ];
 
@@ -134,6 +140,7 @@ export default function Home() {
                   🔁 AI op dit apparaat opnieuw proberen
                 </button>
               )}
+              <FalSetting />
               <AiServerSetting onChange={(on) => setCloud(on)} />
               <p className="muted small">
                 Alles wordt alleen op dit apparaat bewaard. Met een back-up zet je het over naar een ander apparaat of deel je het met je

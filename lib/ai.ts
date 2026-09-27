@@ -1,4 +1,6 @@
 import { ROOMS } from "./categories";
+import { falEnabled } from "./fal";
+import { falCutout } from "./falTasks";
 import { canvasToUrl } from "./images";
 import type { RoomType } from "./types";
 import { imagePixels, isLightMode, pixelsToCanvas, runAi, type Img, type Progress } from "./worker";
@@ -71,6 +73,13 @@ export async function classifyRooms(
  * Much better than the colour-based cut-out for light furniture or sfeerfoto's.
  */
 export async function removeBackgroundAI(src: string, onProgress?: Progress): Promise<string> {
+  if (await falEnabled()) {
+    try {
+      return await falCutout(src, onProgress);
+    } catch (e) {
+      console.warn("fal cut-out failed, cutting out here", e);
+    }
+  }
   const image = await imagePixels(src, 1024);
   const out = await runAi<Img>({ task: "removeBackground", image, models: ["briaai/RMBG-1.4"] }, onProgress, [image.data.buffer]);
   return canvasToUrl(pixelsToCanvas(out));

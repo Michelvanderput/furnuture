@@ -25,6 +25,10 @@ interface Props {
   onRemove: () => void;
   onReorder: (dir: number) => void;
   onDuplicate: () => void;
+  /** 📍 Ask the AI (fal) where this product would go well; undefined when not available. */
+  onSuggestSpots?: () => void;
+  /** The suggested spots are on the photo now. */
+  spotsShown?: boolean;
 }
 
 const fillValue = (f: SurfaceFill) =>
@@ -64,6 +68,8 @@ export function LayerControls({
   onRemove,
   onReorder,
   onDuplicate,
+  onSuggestSpots,
+  spotsShown,
 }: Props) {
   if (layer.kind === "measure") {
     return (
@@ -76,8 +82,9 @@ export function LayerControls({
           </>
         ) : (
           <>
-            <strong>📏 {lengthCm ? formatCm(lengthCm) : "Meting"}</strong>
+            <strong>📏 {lengthCm ? `${metric?.estimated ? "≈ " : ""}${formatCm(lengthCm)}` : "Meting"}</strong>
             {!metric && <span className="muted small">Geef één lijn een echte lengte om te kunnen meten.</span>}
+            {metric?.estimated && <span className="muted small">Geschat uit het perspectief. Weet je een echte maat? Maak dan een meetlat.</span>}
             <button onClick={() => onChange({ cm: lengthCm ? Math.round(lengthCm) : 100 })}>Maak dit de meetlat</button>
           </>
         )}
@@ -174,11 +181,14 @@ export function LayerControls({
                     checked={trueSize}
                     onChange={(e) => onChange({ floor: { ...layer.floor!, widthCm: e.target.checked ? (dims?.w ?? 200) : undefined } })}
                   />
-                  📐 Ware grootte
+                  📐 Ware grootte{metric.estimated ? " (geschat)" : ""}
                 </label>
                 {trueSize && <CmInput label="Breedte" value={layer.floor.widthCm} onCommit={(cm) => cm && onChange({ floor: { ...layer.floor!, widthCm: cm } })} />}
                 {dims && <span className="muted small">Productmaat: {formatDims(dims)}</span>}
                 {trueSize && !dims?.w && <span className="muted small">Tip: vul bij Producten de maten in.</span>}
+                {trueSize && metric.estimated && (
+                  <span className="muted small">Maat geschat uit het perspectief (± 15 %). Meet de vloer (knop Meten) voor precisie.</span>
+                )}
               </>
             ) : (
               <span className="muted small">📏 Meet de vloer (knop Meten) om dit meubel op ware grootte te zetten.</span>
@@ -198,6 +208,12 @@ export function LayerControls({
                 onChange={(e) => onChange({ floor: { ...layer.floor!, angle: Number(e.target.value) } })}
               />
             </label>
+            {onSuggestSpots && (
+              <button className="primary" onClick={onSuggestSpots} title="De AI bekijkt de kamer en wijst plekken aan waar dit meubel goed staat (fal.ai, ± 1 cent)">
+                📍 Beste plekken (AI)
+              </button>
+            )}
+            {spotsShown && <span className="small">Tik op een genummerde plek in de foto: het meubel gaat erheen.</span>}
             <button onClick={() => onChange({ floor: undefined })}>Losmaken van vloer</button>
           </div>
         ) : (

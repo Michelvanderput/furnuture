@@ -39,7 +39,31 @@ Let op: de voorwaarden van Funda staan geautomatiseerd ophalen niet toe. Voor pe
 
 ## AI in de visualizer
 
-### ☁️ Gratis AI-server (aanrader voor de iPad)
+### ✨ fal.ai: de beste AI, betaald per keer (aanrader)
+
+Met een sleutel van [fal.ai](https://fal.ai) doet de app het zware werk met de beste modellen van dit moment. Zonder sleutel werkt alles zoals hieronder (gratis, maar minder mooi). Mislukt een fal-taak, dan valt de app vanzelf terug op de gratis manier.
+
+| Taak | Model | Kosten (ongeveer) |
+|---|---|---|
+| Weggummen | `fal-ai/object-removal` (terugval: Bria Eraser) | 1–4 cent per keer |
+| Selecteren (tik op een meubel) | SAM 2 | gratis / < 1 cent |
+| Meubel uitknippen | BiRefNet v2 (2048 px) | ± 1 cent |
+| 📍 Beste plekken voor een meubel | Gemini 2.5 Flash (vision) | < 1 cent |
+| ✨ Fotorealistisch | Nano Banana 2 (2K) | ± 11 cent |
+
+- **📍 Beste plekken (AI)**: selecteer een meubel dat op de vloer staat. De AI bekijkt de kamer en wijst genummerde plekken aan met een reden ("tegenover de tv"). Tik op een plek en het meubel gaat erheen, op ware grootte en in perspectief.
+- **✨ Fotorealistisch**: maakt van je ontwerp een echte foto. Het meubel krijgt schaduw, licht en reflecties van de kamer, en de productfoto's gaan mee zodat het hetzelfde meubel blijft. Niets wordt verplaatst. Met 👁 Vergelijk (vasthouden) zie je je eigen ontwerp.
+- **Ware grootte zonder meten**: de maat wordt geschat uit het perspectief (camera op ± 1,5 m hoogte, ± 15 %), gemarkeerd met "≈". Meten met 📏 maakt het precies.
+
+**Instellen:**
+1. Maak een account op fal.ai, zet er tegoed op (bijvoorbeeld $10) en maak een API-sleutel (Settings → API Keys).
+2. Zet in Vercel (Project → Settings → Environment Variables) `FAL_KEY` = je sleutel.
+3. Aanrader: zet ook `AI_ACCESS_CODE` = een eigen code. Anders kan iedereen die de site vindt jouw tegoed gebruiken. Vul de code in de app in via ⋯ Project → fal.ai.
+4. Redeploy. In ⋯ Project staat daarna "✨ fal.ai actief".
+
+De sleutel blijft op de server (`app/api/fal`), die alleen de bovenstaande modellen toestaat.
+
+### ☁️ Gratis AI-server
 
 Een iPad-tabblad heeft weinig geheugen; AI-modellen in Safari kunnen het laten vastlopen.
 Met een eigen, gratis **Hugging Face Space** (map [`ai-server`](ai-server/README.md), CPU basic,
@@ -82,7 +106,7 @@ Zo werkt het:
 
 ### Echter zonder betaalde AI
 
-De app blijft volledig gratis: geen API-sleutels, geen proefperiodes. Om meubels toch natuurlijk te laten ogen:
+Zonder fal-sleutel blijft de app volledig gratis. Om meubels toch natuurlijk te laten ogen:
 
 - **Contactschaduw**: een zachte schaduw onder het meubel, op een herkende vloer in perspectief en mee met het draaien.
 - **Licht en warmte**: productfoto's zijn fel en neutraal (studiolicht). Bij het plaatsen wordt het meubel gedimd en opgewarmd op basis van de gemiddelde helderheid en kleur van de kamerfoto; bij te stellen met de schuiven Licht en Warmte.

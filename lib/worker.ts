@@ -1,5 +1,6 @@
 import type { Img, Task } from "./ai.worker";
 import { cloudRun, cloudUrl, type CloudSession } from "./cloud";
+import { falReady } from "./fal";
 import { loadImage, proxied } from "./images";
 
 export type { Img };
@@ -69,7 +70,7 @@ export const anyDeviceAiOff = () => offTasks().length > 0;
 export const resetDeviceAi = () => store(OFF_KEY, null);
 
 /** Heavy extras (AI cut-out, LaMa) only when they cannot take this device down. */
-export const heavyAiAllowed = () => !!cloudUrl() || !isLowMemoryDevice();
+export const heavyAiAllowed = () => falReady() || !!cloudUrl() || !isLowMemoryDevice();
 
 export class AiOffError extends Error {}
 

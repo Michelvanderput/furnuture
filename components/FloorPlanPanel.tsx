@@ -38,10 +38,10 @@ const measure = (url: string) =>
  * furniture in perspective.
  */
 export function FloorPlanPanel({ project, update, onOpenPhoto }: Props) {
+  const photos = project.listing?.photos ?? [];
   const plans = plansOf(project);
   const [planId, setPlanId] = useState<string | null>(null);
   const plan = plans.find((p) => p.id === planId) ?? plans[0];
-  const photos = project.listing?.photos ?? [];
   const planPhoto = plan && photos.find((p) => p.id === plan.photoId);
   const candidates = photos.filter((p) => p.room === "plattegrond" && !plans.some((pl) => pl.photoId === p.id));
 
@@ -50,13 +50,16 @@ export function FloorPlanPanel({ project, update, onOpenPhoto }: Props) {
     if (!photo) return;
     const size = await measure(photo.url).catch(() => ({ w: 1440, h: 1000 }));
     const id = newId();
-    update((p) => ({
-      ...p,
-      plans: [
-        ...plansOf(p),
-        { id, name: plansOf(p).length ? `Verdieping ${plansOf(p).length}` : "Begane grond", photoId, imageW: size.w, imageH: size.h, rooms: [], items: [], links: {} },
-      ],
-    }));
+    update((p) => {
+      const kept = plansOf(p);
+      return {
+        ...p,
+        plans: [
+          ...kept,
+          { id, name: kept.length ? `Verdieping ${kept.length}` : "Begane grond", photoId, imageW: size.w, imageH: size.h, rooms: [], items: [], links: {} },
+        ],
+      };
+    });
     setPlanId(id);
   }
 

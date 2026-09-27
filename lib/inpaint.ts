@@ -3,6 +3,8 @@ import { loadImage, proxied } from "./images";
 import { aiInpaint, patchInpaint } from "./aiInpaint";
 import { decodeMask, dilate, extendDown, polygonMask } from "./masks";
 import { fingerprint, getCached, putCached } from "./aiCache";
+import { falEnabled } from "./fal";
+import { falErase } from "./falTasks";
 import type { RegionMap } from "./regions";
 import type { EraseLayer, Pt } from "./types";
 
@@ -159,7 +161,8 @@ export async function renderErased(
 ): Promise<{ url: string; aiFailed: boolean }> {
   const ordered = [...layers].reverse(); // oldest first
   const keys = ordered.map(eraseLayerId);
-  const cacheKey = `erased5:${fingerprint(photoUrl)}:${regions ? "r" : ""}${keys.join(".")}`;
+  const useFal = await falEnabled();
+  const cacheKey = `erased5:${fingerprint(photoUrl)}:${useFal ? "fal:" : ""}${regions ? "r" : ""}${keys.join(".")}`;
   if (last && last.photoUrl === photoUrl && last.keys.join(".") === keys.join(".")) return { url: URL.createObjectURL(last.blob), aiFailed: false };
   const stored = await getCached<Blob>(cacheKey);
   if (stored instanceof Blob) {
@@ -193,6 +196,16 @@ export async function renderErased(
     // see the photo at 512 px) smear or invent things. The AI does the small objects.
     let holeSize = 0;
     for (let i = 0; i < mask.length; i++) holeSize += mask[i];
+    // With fal (paid, see lib/fal.ts): its object-removal model does every AI erase, big or small.
+    if (layer.method === "ai" && useFal) {
+      try {
+        await falErase(canvas, mask, onProgress);
+        continue;
+      } catch (e) {
+        console.warn("fal erase failed, using the built-in way", e);
+        aiFailed = true;
+      }
+    }
     if (layer.method === "ai" && holeSize / mask.length < BIG_HOLE) {
       try {
         await aiInpaint(canvas, mask, onProgress);

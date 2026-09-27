@@ -44,9 +44,14 @@ export function ListingPanel({ project, update, onDecorate }: Props) {
       listing: {
         url: listingUrl,
         title: data.title || "Mijn nieuwe huis",
-        photos: data.photos.map((u) => ({ id: newId(), url: u, room: data.rooms?.[u] ?? ("overig" as RoomType) })),
+        // The same house again: keep photo ids (and sorting), so plans and designs stay linked.
+        photos: data.photos.map((u) => {
+          const old = p.listing?.url === listingUrl ? p.listing.photos.find((ph) => ph.url === u) : undefined;
+          return { id: old?.id ?? newId(), url: u, room: data.rooms?.[u] ?? old?.room ?? ("overig" as RoomType) };
+        }),
       },
-      scenes: {},
+      // A new house: its plans, visualisations and photo links belong to the old one.
+      ...(p.listing?.url === listingUrl ? {} : { scenes: {}, plans: [] }),
     }));
   };
 
@@ -199,7 +204,7 @@ export function ListingPanel({ project, update, onDecorate }: Props) {
           <button
             onClick={() => {
               if (confirm("Andere woning laden? Je indeling en visualisaties van deze woning worden gewist.")) {
-                update((p) => ({ ...p, listing: null, scenes: {} }));
+                update((p) => ({ ...p, listing: null, scenes: {}, plans: [] }));
               }
             }}
           >

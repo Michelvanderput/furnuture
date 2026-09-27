@@ -1,3 +1,5 @@
+import { falReady } from "./fal";
+import { falSelect } from "./falTasks";
 import { AiSession, imagePixels, isLightMode, type Progress } from "./worker";
 
 /**
@@ -38,6 +40,14 @@ export class Selector {
     /** Box around the object (fractions of the photo: x0, y0, x1, y1), e.g. from the room recognition. */
     box?: [number, number, number, number],
   ): Promise<Uint8Array> {
+    // With fal set up: SAM 2 there (sharper, and nothing heavy on this device).
+    if (falReady()) {
+      try {
+        return await falSelect(photoUrl, points, outW, outH, onProgress, box);
+      } catch (e) {
+        console.warn("fal select failed, selecting here", e);
+      }
+    }
     const ask = () =>
       this.session.run<{ mask: Uint8Array; score: number }>(
         {

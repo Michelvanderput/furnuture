@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calibrate, distanceCm, estimateFocal, footprint } from "@/lib/metric";
+import { calibrate, distanceCm, estimateFocal, estimateMetric, footprint } from "@/lib/metric";
 import type { Pt, Quad } from "@/lib/types";
 
 /** A simple pinhole camera looking at a floor (y = 0), with pitch and yaw. */
@@ -52,5 +52,29 @@ describe("measuring on a floor in perspective", () => {
     expect(distanceCm(floor, metric, fp[2], fp[1])).toBeCloseTo(95, 0);
     // The back edge is further away, so it is shorter in the photo.
     expect(Math.hypot(fp[1][0] - fp[0][0], fp[1][1] - fp[0][1])).toBeLessThan(Math.hypot(fp[2][0] - fp[3][0], fp[2][1] - fp[3][1]));
+  });
+});
+
+
+describe("true size without measuring", () => {
+  it("gets the floor's scale from the perspective and a 1.5 m camera", () => {
+    // Camera 150 cm high looking at a 500 × 400 cm floor (plan units = cm).
+    const W = 1440, H = 960, f = W / 2 / Math.tan((75 / 2) * (Math.PI / 180));
+    const pitch = (15 * Math.PI) / 180;
+    const fwd = [0, -Math.cos(pitch), -Math.sin(pitch)], right = [1, 0, 0];
+    const down = [right[1] * fwd[2] - right[2] * fwd[1], right[2] * fwd[0] - right[0] * fwd[2], right[0] * fwd[1] - right[1] * fwd[0]];
+    const cam = ([X, Y]: number[]): [number, number] => {
+      const d = [X - 350, Y - 520, -150];
+      const z = d[0] * fwd[0] + d[1] * fwd[1] + d[2] * fwd[2];
+      return [W / 2 + (f * (d[0] * right[0] + d[1] * right[1] + d[2] * right[2])) / z, H / 2 + (f * (d[0] * down[0] + d[1] * down[1] + d[2] * down[2])) / z];
+    };
+    const plane = [[100, 100], [600, 100], [600, 480], [100, 480]].map(cam) as [number, number][];
+    const m = estimateMetric(plane as never, W, H)!;
+    expect(m.estimated).toBe(true);
+    // The plane square is 500 cm wide (u) and 380 cm deep (v).
+    expect(m.sx * 1000).toBeGreaterThan(500 * 0.95);
+    expect(m.sx * 1000).toBeLessThan(500 * 1.05);
+    expect(m.sx * m.rho * 1000).toBeGreaterThan(380 * 0.9);
+    expect(m.sx * m.rho * 1000).toBeLessThan(380 * 1.1);
   });
 });

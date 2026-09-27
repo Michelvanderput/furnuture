@@ -1,3 +1,4 @@
+import { cameraFromHomography, cameraOnPlan } from "./camera";
 import { homography, project } from "./geometry";
 import { PLANE } from "./plane";
 import type { Pt, Quad } from "./types";
@@ -17,6 +18,8 @@ export interface FloorMetric {
   sx: number;
   /** sy / sx: centimetres per plane unit along v, relative to u. */
   rho: number;
+  /** Not measured but estimated from the perspective and a usual camera height (see estimateMetric). */
+  estimated?: boolean;
 }
 
 const SQUARE: Quad = [[0, 0], [PLANE, 0], [PLANE, PLANE], [0, PLANE]];
@@ -108,3 +111,27 @@ export function footprint(plane: Quad, metric: FloorMetric, u: number, v: number
 
 export const formatCm = (cm: number) =>
   cm >= 100 ? `${(cm / 100).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m` : `${Math.round(cm)} cm`;
+
+/** Height at which estate agents' photos are usually taken (tripod at chest height). */
+export const CAMERA_HEIGHT_CM = 150;
+
+/**
+ * The floor's scale without measuring: from the perspective, the camera's position
+ * above the floor follows (in plane units); a photo taken at the usual height of
+ * about 1.5 m then gives centimetres. Good to within roughly 10–20 %; a measured
+ * line (calibrate) replaces it.
+ */
+export function estimateMetric(plane: Quad, imageW: number, imageH: number, cameraHeightCm = CAMERA_HEIGHT_CM): FloorMetric | null {
+  const f = estimateFocal(plane, imageW, imageH);
+  const rho = planeAspect(plane, f, imageW, imageH);
+  if (!Number.isFinite(rho) || rho <= 0) return null;
+  // Plane coordinates made square (v stretched by rho), so one unit is the same length both ways.
+  const m = homography([[0, 0], [PLANE, 0], [PLANE, PLANE * rho], [0, PLANE * rho]], plane);
+  const cam = cameraFromHomography(m, imageW, imageH, f);
+  if (!cam) return null;
+  const height = cameraOnPlan(cam).height;
+  if (!(height > 1e-6) || !Number.isFinite(height)) return null;
+  const sx = cameraHeightCm / height;
+  // A floor of less than 50 cm or more than 50 m across: the fit is off, do not guess.
+  return sx * PLANE > 50 && sx * PLANE < 5000 ? { sx, rho, estimated: true } : null;
+}
