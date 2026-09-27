@@ -3,6 +3,7 @@ import { loadImage, proxied } from "./images";
 import { aiInpaint, patchInpaint } from "./aiInpaint";
 import { decodeMask, dilate, extendDown, polygonMask } from "./masks";
 import { fingerprint, getCached, putCached } from "./aiCache";
+import type { RegionMap } from "./regions";
 import type { EraseLayer, Pt } from "./types";
 
 /**
@@ -153,10 +154,12 @@ export async function renderErased(
   onProgress?: Progress,
   /** The floor's outline in photo pixels, if known: floor and wall are then filled separately. */
   floor?: Pt[],
+  /** The room recognition's regions (floor, rug, walls…), if known: each is filled from itself. */
+  regions?: RegionMap,
 ): Promise<{ url: string; aiFailed: boolean }> {
   const ordered = [...layers].reverse(); // oldest first
   const keys = ordered.map(eraseLayerId);
-  const cacheKey = `erased4:${fingerprint(photoUrl)}:${keys.join(".")}`;
+  const cacheKey = `erased5:${fingerprint(photoUrl)}:${regions ? "r" : ""}${keys.join(".")}`;
   if (last && last.photoUrl === photoUrl && last.keys.join(".") === keys.join(".")) return { url: URL.createObjectURL(last.blob), aiFailed: false };
   const stored = await getCached<Blob>(cacheKey);
   if (stored instanceof Blob) {
@@ -200,7 +203,7 @@ export async function renderErased(
       }
     }
     try {
-      await patchInpaint(canvas, mask, floor?.map(([x, y]) => [x * f, y * f] as Pt), onProgress);
+      await patchInpaint(canvas, mask, floor?.map(([x, y]) => [x * f, y * f] as Pt), onProgress, regions);
     } catch (e) {
       console.warn("Content-aware fill failed, using the smooth fill", e);
       simpleFill(ctx, mask, w, h);

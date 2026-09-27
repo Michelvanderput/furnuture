@@ -9,6 +9,8 @@
  */
 
 const R = 3; // patch radius: 7×7 patches
+/** Label of pixels that are no part of the picture: never copied, never filled. */
+const VOID = 255;
 
 /** `labels`: optional region per pixel (e.g. 1 = floor, 2 = wall/other); holes are filled only from the same region. */
 type Level = { w: number; h: number; img: Float32Array; hole: Uint8Array; labels?: Uint8Array };
@@ -126,7 +128,7 @@ function patchVariance(img: Float32Array, w: number, h: number): Float32Array {
   return v;
 }
 
-function solveLevel(l: Level, nnf: Int32Array, em: number, rand: () => number, coarsest = false): void {
+function solveLevel(l: Level, nnf: Int32Array, em: number, rand: () => number, coarsest = false, finest = false, lowVariancePenalty = 150_000): void {
   const { w, h, img, hole, labels } = l;
   const n = w * h;
   const notSource = grow(hole, w, h, R);
@@ -136,7 +138,7 @@ function solveLevel(l: Level, nnf: Int32Array, em: number, rand: () => number, c
   // that one patch. Penalising low-variance sources pushes matches back towards
   // patches that actually carry the room's real texture.
   const variance = patchVariance(img, w, h);
-  const LOW_VARIANCE_PENALTY = 150_000;
+  const LOW_VARIANCE_PENALTY = lowVariancePenalty;
   // Region of each possible source patch: its label when the whole patch is one region, else 0.
   const region = new Uint8Array(n);
   if (labels) {
@@ -153,7 +155,7 @@ function solveLevel(l: Level, nnf: Int32Array, em: number, rand: () => number, c
   let want = 0; // region the current target needs (0 = any)
   const valid = (q: number) => {
     const x = q % w, y = (q / w) | 0;
-    return x >= R && y >= R && x < w - R && y < h - R && !notSource[q] && (!want || region[q] === want);
+    return x >= R && y >= R && x < w - R && y < h - R && !notSource[q] && !(labels && labels[q] === VOID) && (!want || region[q] === want);
   };
   const targets: number[] = [];
   const near = grow(hole, w, h, R);
@@ -162,7 +164,7 @@ function solveLevel(l: Level, nnf: Int32Array, em: number, rand: () => number, c
   const byRegion = new Map<number, number[]>();
   for (let i = 0; i < n; i++) {
     const x = i % w, y = (i / w) | 0;
-    if (x < R || y < R || x >= w - R || y >= h - R || notSource[i]) continue;
+    if (x < R || y < R || x >= w - R || y >= h - R || notSource[i] || (labels && labels[i] === VOID)) continue;
     for (const key of labels ? [0, region[i]] : [0]) {
       if (!byRegion.has(key)) byRegion.set(key, []);
       byRegion.get(key)!.push(i);
@@ -298,7 +300,9 @@ function solveLevel(l: Level, nnf: Int32Array, em: number, rand: () => number, c
     if (!hole[p]) continue;
     const q = nnf[p];
     const confidence = Math.exp(-cost[p] / (2 * typical));
-    const amount = 0.3 + 0.55 * confidence; // 0.3 (uncertain) .. 0.85 (confident)
+    // At full resolution a good match is copied almost as is: averaging there is what
+    // makes the fill look hazy. Coarser levels stay smoother (they only guide).
+    const amount = finest ? 0.45 + 0.5 * confidence : 0.3 + 0.55 * confidence;
     for (let c = 0; c < 3; c++) img[p * 3 + c] = amount * img[q * 3 + c] + (1 - amount) * avg[p * 3 + c];
   }
 }
@@ -316,7 +320,16 @@ function solveLevel(l: Level, nnf: Int32Array, em: number, rand: () => number, c
  * instead any residual light mismatch at the hole's edge is fixed afterwards,
  * as a smooth additive correction (`seamless`) that leaves the copied texture intact.
  */
-export function patchFill(rgba: Uint8ClampedArray, mask: Uint8Array, w: number, h: number, labels?: Uint8Array, seed = 7): void {
+export function patchFill(
+  rgba: Uint8ClampedArray,
+  mask: Uint8Array,
+  w: number,
+  h: number,
+  labels?: Uint8Array,
+  seed = 7,
+  /** How strongly flat source patches are avoided (see solveLevel). */
+  lowVariancePenalty = 150_000,
+): void {
   const n = w * h;
   const base: Level = { w, h, img: new Float32Array(n * 3), hole: mask.slice(), labels };
   for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) base.img[i * 3 + c] = rgba[i * 4 + c];
@@ -346,7 +359,7 @@ export function patchFill(rgba: Uint8ClampedArray, mask: Uint8Array, w: number, 
         }
       }
     }
-    solveLevel(l, nnf, li === levels.length - 1 ? 16 : li === 0 ? 6 : 8, rand, li === levels.length - 1);
+    solveLevel(l, nnf, li === levels.length - 1 ? 16 : li === 0 ? 6 : 8, rand, li === levels.length - 1, li === 0, lowVariancePenalty);
     prev = { nnf, w: l.w, h: l.h };
   }
   seamless(base, mask, labels);

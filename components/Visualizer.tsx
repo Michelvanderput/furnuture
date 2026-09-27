@@ -7,6 +7,7 @@ import { renderDesign, shareOrDownload } from "@/lib/exportImage";
 import { centroid, pointInPolygon, project as projectPoint, quadToMatrix3d, rectQuad } from "@/lib/geometry";
 import { cropCenter, loadImage, NoPlainBackground, proxied, releaseUrl, removeBackground, rotatedTexture } from "@/lib/images";
 import { eraseLayerId, renderErased } from "@/lib/inpaint";
+import { regionMap, type RegionMap } from "@/lib/regions";
 import { fingerprintOf, getCached, putCached } from "@/lib/aiCache";
 import {
   floorMetric,
@@ -284,6 +285,9 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     return quad?.map(([x, y]) => [(x * size.w) / seg.w, (y * size.h) / seg.h] as Pt);
   }, [segmentation, size]);
   const floorOutline = useRef<Pt[] | undefined>(undefined);
+  // What the erase fill may copy from where (rug from rug, wall from wall), from the recognition.
+  const regionsRef = useRef<RegionMap | undefined>(undefined);
+  regionsRef.current = useMemo(() => (segmentation ? regionMap(segmentation) : undefined), [segmentation]);
   const laidFloor = layers.find((l): l is SurfaceLayer => isFloor(l));
   floorOutline.current = (laidFloor && planeOf(laidFloor)) || recognisedFloor;
 
@@ -299,7 +303,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     setStatus("Gummen…");
     // Let the status paint before the fill blocks the page briefly.
     const t = setTimeout(() => {
-      renderErased(photo.url, eraseLayers, (m) => !cancelled && setStatus(m || "Gummen…"), floorOutline.current)
+      renderErased(photo.url, eraseLayers, (m) => !cancelled && setStatus(m || "Gummen…"), floorOutline.current, regionsRef.current)
         .then(({ url, aiFailed }) => {
           if (cancelled) return;
           setErased({ key: eraseKey, url });

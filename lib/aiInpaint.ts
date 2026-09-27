@@ -1,14 +1,19 @@
 import { polygonMask } from "./masks";
 import { project } from "./geometry";
 import { imageToPlane, PLANE, planeToImage } from "./plane";
+import { furnitureAt, type RegionMap } from "./regions";
 import type { Pt, Quad } from "./types";
 import { cloudUrl } from "./cloud";
 import { isLightMode, isLowMemoryDevice, runAi, type Img, type Progress } from "./worker";
 
 /** Largest crop sent to the AI: MI-GAN works at 512 px internally, more only costs memory. */
 const maxCrop = () => (isLightMode() ? 640 : 1024);
-/** Content-aware fill works on a smaller crop: it is plain JavaScript (about 1.5 s at this size). */
-const PATCH_CROP = 480;
+/**
+ * Content-aware fill works on a smaller crop: it is plain JavaScript. At 480 px a sofa
+ * was filled at a third of the photo's resolution and stretched back: a haze. Twice
+ * that is sharp and takes a few seconds (in a worker, once per erased object).
+ */
+const patchCrop = () => (isLightMode() ? 720 : 1000);
 
 /** Fills `hole` (1 = fill) of a crop and returns the crop. `labels`: 1 = floor, 2 = the rest (optional). */
 type Solver = (image: Img, hole: Uint8Array, labels: Uint8Array | undefined) => Promise<Img>;
@@ -30,6 +35,8 @@ async function cropInpaint(
    * a large share of its working image — a bigger crop (downscaled to the same
    * `maxSide`) gives it proportionally more of that at every pyramid level. */
   contextFactor = 2,
+  /** Furniture per photo pixel (see regions.ts): never a source for the fill. */
+  furniture?: (x: number, y: number) => boolean,
 ): Promise<void> {
   const W = canvas.width;
   const H = canvas.height;
@@ -72,6 +79,15 @@ async function cropInpaint(
   if (floor && floor.length >= 3) {
     const inFloor = polygonMask(floor.map(([x, y]) => [(x - cx) * (sw / cw), (y - cy) * (sh / ch)]), sw, sh);
     labels = inFloor.map((v) => (v ? 1 : 2));
+  }
+
+  if (furniture) {
+    // Never copy from furniture that stays (a table leg printed into the floor).
+    labels ??= new Uint8Array(sw * sh).fill(2);
+    for (let y = 0; y < sh; y++) {
+      const sy = cy + ((y + 0.5) * ch) / sh;
+      for (let x = 0; x < sw; x++) if (!hole[y * sw + x] && furniture(cx + ((x + 0.5) * cw) / sw, sy)) labels[y * sw + x] = 0;
+    }
   }
 
   const out = await solve(image, hole, labels);
@@ -159,19 +175,19 @@ export function aiInpaint(canvas: HTMLCanvasElement, mask: Uint8Array, onProgres
 }
 
 /** Content-aware fill (lib/patchFill.ts) in its own worker, so the page stays responsive. */
-function runFill(image: Img, hole: Uint8Array, labels: Uint8Array | undefined): Promise<Img> {
+function runFill(image: Img, hole: Uint8Array, labels: Uint8Array | undefined, lowVariancePenalty?: number): Promise<Img> {
   return new Promise<Img>((resolve, reject) => {
     const worker = new Worker(new URL("./fill.worker.ts", import.meta.url), { type: "module" });
     worker.onmessage = (e: MessageEvent<Img>) => (worker.terminate(), resolve(e.data));
     worker.onerror = (e) => (worker.terminate(), reject(new Error(e.message || "Gummen mislukt")));
-    worker.postMessage({ image, hole, labels }, [image.data.buffer]);
+    worker.postMessage({ image, hole, labels, lowVariancePenalty }, [image.data.buffer]);
   });
 }
 
 /** Region label for pixels that are no part of the picture (never copied, never filled). */
 const VOID = 255;
-/** Size of the top-down floor view the fill works in. */
-const RECT_SIDE = 400;
+/** Size of the top-down floor view the fill works in (400 left the floor near the camera blurry). */
+const rectSide = () => (isLightMode() ? 600 : 900);
 
 /**
  * Fills the floor part of the hole in a top-down view of the floor. In the photo,
@@ -179,7 +195,12 @@ const RECT_SIDE = 400;
  * from above they repeat, the fill can continue them, and projecting back puts them
  * in perspective again. Returns the part of the mask that is not floor.
  */
-async function fillFloorFromAbove(canvas: HTMLCanvasElement, mask: Uint8Array, quad: Quad): Promise<Uint8Array> {
+async function fillFloorFromAbove(
+  canvas: HTMLCanvasElement,
+  mask: Uint8Array,
+  quad: Quad,
+  furniture?: (x: number, y: number) => boolean,
+): Promise<Uint8Array> {
   const W = canvas.width, H = canvas.height;
   const inFloor = polygonMask(quad, W, H);
   const toPlane = imageToPlane(quad);
@@ -202,7 +223,7 @@ async function fillFloorFromAbove(canvas: HTMLCanvasElement, mask: Uint8Array, q
   if (!any) return mask;
   const mu = Math.max(40, (u1 - u0) * 0.6), mv = Math.max(40, (v1 - v0) * 0.6);
   u0 = Math.max(0, u0 - mu), u1 = Math.min(PLANE, u1 + mu), v0 = Math.max(0, v0 - mv), v1 = Math.min(PLANE, v1 + mv);
-  const scale = RECT_SIDE / Math.max(u1 - u0, v1 - v0);
+  const scale = rectSide() / Math.max(u1 - u0, v1 - v0);
   const rw = Math.max(8, Math.round((u1 - u0) * scale)), rh = Math.max(8, Math.round((v1 - v0) * scale));
 
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
@@ -222,12 +243,16 @@ async function fillFloorFromAbove(canvas: HTMLCanvasElement, mask: Uint8Array, q
         continue;
       }
       const i = iy * W + ix;
-      labels[j] = 1;
+      // Floor (and rugs); furniture standing on it is never copied.
+      labels[j] = !mask[i] && furniture?.(ix, iy) ? 0 : 1;
       if (mask[i]) hole[j] = 1;
       else for (let c = 0; c < 3; c++) data[j * 4 + c] = src[i * 4 + c];
     }
   }
-  const out = await runFill({ data, width: rw, height: rh }, hole, labels);
+  // Seen from above, anything standing on the floor (a table leg, a radiator) is stretched
+  // into long streaks: the most "textured" patches there, so a strong preference for
+  // texture pulled those streaks into the floor. Much weaker here.
+  const out = await runFill({ data, width: rw, height: rh }, hole, labels, 20_000);
 
   // Back into the photo: every floor pixel of the hole samples the filled top-down view.
   const o = out.data;
@@ -253,16 +278,24 @@ async function fillFloorFromAbove(canvas: HTMLCanvasElement, mask: Uint8Array, q
  * floor part is filled in a top-down view (planks continue in perspective) and the
  * rest (wall, skirting) from the non-floor part of the photo.
  */
-export async function patchInpaint(canvas: HTMLCanvasElement, mask: Uint8Array, floor?: Pt[], onProgress?: Progress): Promise<void> {
+export async function patchInpaint(
+  canvas: HTMLCanvasElement,
+  mask: Uint8Array,
+  floor?: Pt[],
+  onProgress?: Progress,
+  /** The room recognition, when known: the fill never copies from furniture. */
+  regionMap?: RegionMap,
+): Promise<void> {
   onProgress?.("Gummen…");
+  const furniture = regionMap ? furnitureAt(regionMap, canvas.width, canvas.height) : undefined;
   let rest = mask;
   if (floor?.length === 4) {
     try {
-      rest = await fillFloorFromAbove(canvas, mask, floor as Quad);
+      rest = await fillFloorFromAbove(canvas, mask, floor as Quad, furniture);
     } catch (e) {
       console.warn("Floor fill failed", e);
     }
   }
   if (!rest.some(Boolean)) return;
-  await cropInpaint(canvas, rest, PATCH_CROP, runFill, floor, 4);
+  await cropInpaint(canvas, rest, patchCrop(), runFill, floor, 3, furniture);
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { patchFill } from "@/lib/patchFill";
+import { furnitureAt, regionMap } from "@/lib/regions";
 
 describe("patchFill", () => {
   it("continues a striped pattern into the hole instead of smearing it", () => {
@@ -55,5 +56,26 @@ describe("patchFill light", () => {
     const row = Array.from({ length: 60 }, (_, i) => at(50 + i));
     const diffs = row.slice(1).map((v, i) => Math.abs(v - row[i]));
     expect(Math.max(...diffs)).toBeGreaterThan(8);
+  });
+});
+
+describe("furniture is never a source", () => {
+  it("marks recognised furniture, not rugs or walls", () => {
+    const w = 4, h = 1;
+    const seg = {
+      w, h,
+      ids: Int32Array.from([1, 2, 3, 0]),
+      segments: [
+        { id: 1, kind: "furniture" as const, label: "Tafel", className: "table", area: 1, box: [0, 0, 0, 0] as [number, number, number, number] },
+        { id: 2, kind: "furniture" as const, label: "Vloerkleed", className: "rug", area: 1, box: [1, 0, 1, 0] as [number, number, number, number] },
+        { id: 3, kind: "wall" as const, label: "Muur", area: 1, box: [2, 0, 2, 0] as [number, number, number, number] },
+      ],
+    };
+    const map = regionMap(seg);
+    // The table (grown by 2 px) covers the rug next to it here, but not the far end.
+    expect(map.furniture[0]).toBe(1);
+    const at = furnitureAt(map, 400, 100);
+    expect(at(10, 50)).toBe(true);
+    expect(regionMap({ ...seg, ids: Int32Array.from([0, 2, 3, 0]) }).furniture.some(Boolean)).toBe(false);
   });
 });
