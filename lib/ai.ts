@@ -113,7 +113,7 @@ export async function aiRooms(listing: Listing, onProgress?: Progress): Promise<
     (planUrls.length ? ` en daarna ${planUrls.length} plattegrond(en).` : ".") +
     "\n\nBepaal welke ruimtes deze woning heeft die ingericht moeten worden (per verdieping, van beneden naar boven). " +
     "Gebruik de plattegrond en omschrijving voor namen, verdieping en m² (alleen als je het kunt aflezen of berekenen, anders null). " +
-    "Geef elke slaapkamer een eigen ruimte. Koppel elke foto aan de ruimte die hij toont." +
+    "Geef elke slaapkamer een eigen ruimte. Alleen ruimtes van deze woning zelf (met eigen tuin, balkon, berging of garage), niet de straat, de buurt of een speeltuin. Koppel elke foto aan de ruimte die hij toont." +
     `\nAntwoord als JSON: {"rooms":[{"name":"Woonkamer","type":"woonkamer","floor":"Begane grond","area_m2":32,"photos":[0,3],"note":"open keuken, grote tuindeuren op het zuiden"}],"photo_types":["woonkamer","buitenkant",…]}` +
     `\n"type" is een van: ${TYPES}. "photo_types" heeft per foto (in volgorde) een van: ${TYPES}, buitenkant, plattegrond. "note": max 12 woorden over wat handig is om te weten bij het inrichten.`;
   type Answer = { rooms?: { name?: unknown; type?: unknown; floor?: unknown; area_m2?: unknown; photos?: unknown; note?: unknown }[]; photo_types?: unknown[] };
