@@ -138,6 +138,15 @@ kamer (niet alleen gemaakte testbeelden):
   vervagen tot een vlakke, weinig overtuigende vlek — een bekende, inherente grens van deze
   aanpak zonder AI op een drukke, echte foto. AI-gum (MI-GAN) is hier sterker; geef anders
   eerst de vloer aan of herken de kamer voordat je gumt.
+- **Scherpte**: het gat wordt op ± 1000 px ingevuld (de vloer van bovenaf op 900 px); de
+  fijnste stap kopieert goede stukjes vrijwel ongemengd, wat de waas wegneemt. Is de kamer
+  herkend, dan wordt nooit uit meubels gekopieerd (eerder kwamen er tafelpoten in een
+  vloerkleed terecht).
+- **Waarom geen generatieve AI (Stable Diffusion) voor grote meubels?** Getest op een echte
+  woonkamer: in een bank-vormig gat tekent het model een nieuwe bank, ook met "geen meubels"
+  als instructie; op lage sterkte verzint het niets, maar wint het ook bijna niets. Dat is
+  1–3 minuten wachten op een gratis server niet waard. Voor een grote bank geldt: overdek
+  de plek met de nieuwe vloer en een nieuw meubel, dan zie je de invulling nauwelijks.
 
 ## Gebruiksgemak en snelheid
 
