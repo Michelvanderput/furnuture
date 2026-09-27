@@ -76,7 +76,7 @@ export function HouseView() {
       {l?.facts && Object.keys(l.facts).length > 0 && (
         <div className="card stack">
           <h2>Kenmerken</h2>
-          <div className="grid stats">
+          <div className="grid stats facts-grid">
             {FACTS.filter(([k]) => l.facts?.[k]).map(([k, label]) => (
               <div key={k} className="stack tight">
                 <span className="tiny muted">{label}</span>

@@ -151,3 +151,11 @@ export function planCsv(project: Project): string {
   }
   return "﻿" + rows.join("\n");
 }
+
+/** A product name short enough for a message: "KLEDINGKAST 2 DEUREN EN 2 LADES MOLLY" → "Kledingkast 2 deuren en…". */
+export function shortName(title: string, max = 30): string {
+  const t = title === title.toUpperCase() ? title.charAt(0) + title.slice(1).toLowerCase() : title;
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), max - 8)).replace(/[\s,.-]+$/, "")}…`;
+}

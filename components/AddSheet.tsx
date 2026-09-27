@@ -8,7 +8,7 @@ import { fileToDataUrl, firstWorkingThumb } from "@/lib/images";
 import { addItems, addOrFill, patchItem } from "@/lib/items";
 import { itemFromLink, sameLink } from "@/lib/products";
 import { newId } from "@/lib/rooms";
-import { extractLinks } from "@/lib/shopping";
+import { extractLinks, shortName } from "@/lib/shopping";
 import type { Category, Item } from "@/lib/types";
 import { Camera, LinkSimple, PencilSimple } from "@phosphor-icons/react";
 import { useApp } from "./app";
@@ -66,9 +66,9 @@ export function AddSheet({ roomId: initialRoom, alternativeOf, links: initialLin
       }
       const text =
         replaced.length === 1 && !fresh.length
-          ? `${replaced[0].item.title.slice(0, 40)} vervangt "${replaced[0].placeholder.title.slice(0, 30)}"`
+          ? `${shortName(replaced[0].item.title)} vervangt "${shortName(replaced[0].placeholder.title, 24)}"`
           : added.length === 1
-            ? `${added[0].title.slice(0, 50)} toegevoegd`
+            ? `${shortName(added[0].title, 40)} toegevoegd`
             : `${added.length} producten toegevoegd${replaced.length ? `, ${replaced.length} op de plek van een "nog te vinden"` : ""}`;
       toast(text, () => update(() => before));
     }
@@ -87,7 +87,7 @@ export function AddSheet({ roomId: initialRoom, alternativeOf, links: initialLin
 
   return (
     <Sheet
-      title={main ? `Alternatief voor ${main.title.slice(0, 40)}` : "Toevoegen"}
+      title={main ? `Optie voor ${shortName(main.title)}` : "Toevoegen"}
       onClose={onClose}
       footer={
         mode === "link" ? (
@@ -208,7 +208,7 @@ function FromScreenshot({ roomId, alternativeOf, onDone }: { roomId: string | nu
       apply(project);
       const taken = replaced[0]?.placeholder.title;
       update(apply);
-      toast(taken ? `${p.title.slice(0, 40)} vervangt "${taken.slice(0, 30)}"` : `${p.title.slice(0, 50)} toegevoegd`, () => update(() => before));
+      toast(taken ? `${shortName(p.title)} vervangt "${shortName(taken, 24)}"` : `${shortName(p.title, 40)} toegevoegd`, () => update(() => before));
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -284,7 +284,7 @@ function Manual({ roomId, alternativeOf, onDone }: { roomId: string | null; alte
           alternativeOf,
         };
         update(addItems([item]));
-        toast(`${item.title.slice(0, 50)} toegevoegd`);
+        toast(`${shortName(item.title, 40)} toegevoegd`);
         onDone();
       }}
     >

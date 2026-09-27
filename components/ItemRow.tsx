@@ -5,7 +5,7 @@ import { Check, Scales, Star, TrendDown, TrendUp } from "@phosphor-icons/react";
 import { categoryLabel } from "@/lib/categories";
 import { patchItem } from "@/lib/items";
 import { priceChange } from "@/lib/products";
-import { euro, isBought, lineCost, nextStatus, statusLabel } from "@/lib/shopping";
+import { euro, isBought, lineCost, nextStatus, shortName, statusLabel } from "@/lib/shopping";
 import type { Item } from "@/lib/types";
 import { useApp } from "./app";
 import { CategoryIcon, I } from "./icons";
@@ -102,7 +102,7 @@ export function ItemRow({ item, alternatives = 0, showRoom, alt, check }: { item
             onClick={() => {
               const next = nextStatus(item.status);
               update(patchItem(item.id, { status: next }));
-              if (next === "binnen") toast(`${item.title.slice(0, 40)} staat in huis`);
+              if (next === "binnen") toast(`${shortName(item.title)} staat in huis`);
             }}
           />
         )}
