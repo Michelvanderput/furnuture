@@ -108,3 +108,27 @@ async function prune(): Promise<void> {
     bytes -= m.size;
   }
 }
+
+/**
+ * The last answer shown per room (or house), kept on this device: coming back, even
+ * after closing the app, shows it again without asking (and paying) again.
+ */
+export function lastAnswer<T>(kind: string) {
+  const key = (id: string) => `furnuture:last-${kind}:${id}`;
+  return {
+    get(id: string): T | null {
+      try {
+        return JSON.parse(localStorage.getItem(key(id)) ?? "null") as T | null;
+      } catch {
+        return null;
+      }
+    },
+    set(id: string, value: T): void {
+      try {
+        localStorage.setItem(key(id), JSON.stringify(value));
+      } catch {
+        // storage full or blocked: only for this visit
+      }
+    },
+  };
+}

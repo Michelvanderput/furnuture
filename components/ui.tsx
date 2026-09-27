@@ -161,18 +161,20 @@ export function Lightbox({ photos, index, onClose }: { photos: string[]; index: 
 // ---------------------------------------------------------------------------
 // Toasts with undo
 
-type Toast = { text: string; undo?: () => void; id: number };
-const ToastContext = createContext<(text: string, undo?: () => void) => void>(() => undefined);
+/** A second button next to "Ongedaan maken", e.g. "Als optie". */
+export type ToastAction = { label: string; run: () => void };
+type Toast = { text: string; undo?: () => void; action?: ToastAction; id: number };
+const ToastContext = createContext<(text: string, undo?: () => void, action?: ToastAction) => void>(() => undefined);
 export const useToast = () => useContext(ToastContext);
 
 export function ToastHost({ children }: { children: React.ReactNode }) {
   const [toast, setToast] = useState<Toast | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const show = useCallback((text: string, undo?: () => void) => {
+  const show = useCallback((text: string, undo?: () => void, action?: ToastAction) => {
     clearTimeout(timer.current);
     const id = Date.now();
-    setToast({ text, undo, id });
-    timer.current = setTimeout(() => setToast((t) => (t?.id === id ? null : t)), undo ? 6000 : 3000);
+    setToast({ text, undo, action, id });
+    timer.current = setTimeout(() => setToast((t) => (t?.id === id ? null : t)), action ? 9000 : undo ? 6000 : 3000);
   }, []);
   return (
     <ToastContext.Provider value={show}>
@@ -188,6 +190,16 @@ export function ToastHost({ children }: { children: React.ReactNode }) {
               }}
             >
               Ongedaan maken
+            </button>
+          )}
+          {toast.action && (
+            <button
+              onClick={() => {
+                toast.action!.run();
+                setToast(null);
+              }}
+            >
+              {toast.action.label}
             </button>
           )}
         </div>

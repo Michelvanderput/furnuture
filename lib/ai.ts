@@ -346,7 +346,8 @@ export async function aiStyle(project: Project, room: Room, onProgress?: Progres
 export interface RenoProposal {
   title: string;
   kind: RenoKind;
-  roomId?: string;
+  /** The rooms it is for; none = the whole house. */
+  roomIds: string[];
   who: "zelf" | "vakman";
   estimate?: number;
   days?: number;
@@ -355,6 +356,23 @@ export interface RenoProposal {
 }
 
 const RENO_KINDS = Object.keys(KINDS).join(", ");
+
+/** Plurals the AI uses for a group of rooms ("slaapkamers schilderen"). */
+const GROUPS: [RegExp, RoomType][] = [
+  [/slaapkamers/i, "slaapkamer"],
+  [/badkamers/i, "badkamer"],
+  [/toiletten/i, "toilet"],
+  [/overlopen|hal en overloop/i, "hal"],
+];
+
+/** The rooms an answer names: "Woonkamer", "Slaapkamer 1, Slaapkamer 2", or a group in the room or the title. */
+export function roomsNamed(project: Project, room: string, title = ""): string[] {
+  const names = room.split(/\s*(?:,|;|\ben\b|&)\s*/i).map((x) => x.trim().toLowerCase()).filter(Boolean);
+  const exact = project.rooms.filter((r) => names.includes(r.name.toLowerCase()) || r.name.toLowerCase() === room.trim().toLowerCase());
+  if (exact.length) return exact.map((r) => r.id);
+  for (const [re, type] of GROUPS) if (re.test(room) || (/hele huis|^$/i.test(room.trim()) && re.test(title))) return project.rooms.filter((r) => r.type === type).map((r) => r.id);
+  return [];
+}
 
 /**
  * Reads the photos (the state of floors, walls, kitchen, bathroom), the description,
@@ -383,19 +401,18 @@ export async function aiRenovationPlan(project: Project, onProgress?: Progress):
     "Welke verbouwklussen zijn verstandig voor de nieuwe bewoners? Alleen wat echt nodig of zinvol is, niet wat al goed is of al gepland. Denk ook aan verduurzaming bij een oud huis of slecht label, en aan wat vóór de verhuizing moet (stof, vloeren, elektra). " +
     "Geef realistische Nederlandse prijzen inclusief btw." +
     `\nAntwoord als JSON: {"tasks":[{"title":"Vloer woonkamer vervangen door pvc","kind":"vloeren","room":"Woonkamer","who":"vakman","estimate":1500,"days":2,"before_move":true,"why":"max 15 woorden: wat je op de foto ziet of leest"}]}` +
-    `\nMaximaal 10 klussen. "kind" is een van: ${RENO_KINDS}. "room" is exact een van de ruimtes hierboven, of "Hele huis". "who" is "zelf" of "vakman".`;
+    `\nMaximaal 10 klussen. "kind" is een van: ${RENO_KINDS}. "room" is exact een van de ruimtes hierboven, meerdere gescheiden door komma's (bijv. "Slaapkamer 1, Slaapkamer 2"), of "Hele huis". "who" is "zelf" of "vakman".`;
   type Answer = { tasks?: { title?: unknown; kind?: unknown; room?: unknown; who?: unknown; estimate?: unknown; days?: unknown; before_move?: unknown; why?: unknown }[] };
   const a = await ask<Answer>(`reno:${fingerprint(l?.url ?? "")}`, { prompt, images, maxTokens: 2000 }, "Verbouwplan", onProgress);
   return (a.tasks ?? [])
     .filter((t) => text(t.title))
     .slice(0, 10)
     .map((t) => {
-      const room = project.rooms.find((r) => r.name.toLowerCase() === text(t.room).toLowerCase());
       const kind = (Object.keys(KINDS) as RenoKind[]).includes(t.kind as RenoKind) ? (t.kind as RenoKind) : "overig";
       return {
         title: text(t.title, 90),
         kind,
-        roomId: room?.id,
+        roomIds: roomsNamed(project, text(t.room), text(t.title)),
         who: t.who === "zelf" ? "zelf" : "vakman",
         estimate: num(t.estimate),
         days: Math.min(30, num(t.days) ?? KINDS[kind].days),

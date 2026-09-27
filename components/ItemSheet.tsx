@@ -3,11 +3,11 @@
 import { useState } from "react";
 import { CATEGORIES } from "@/lib/categories";
 import { productThumb } from "@/lib/images";
-import { chooseAlternative, isPlaceholder, duplicateItem, moveItem, patchItem, removeItem } from "@/lib/items";
+import { chooseAlternative, isPlaceholder, duplicateItem, makeOptionOf, moveItem, patchItem, removeItem, rivalOf } from "@/lib/items";
 import { itemFromLink, priceChange, refreshPrice } from "@/lib/products";
 import { alternativesOf, euro, lineCost, STATUS } from "@/lib/shopping";
 import type { Category, Item } from "@/lib/types";
-import { ArrowSquareOut, ArrowsClockwise, Copy, Plus, Star, Trash } from "@phosphor-icons/react";
+import { ArrowSquareOut, ArrowsClockwise, Copy, Plus, Scales, Star, Trash } from "@phosphor-icons/react";
 import { useApp } from "./app";
 import { I, STATUS_ICON } from "./icons";
 import { Img } from "./Img";
@@ -21,6 +21,7 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
   const item = project.items.find((i) => i.id === id)!;
   const main = item.alternativeOf ? project.items.find((i) => i.id === item.alternativeOf) : undefined;
   const alts = alternativesOf(project.items, item.id);
+  const rival = rivalOf(project.items, item);
   const set = (patch: Partial<Item>) => update(patchItem(item.id, patch));
   const [busy, setBusy] = useState("");
   const [note, setNote] = useState("");
@@ -156,6 +157,23 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
       )}
 
       {isPlaceholder(item) && findCard}
+
+      {!main && rival && alts.length === 0 && (
+        <div className="card quiet row between wrap-row">
+          <span className="small">
+            Ook in deze kamer: <strong>{rival.title}</strong>. Twijfel je tussen deze twee? Maak er een optie van; alleen de gekozen telt dan mee.
+          </span>
+          <button
+            className="small soft"
+            onClick={() => {
+              update(makeOptionOf(item.id, rival.id));
+              toast(`Staat nu als optie naast ${rival.title}`);
+            }}
+          >
+            <I icon={Scales} /> Als optie
+          </button>
+        </div>
+      )}
 
       <div className="row top wrap-row" style={{ gap: 18 }}>
         {(item.image || item.thumb) && (

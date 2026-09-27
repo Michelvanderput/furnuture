@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { aiAdvice, aiStyle, type Advice, type StyleCheck } from "@/lib/ai";
+import { lastAnswer } from "@/lib/aiCache";
 import { ArrowLeft, CaretDown, CaretRight, Check, Compass, Hammer, Palette, PencilSimple, Plus, Sparkle, Star, Trash } from "@phosphor-icons/react";
 import { CATEGORIES } from "@/lib/categories";
 import { euroCents, FAL_COST } from "@/lib/fal";
@@ -209,9 +210,8 @@ function ItemWithAlternatives({ item }: { item: Item }) {
   );
 }
 
-/** The last answers per room, for this session: coming back to a room shows them again (asking again costs). */
-const lastAdvice = new Map<string, Advice>();
-const lastStyle = new Map<string, StyleCheck>();
+const lastAdvice = lastAnswer<Advice>("advice");
+const lastStyle = lastAnswer<StyleCheck>("style");
 
 /** ✨ What is missing, and does it go together? */
 function AiCard({ room }: { room: Room }) {

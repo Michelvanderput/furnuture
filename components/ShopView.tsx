@@ -4,7 +4,7 @@ import { useState } from "react";
 import { backupFileName, shareOrDownload } from "@/lib/backup";
 import { ArrowsClockwise, DownloadSimple, Package, Printer, ShareNetwork, ShoppingBag } from "@phosphor-icons/react";
 import { CATEGORIES } from "@/lib/categories";
-import { patchItem } from "@/lib/items";
+import { patchItem, patchItems } from "@/lib/items";
 import { refreshPrice } from "@/lib/products";
 import { byShop, euro, isBought, itemsIn, lineCost, mainItems, planCsv, planText, STATUS, totals } from "@/lib/shopping";
 import { useApp } from "./app";
@@ -136,7 +136,7 @@ export function ShopView() {
                     className="small soft no-print"
                     onClick={() => {
                       const before = project;
-                      update((p) => ({ ...p, items: p.items.map((i) => (open.some((o) => o.id === i.id) ? { ...i, status: "besteld" } : i)) }));
+                      update(patchItems(open.map((o) => o.id), { status: "besteld" }));
                       toast(`${open.length} items bij ${g.shop} besteld`, () => update(() => before));
                     }}
                   >

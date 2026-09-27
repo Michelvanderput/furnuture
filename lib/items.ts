@@ -8,6 +8,39 @@ export const patchItem = (id: string, patch: Partial<Item>) => (p: P): P => ({
   items: p.items.map((i) => (i.id === id ? withOrderDate(i, { ...i, ...patch }) : i)),
 });
 
+/**
+ * Another product on the list for the same thing: same room and kind, not an option
+ * yet. A second sofa in the living room is usually an alternative, not a second sofa.
+ */
+export function rivalOf(items: Item[], item: Item): Item | undefined {
+  if (item.alternativeOf || item.category === "overig" || item.category === "decoratie" || item.category === "planten" || item.category === "verlichting") return undefined;
+  const extra = /fauteuil|poef|hocker|bijzet|nacht|kinder|logeer/i;
+  return items.find(
+    (i) =>
+      i.id !== item.id &&
+      !i.alternativeOf &&
+      i.roomId === item.roomId &&
+      i.category === item.category &&
+      !isPlaceholder(i) &&
+      !extra.test(i.title) &&
+      !extra.test(item.title) &&
+      // Sofas and beds: any two in one room; other things when their names match ("eettafel" and "eettafel").
+      (item.category === "banken" || item.category === "bedden" || sharesName(i.suggestion ?? i.title, item.title) || sharesName(item.title, i.title)),
+  );
+}
+
+/** Makes an item an option for another (and its own options follow). */
+export const makeOptionOf = (id: string, mainId: string) => (p: P): P => ({
+  ...p,
+  items: p.items.map((i) => (i.id === id || i.alternativeOf === id ? { ...i, alternativeOf: mainId } : i)),
+});
+
+/** The same change for several items (e.g. everything from one shop ordered). */
+export const patchItems = (ids: string[], patch: Partial<Item>) => (p: P): P => ({
+  ...p,
+  items: p.items.map((i) => (ids.includes(i.id) ? withOrderDate(i, { ...i, ...patch }) : i)),
+});
+
 /** Ordering sets the order date (the delivery planning counts from it); going back to "idea" or "chosen" clears it. */
 function withOrderDate(before: Item, after: Item): Item {
   if (after.status === before.status) return after;

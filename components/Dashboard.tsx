@@ -76,7 +76,7 @@ export function Dashboard() {
       <PlanningCard />
 
       <div className="grid two" style={{ alignItems: "start" }}>
-        <div className="card stack" style={{ gap: 20 }}>
+        <div className="card stack budget-card" style={{ gap: 20 }}>
           <h2>Budget</h2>
           <div className="row wrap-row" style={{ gap: 24 }}>
             <Ring pct={pct} over={!!budget && t.planned > budget}>
@@ -225,12 +225,22 @@ export function Dashboard() {
   );
 }
 
+/** Scrolls to a field on the page and puts the cursor in it. */
+function jumpTo(selector: string) {
+  const el = document.querySelector<HTMLElement>(selector);
+  if (!el) return;
+  el.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+  if (el instanceof HTMLInputElement) setTimeout(() => el.focus({ preventScroll: true }), 400);
+}
+
 /** A short to-do for a fresh project; disappears when everything is done. */
 function NextSteps({ project }: { project: Project }) {
   const { openAdd, fal } = useApp();
+  const r = renovationOf(project);
   const steps = [
     { done: roomsRecognised(project.rooms), label: "Kamers controleren", hint: fal ? "laat de AI ze herkennen" : "namen, m² en foto's", href: "#/woning" },
-    { done: project.budget !== undefined, label: "Budget instellen", hint: "hieronder" },
+    { done: !!(r.keyDate && r.moveDate), label: "Sleutel en verhuisdag", hint: "voor de planning", action: () => jumpTo(".planning .countdowns") },
+    { done: project.budget !== undefined, label: "Budget instellen", hint: "voor de inrichting", action: () => jumpTo(".budget-card input") },
     { done: project.items.length > 0, label: "Eerste product toevoegen", hint: "plak een webshoplink", action: () => openAdd({ roomId: project.rooms[0]?.id ?? null }) },
     { done: project.items.some((i) => i.status !== "idee"), label: "Iets kiezen of bestellen", hint: "tik op de status" },
   ];

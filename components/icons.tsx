@@ -65,7 +65,7 @@ export const ROOM_ICON: Record<RoomType, Icon> = {
   tuin: Tree,
   buitenkant: House,
   plattegrond: MapTrifold,
-  overig: Sparkle,
+  overig: Package,
 };
 
 export const CATEGORY_ICON: Record<Category, Icon> = {

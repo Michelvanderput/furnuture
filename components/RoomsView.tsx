@@ -14,7 +14,7 @@ import { Img } from "./Img";
 import { ItemRow } from "./ItemRow";
 import { BudgetBar } from "./ui";
 
-export function RoomCard({ room }: { room: Room }) {
+export function RoomCard({ room, hideFloor }: { room: Room; hideFloor?: boolean }) {
   const { project } = useApp();
   const t = totals(itemsIn(project.items, room.id));
   const photo = roomPhotos(project.listing, room.id)[0];
@@ -29,12 +29,8 @@ export function RoomCard({ room }: { room: Room }) {
             <RoomIcon type={room.type} size={40} />
           </span>
         )}
-        {(room.area || room.floor) && (
-          <span className="badge">
-            {room.area ? `${room.area} m²` : ""}
-            {room.area && room.floor ? " · " : ""}
-            {room.floor ?? ""}
-          </span>
+        {(room.area || (room.floor && !hideFloor)) && (
+          <span className="badge">{[room.area ? `${room.area} m²` : "", hideFloor ? "" : room.floor].filter(Boolean).join(" · ")}</span>
         )}
       </div>
       <div className="body">
@@ -135,7 +131,7 @@ export function RoomsView() {
               {project.rooms
                 .filter((r) => (r.floor ?? "") === f)
                 .map((r) => (
-                  <RoomCard key={r.id} room={r} />
+                  <RoomCard key={r.id} room={r} hideFloor />
                 ))}
             </div>
           </div>

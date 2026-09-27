@@ -5,7 +5,7 @@ import { aiScreenshot } from "@/lib/ai";
 import { CATEGORIES, guessCategory } from "@/lib/categories";
 import { euroCents, FAL_COST } from "@/lib/fal";
 import { fileToDataUrl, firstWorkingThumb } from "@/lib/images";
-import { addItems, addOrFill, patchItem } from "@/lib/items";
+import { addItems, addOrFill, makeOptionOf, patchItem, rivalOf } from "@/lib/items";
 import { itemFromLink, sameLink } from "@/lib/products";
 import { newId } from "@/lib/rooms";
 import { extractLinks, shortName } from "@/lib/shopping";
@@ -14,11 +14,24 @@ import { Camera, LinkSimple, PencilSimple } from "@phosphor-icons/react";
 import { useApp } from "./app";
 import { I } from "./icons";
 import { PasteButton } from "./PasteButton";
-import { EuroInput, Sheet } from "./ui";
+import { EuroInput, Sheet, type ToastAction } from "./ui";
+
+/** "Als optie": the new product goes next to the one it competes with (only the chosen one counts). */
+function useOptionAction() {
+  const { update, toast } = useApp();
+  return (id: string, rival: Item): ToastAction => ({
+    label: "Als optie",
+    run: () => {
+      update(makeOptionOf(id, rival.id));
+      toast(`Staat nu als optie naast ${shortName(rival.title, 28)}`);
+    },
+  });
+}
 
 type Mode = "link" | "screenshot" | "zelf";
 
 export function AddSheet({ roomId: initialRoom, alternativeOf, links: initialLinks, onClose }: { roomId?: string | null; alternativeOf?: string; links?: string[]; onClose: () => void }) {
+  const optionAction = useOptionAction();
   const { project, update, toast, fal } = useApp();
   const main = alternativeOf ? project.items.find((i) => i.id === alternativeOf) : undefined;
   const [roomId, setRoomId] = useState<string | null>(main?.roomId ?? initialRoom ?? null);
@@ -70,7 +83,9 @@ export function AddSheet({ roomId: initialRoom, alternativeOf, links: initialLin
           : added.length === 1
             ? `${shortName(added[0].title, 40)} toegevoegd`
             : `${added.length} producten toegevoegd${replaced.length ? `, ${replaced.length} op de plek van een "nog te vinden"` : ""}`;
-      toast(text, () => update(() => before));
+      // One new product next to one for the same thing: offer to make it an option (only the chosen one counts).
+      const rival = fresh.length === 1 && !replaced.length && !alternativeOf ? rivalOf(project.items, fresh[0]) : undefined;
+      toast(rival ? `${shortName(fresh[0].title, 28)} toegevoegd. Optie naast ${shortName(rival.title, 24)}?` : text, () => update(() => before), rival ? optionAction(fresh[0].id, rival) : undefined);
     }
     if (failed.length) setErrors(failed);
     else onClose();
@@ -172,6 +187,7 @@ export function AddSheet({ roomId: initialRoom, alternativeOf, links: initialLin
 
 /** ✨ A screenshot of a product page (when a shop blocks reading it, or from Instagram or a store): the AI reads it. */
 function FromScreenshot({ roomId, alternativeOf, onDone }: { roomId: string | null; alternativeOf?: string; onDone: () => void }) {
+  const optionAction = useOptionAction();
   const { project, update, toast, fal } = useApp();
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -208,7 +224,12 @@ function FromScreenshot({ roomId, alternativeOf, onDone }: { roomId: string | nu
       apply(project);
       const taken = replaced[0]?.placeholder.title;
       update(apply);
-      toast(taken ? `${shortName(p.title)} vervangt "${shortName(taken, 24)}"` : `${shortName(p.title, 40)} toegevoegd`, () => update(() => before));
+      const rival = !taken && !alternativeOf ? rivalOf(project.items, item) : undefined;
+      toast(
+        taken ? `${shortName(p.title)} vervangt "${shortName(taken, 24)}"` : rival ? `${shortName(p.title, 28)} toegevoegd. Optie naast ${shortName(rival.title, 24)}?` : `${shortName(p.title, 40)} toegevoegd`,
+        () => update(() => before),
+        rival ? optionAction(item.id, rival) : undefined,
+      );
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

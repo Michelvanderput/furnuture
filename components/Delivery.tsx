@@ -391,7 +391,10 @@ function PlanTimeline() {
       </div>
       <div className="plan-legend tiny muted">
         <span>
-          <i className="lg bar" /> klus
+          <i className="lg bar todo" /> klus, nog regelen
+        </span>
+        <span>
+          <i className="lg bar" /> klus gepland
         </span>
         <span>
           <i className="lg dot" /> levering

@@ -3,6 +3,7 @@
 import { CalendarCheck, Check, Coins, Key, MagicWand, Plus, ShareNetwork, Sparkle, Truck, Warning, Wrench } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import { aiRenovationPlan, type RenoProposal } from "@/lib/ai";
+import { lastAnswer } from "@/lib/aiCache";
 import { euroCents, FAL_COST } from "@/lib/fal";
 import { newId } from "@/lib/rooms";
 import {
@@ -306,7 +307,7 @@ function Suggestions({ project, roomId, compact }: { project: Project; roomId?: 
 }
 export { Suggestions as RenoSuggestions };
 
-const lastPlan = new Map<string, RenoProposal[]>();
+const lastPlan = lastAnswer<RenoProposal[]>("reno-plan");
 
 /** ✨ The AI looks at the photos, the description, build year and energy label. */
 function AiPlan() {
@@ -318,14 +319,14 @@ function AiPlan() {
   const tasks = renovationOf(project).tasks;
   const titles = new Set(tasks.map((x) => x.title.toLowerCase()));
   // Already on the list: the same title, or a job of the same kind in the same room.
-  const have = { has: (title: string, p?: RenoProposal) => titles.has(title.toLowerCase()) || (!!p && !!similarTask(tasks, p.kind, p.roomId)) };
+  const have = { has: (title: string, p?: RenoProposal) => titles.has(title.toLowerCase()) || (!!p && !!similarTask(tasks, p.kind, p.roomIds?.[0])) };
   if (!fal || !project.listing) return null;
 
   const toTask = (p: RenoProposal): Task => ({
     id: newId(),
     title: p.title,
     kind: p.kind,
-    roomIds: p.roomId ? [p.roomId] : [],
+    roomIds: p.roomIds ?? [],
     who: p.who,
     status: "idee",
     estimate: p.estimate,
@@ -394,7 +395,7 @@ function AiPlan() {
                 <div className="grow stack tight">
                   <strong className="small">{p.title}</strong>
                   <span className="tiny muted">
-                    {p.roomId ? project.rooms.find((r) => r.id === p.roomId)?.name : "Hele huis"} · {p.who} {p.estimate ? `· ± ${euro(p.estimate)}` : ""} · {p.why}
+                    {p.roomIds?.length ? p.roomIds.map((id) => project.rooms.find((r) => r.id === id)?.name).filter(Boolean).join(", ") : "Hele huis"} · {p.who} {p.estimate ? `· ± ${euro(p.estimate)}` : ""} · {p.why}
                   </span>
                 </div>
                 <button className="small soft" disabled={added} onClick={() => update(addTasks([toTask(p)]))} aria-label={added ? `${p.title} staat op de lijst` : `${p.title} op de lijst zetten`}>

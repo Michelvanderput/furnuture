@@ -3,6 +3,7 @@
 import { createContext, useContext } from "react";
 import type { HouseRef } from "@/lib/houses";
 import type { Project } from "@/lib/types";
+import type { ToastAction } from "./ui";
 import type { SyncState } from "@/lib/useProject";
 
 export interface App {
@@ -20,7 +21,7 @@ export interface App {
   openAdd: (opts?: { roomId?: string | null; alternativeOf?: string; links?: string[] }) => void;
   /** Opens a renovation job. */
   openTask: (id: string) => void;
-  toast: (text: string, undo?: () => void) => void;
+  toast: (text: string, undo?: () => void, action?: ToastAction) => void;
   /** fal.ai is set up: the ✨ features are available. */
   fal: boolean;
 }
