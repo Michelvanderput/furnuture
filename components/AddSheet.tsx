@@ -5,7 +5,7 @@ import { aiScreenshot } from "@/lib/ai";
 import { CATEGORIES, guessCategory } from "@/lib/categories";
 import { euroCents, FAL_COST } from "@/lib/fal";
 import { fileToDataUrl, firstWorkingThumb } from "@/lib/images";
-import { addItems, patchItem } from "@/lib/items";
+import { addItems, addOrFill, patchItem } from "@/lib/items";
 import { itemFromLink, sameLink } from "@/lib/products";
 import { newId } from "@/lib/rooms";
 import { extractLinks } from "@/lib/shopping";
@@ -50,30 +50,11 @@ export function AddSheet({ roomId: initialRoom, alternativeOf, links: initialLin
     if (added.length) {
       const before = project;
       // A product for something still to find ("Bank (3-zits)", ± € 800) takes its place instead of standing next to it.
-      const taken = new Set<string>();
-      const replaced: { item: Item; placeholder: Item }[] = [];
-      const fresh: Item[] = [];
-      for (const it of added) {
-        const matches = alternativeOf
-          ? []
-          : project.items.filter((p) => p.roomId === it.roomId && !p.url && !p.alternativeOf && p.category === it.category && it.category !== "overig" && !taken.has(p.id));
-        if (matches.length === 1) {
-          taken.add(matches[0].id);
-          replaced.push({ item: it, placeholder: matches[0] });
-        } else fresh.push(it);
-      }
-      update((p) => ({
-        ...p,
-        items: [
-          ...p.items.map((x) => {
-            const r = replaced.find((y) => y.placeholder.id === x.id);
-            if (!r) return x;
-            // The product's data, with the placeholder's place: room, quantity, must-have, note, where it came from.
-            return { ...r.item, id: x.id, roomId: x.roomId, qty: x.qty, must: x.must, note: x.note, suggestion: x.suggestion ?? x.title, why: x.why, estimate: x.estimate, status: x.status === "idee" ? "gekozen" : x.status };
-          }),
-          ...fresh,
-        ],
-      }));
+      const { apply, replaced: planned } = addOrFill(added);
+      apply(project); // what will be replaced, for the message; applied to the latest state below
+      const replaced = planned.map((r) => ({ item: r.product, placeholder: r.placeholder }));
+      const fresh = added.filter((a) => !replaced.some((r) => r.item.id === a.id));
+      update(apply);
       // Thumbnails in the background: instant list, and the photo survives an expiring shop link.
       for (const it of [...fresh, ...replaced.map((r) => ({ ...r.item, id: r.placeholder.id }))]) {
         const urls = [it.image, ...it.images].filter((u): u is string => !!u);
@@ -187,7 +168,7 @@ export function AddSheet({ roomId: initialRoom, alternativeOf, links: initialLin
 
 /** ✨ A screenshot of a product page (when a shop blocks reading it, or from Instagram or a store): the AI reads it. */
 function FromScreenshot({ roomId, alternativeOf, onDone }: { roomId: string | null; alternativeOf?: string; onDone: () => void }) {
-  const { update, toast, fal } = useApp();
+  const { project, update, toast, fal } = useApp();
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [over, setOver] = useState(false);
@@ -218,8 +199,12 @@ function FromScreenshot({ roomId, alternativeOf, onDone }: { roomId: string | nu
         source: "screenshot",
         alternativeOf,
       };
-      update(addItems([item]));
-      toast(`${p.title.slice(0, 50)} toegevoegd`);
+      const before = project;
+      const { apply, replaced } = addOrFill([item]);
+      apply(project);
+      const taken = replaced[0]?.placeholder.title;
+      update(apply);
+      toast(taken ? `${p.title.slice(0, 40)} vervangt "${taken.slice(0, 30)}"` : `${p.title.slice(0, 50)} toegevoegd`, () => update(() => before));
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

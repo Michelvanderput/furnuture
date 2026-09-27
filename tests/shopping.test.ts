@@ -79,3 +79,26 @@ describe("export", () => {
     expect(csv).toContain('"Lamp ""Bol"""');
   });
 });
+
+describe("a product takes the place of what was still to find", () => {
+  it("fills the one matching placeholder in the room, keeping its quantity and must-have", async () => {
+    const { addOrFill } = await import("@/lib/items");
+    const p: Project = {
+      listing: null,
+      rooms: [],
+      items: [
+        item({ id: "ph", title: "Bank (3-zits)", estimate: 800, must: true, qty: 1 }),
+        item({ id: "st", title: "Stoelen", category: "stoelen", estimate: 75, qty: 4 }),
+        item({ id: "st2", title: "Barkrukken", category: "stoelen", estimate: 60, qty: 2 }),
+      ],
+    };
+    const sofa = item({ id: "new", title: "EKTORP", url: "https://ikea.com/e", price: 699, shop: "IKEA" });
+    const chair = item({ id: "new2", title: "LISABO", category: "stoelen", url: "https://ikea.com/l", price: 50 });
+    const { apply, replaced } = addOrFill([sofa, chair]);
+    const next = apply(p);
+    expect(replaced.map((r) => r.placeholder.id)).toEqual(["ph"]); // two chair placeholders: not guessed
+    const filled = next.items.find((i) => i.id === "ph")!;
+    expect(filled).toMatchObject({ title: "EKTORP", price: 699, must: true, status: "gekozen", suggestion: "Bank (3-zits)" });
+    expect(next.items.map((i) => i.id)).toEqual(["ph", "st", "st2", "new2"]);
+  });
+});

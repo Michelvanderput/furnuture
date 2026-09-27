@@ -74,3 +74,56 @@ export const moveRoom = (id: string, dir: -1 | 1) => (p: P): P => {
   [rooms[i], rooms[j]] = [rooms[j], rooms[i]];
   return { ...p, rooms };
 };
+
+/** Something still to find: no product link and no shop price, only (maybe) an estimate. */
+export const isPlaceholder = (i: Item) => !i.url && i.price === undefined;
+
+/** The one "still to find" item a new product of the same kind in the same room takes the place of, if there is exactly one. */
+export function placeholderFor(items: Item[], product: Item, taken: Set<string> = new Set()): Item | undefined {
+  if (product.alternativeOf || product.category === "overig") return undefined;
+  const matches = items.filter((p) => p.roomId === product.roomId && isPlaceholder(p) && !p.alternativeOf && p.category === product.category && !taken.has(p.id) && p.id !== product.id);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+/** The product's data in the placeholder's place: its room, quantity, must-have, note and where it came from stay. */
+export const fillPlaceholder = (placeholder: Item, product: Item): Item => ({
+  ...product,
+  id: placeholder.id,
+  roomId: placeholder.roomId,
+  qty: placeholder.qty,
+  must: placeholder.must,
+  note: placeholder.note || product.note,
+  suggestion: placeholder.suggestion ?? placeholder.title,
+  why: placeholder.why ?? product.why,
+  estimate: placeholder.estimate,
+  status: placeholder.status === "idee" ? "gekozen" : placeholder.status,
+  addedAt: placeholder.addedAt,
+});
+
+/** Adds products; each takes the place of the one matching placeholder in its room, if any. Returns what was replaced. */
+export function addOrFill(products: Item[]) {
+  const replaced: { product: Item; placeholder: Item }[] = [];
+  const apply = (p: Project): Project => {
+    const taken = new Set<string>();
+    const fresh: Item[] = [];
+    replaced.length = 0;
+    for (const it of products) {
+      const ph = placeholderFor(p.items, it, taken);
+      if (ph) {
+        taken.add(ph.id);
+        replaced.push({ product: it, placeholder: ph });
+      } else fresh.push(it);
+    }
+    return {
+      ...p,
+      items: [
+        ...p.items.map((x) => {
+          const r = replaced.find((y) => y.placeholder.id === x.id);
+          return r ? fillPlaceholder(x, r.product) : x;
+        }),
+        ...fresh,
+      ],
+    };
+  };
+  return { apply, replaced };
+}

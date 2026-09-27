@@ -238,7 +238,8 @@ export interface ScreenshotProduct {
 
 export async function aiScreenshot(image: string, onProgress?: Progress): Promise<ScreenshotProduct> {
   const prompt =
-    "Dit is een screenshot of foto van een product (meestal een webshoppagina). Lees af wat het is." +
+    "Dit is een screenshot of foto van een product (meestal een webshoppagina). Lees af wat het is. " +
+    "Staat er niet duidelijk één product op (een overzichts- of categoriepagina, een zoekresultaat, een foto zonder product), geef dan title: null." +
     `\nAntwoord als JSON: {"title":"productnaam zoals de winkel hem noemt","price":199.95,"shop":"IKEA","category":"banken","dims":{"w":200,"d":90,"h":80},"url":"https://… als zichtbaar in de adresbalk, anders null"}` +
     `\nPrijs als getal in euro (de huidige prijs, niet de doorgestreepte). Maten in cm (breedte, diepte, hoogte) als ze erop staan, anders null. "category" is een van: ${CATS}.`;
   type Answer = { title?: unknown; price?: unknown; shop?: unknown; category?: unknown; dims?: { w?: unknown; d?: unknown; h?: unknown }; url?: unknown };
@@ -280,7 +281,7 @@ export async function aiAlternatives(item: Item, project?: Project, onProgress?:
   const dims = item.dims?.w ? ` Maten: ${[item.dims.w, item.dims.d, item.dims.h].filter(Boolean).join(" × ")} cm.` : "";
   const room = project?.rooms.find((r) => r.id === item.roomId);
   const context = `${room ? ` Voor de ${room.name.toLowerCase()}${room.area ? ` (${room.area} m²)` : ""}.` : ""}${project?.style ? ` Stijl: ${project.style}.` : ""}`;
-  const prompt = item.url
+  const prompt = item.url || item.price !== undefined
     ? `Product: "${item.title}"${item.shop ? ` van ${item.shop}` : ""}${each ? `, € ${each}` : ""} (${categoryLabel(item.category)}).${dims}${context}` +
       "\nZoek op internet 5 vergelijkbare producten die nu te koop zijn bij Nederlandse webshops: zelfde soort, vergelijkbare maat en stijl, bij voorkeur goedkoper, of duidelijk beter voor weinig meer."
     : `Gezocht: "${item.title}" (${categoryLabel(item.category)})${each ? `, budget rond € ${each} per stuk` : ""}.${dims}${context}` +

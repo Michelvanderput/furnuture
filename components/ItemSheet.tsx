@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { CATEGORIES } from "@/lib/categories";
 import { productThumb } from "@/lib/images";
-import { chooseAlternative, duplicateItem, moveItem, patchItem, removeItem } from "@/lib/items";
+import { chooseAlternative, isPlaceholder, duplicateItem, moveItem, patchItem, removeItem } from "@/lib/items";
 import { itemFromLink, priceChange, refreshPrice } from "@/lib/products";
 import { alternativesOf, euro, lineCost, STATUS } from "@/lib/shopping";
 import type { Category, Item } from "@/lib/types";
@@ -151,7 +151,7 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
         </div>
       )}
 
-      {!item.url && findCard}
+      {isPlaceholder(item) && findCard}
 
       <div className="row top wrap-row" style={{ gap: 18 }}>
         {(item.image || item.thumb) && (
@@ -339,7 +339,7 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
               </table>
             </div>
           )}
-          {item.url && <ProductFinder item={item} />}
+          {!isPlaceholder(item) && <ProductFinder item={item} />}
         </div>
       )}
     </Sheet>

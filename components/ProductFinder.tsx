@@ -5,7 +5,7 @@ import { useState } from "react";
 import { aiAlternatives } from "@/lib/ai";
 import { euroCents, FAL_COST } from "@/lib/fal";
 import { productThumb } from "@/lib/images";
-import { addItems, patchItem } from "@/lib/items";
+import { addItems, isPlaceholder, patchItem } from "@/lib/items";
 import { verifyFound, type Found } from "@/lib/products";
 import { newId } from "@/lib/rooms";
 import { euro, lineCost } from "@/lib/shopping";
@@ -29,7 +29,7 @@ export function ProductFinder({ item }: { item: Item }) {
   const setFound = (list: Found[] | null) => (list ? lastFound.set(item.id, list) : lastFound.delete(item.id), setFoundState(list));
   const [error, setError] = useState("");
   const [added, setAdded] = useState<Set<string>>(new Set());
-  const placeholder = !item.url;
+  const placeholder = isPlaceholder(item);
   const current = lineCost(item).known ? lineCost(item).value / item.qty : undefined;
 
   if (!fal) return null;

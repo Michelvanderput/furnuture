@@ -71,7 +71,7 @@ export function ItemRow({ item, alternatives = 0, showRoom, alt, check }: { item
         <span className="title">{item.title}</span>
         <span className="meta">
           {item.shop && <span>{item.shop}</span>}
-          {!item.url && item.estimate !== undefined && <span className="chip estimate">nog kiezen</span>}
+          {!item.url && item.price === undefined && <span className="chip estimate">nog kiezen</span>}
           {room && <span className="chip">{room.name}</span>}
           {!showRoom && !item.shop && <span>{categoryLabel(item.category)}</span>}
           {item.must && (
