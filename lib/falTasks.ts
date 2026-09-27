@@ -89,7 +89,7 @@ function photoForFal(photoUrl: string, side = 1024) {
 }
 
 /**
- * Tap-to-select with SAM 2 on fal: points (fractions of the photo; positive = the
+ * Tap-to-select with SAM 3 on fal: points (fractions of the photo; positive = the
  * object) and an optional box. Returns a mask of outW×outH, or throws when the answer
  * does not look like a selection of the tapped object (the caller then selects here).
  */
@@ -102,19 +102,24 @@ export async function falSelect(
   box?: [number, number, number, number],
 ): Promise<Uint8Array> {
   const photo = await photoForFal(photoUrl);
-  const out = await falRun(
-    "fal-ai/sam2/image",
+  // SAM 3: a tap on a sofa's seat gives the whole sofa (SAM 2 gave single cushions). An empty
+  // text prompt, or it looks for its default ("wheel") and finds nothing.
+  const out = await falRun<{ masks?: { url?: string }[]; image?: { url?: string } }>(
+    "fal-ai/sam-3/image",
     {
       image_url: photo.url,
-      prompts: points.map((p) => ({ x: Math.round(p.at[0] * photo.w), y: Math.round(p.at[1] * photo.h), label: p.positive ? 1 : 0 })),
-      ...(box ? { box_prompts: [{ x_min: box[0] * photo.w, y_min: box[1] * photo.h, x_max: box[2] * photo.w, y_max: box[3] * photo.h }] } : {}),
+      prompt: "",
+      point_prompts: points.map((p) => ({ x: Math.round(p.at[0] * photo.w), y: Math.round(p.at[1] * photo.h), label: p.positive ? 1 : 0, object_id: 1 })),
+      box_prompts: box ? [{ x_min: Math.round(box[0] * photo.w), y_min: Math.round(box[1] * photo.h), x_max: Math.round(box[2] * photo.w), y_max: Math.round(box[3] * photo.h), object_id: 1 }] : [],
       apply_mask: false,
       output_format: "png",
     },
     onProgress,
     "Selecteren (fal)",
   );
-  const img = await loadResult(firstImage(out));
+  const maskUrl = out.masks?.[0]?.url ?? out.image?.url;
+  if (!maskUrl) throw new Error("fal vond niets op die plek");
+  const img = await loadResult(maskUrl);
   const c = document.createElement("canvas");
   c.width = outW;
   c.height = outH;

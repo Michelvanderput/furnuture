@@ -54,7 +54,6 @@ export class FalError extends Error {}
 export const MODEL_COST: Record<string, number> = {
   "fal-ai/object-removal/mask": 0.024,
   "fal-ai/bria/eraser": 0.04,
-  "fal-ai/sam2/image": 0.002,
   "fal-ai/sam-3/image": 0.005,
   "fal-ai/birefnet/v2": 0.01,
   "openrouter/router/vision": 0.005,
@@ -63,7 +62,7 @@ export const MODEL_COST: Record<string, number> = {
 /** Rough cost per job (USD), shown next to the buttons. */
 export const FAL_COST = {
   erase: MODEL_COST["fal-ai/object-removal/mask"],
-  select: MODEL_COST["fal-ai/sam2/image"],
+  select: MODEL_COST["fal-ai/sam-3/image"],
   cutout: MODEL_COST["fal-ai/birefnet/v2"],
   suggest: MODEL_COST["openrouter/router/vision"],
   render: MODEL_COST["fal-ai/nano-banana-2/edit"],

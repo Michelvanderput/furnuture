@@ -46,7 +46,7 @@ Met een sleutel van [fal.ai](https://fal.ai) doet de app het zware werk met de b
 | Taak | Model | Kosten (ongeveer) |
 |---|---|---|
 | Weggummen | `fal-ai/object-removal` (terugval: Bria Eraser) | 1–4 cent per keer |
-| Selecteren (tik op een meubel) | SAM 2 | gratis / < 1 cent |
+| Selecteren (tik op een meubel) | SAM 3 | < 1 cent |
 | Meubel uitknippen | BiRefNet v2 (2048 px) | ± 1 cent |
 | 📍 Beste plekken voor een meubel | Gemini 2.5 Flash (vision) | < 1 cent |
 | ✨ Vloer & muren echt | Nano Banana 2 (2K) | ± 11 cent |

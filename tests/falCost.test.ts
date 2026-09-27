@@ -35,7 +35,7 @@ describe("fal costs", () => {
 
   it("sends the same job at the same time only once", async () => {
     const fal = await import("@/lib/fal");
-    await Promise.all([fal.falRun("fal-ai/sam2/image", { p: 1 }), fal.falRun("fal-ai/sam2/image", { p: 1 })]);
+    await Promise.all([fal.falRun("fal-ai/sam-3/image", { p: 1 }), fal.falRun("fal-ai/sam-3/image", { p: 1 })]);
     expect(submits).toBe(1);
   });
 
@@ -50,8 +50,8 @@ describe("fal costs", () => {
   it("stops asking fal when the credit is gone", async () => {
     const fal = await import("@/lib/fal");
     reply = () => new Response(JSON.stringify({ error: "fal 403: User is locked. Reason: Exhausted balance." }), { status: 502 });
-    await expect(fal.falRun("fal-ai/sam2/image", { p: 1 })).rejects.toThrow(/tegoed op/);
-    await expect(fal.falRun("fal-ai/sam2/image", { p: 2 })).rejects.toThrow(/tegoed op/);
+    await expect(fal.falRun("fal-ai/sam-3/image", { p: 1 })).rejects.toThrow(/tegoed op/);
+    await expect(fal.falRun("fal-ai/sam-3/image", { p: 2 })).rejects.toThrow(/tegoed op/);
     expect(submits).toBe(1);
     expect(fal.falStopped()).toMatch(/tegoed/);
   });
