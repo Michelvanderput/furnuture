@@ -14,6 +14,7 @@ import {
   renovationOf,
   renovationText,
   renoTotals,
+  similarTask,
   suggestions,
   taskEnd,
   taskFromSuggestion,
@@ -314,7 +315,10 @@ function AiPlan() {
   const [plan, setPlanState] = useState<RenoProposal[] | null>(() => lastPlan.get(key) ?? null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const have = new Set(renovationOf(project).tasks.map((x) => x.title.toLowerCase()));
+  const tasks = renovationOf(project).tasks;
+  const titles = new Set(tasks.map((x) => x.title.toLowerCase()));
+  // Already on the list: the same title, or a job of the same kind in the same room.
+  const have = { has: (title: string, p?: RenoProposal) => titles.has(title.toLowerCase()) || (!!p && !!similarTask(tasks, p.kind, p.roomId)) };
   if (!fal || !project.listing) return null;
 
   const toTask = (p: RenoProposal): Task => ({
@@ -348,7 +352,7 @@ function AiPlan() {
     }
   }
 
-  const open = plan?.filter((p) => !have.has(p.title.toLowerCase())) ?? [];
+  const open = plan?.filter((p) => !have.has(p.title, p)) ?? [];
   return (
     <div className="card ai-card stack">
       <div className="card-head">
@@ -381,7 +385,7 @@ function AiPlan() {
       {plan && (
         <div className="stack tight">
           {plan.map((p) => {
-            const added = have.has(p.title.toLowerCase());
+            const added = have.has(p.title, p);
             return (
               <div className="suggestion" key={p.title}>
                 <span className="icon-badge">

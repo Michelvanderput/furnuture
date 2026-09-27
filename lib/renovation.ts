@@ -122,8 +122,17 @@ export function suggestions(p: Project, roomId?: string): Suggestion[] {
   const rooms = roomId ? p.rooms.filter((r) => r.id === roomId) : p.rooms;
   for (const r of rooms) out.push(...roomSuggestions(r));
   if (!roomId) out.push(...houseSuggestions(p));
-  const have = new Set(renovationOf(p).tasks.map((t) => keyOf(t.title, t.roomIds[0])));
-  return out.filter((s) => !have.has(keyOf(s.title, s.roomId)));
+  const tasks = renovationOf(p).tasks;
+  const have = new Set(tasks.map((t) => keyOf(t.title, t.roomIds[0])));
+  return out
+    .filter((s) => !have.has(keyOf(s.title, s.roomId)) && !similarTask(tasks, s.kind, s.roomId))
+    // The whole house first (safety, insulation), then in the order the work is done.
+    .sort((a, b) => Number(!!a.roomId) - Number(!!b.roomId) || KINDS[a.kind].phase - KINDS[b.kind].phase);
+}
+
+/** A job of this kind in this room (or for the whole house) is already on the list. */
+export function similarTask(tasks: Task[], kind: RenoKind, roomId?: string): Task | undefined {
+  return tasks.find((t) => t.kind === kind && (roomId ? t.roomIds.includes(roomId) : t.roomIds.length === 0) && kind !== "overig");
 }
 const keyOf = (title: string, roomId?: string) => `${roomId ?? "huis"}:${title.toLowerCase()}`;
 
