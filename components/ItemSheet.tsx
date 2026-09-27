@@ -5,7 +5,7 @@ import { CATEGORIES } from "@/lib/categories";
 import { productThumb } from "@/lib/images";
 import { chooseAlternative, isPlaceholder, duplicateItem, makeOptionOf, moveItem, patchItem, removeItem, rivalOf } from "@/lib/items";
 import { itemFromLink, priceChange, refreshPrice } from "@/lib/products";
-import { alternativesOf, euro, lineCost, STATUS } from "@/lib/shopping";
+import { alternativesOf, euro, lineCost, shortName, STATUS } from "@/lib/shopping";
 import type { Category, Item } from "@/lib/types";
 import { ArrowSquareOut, ArrowsClockwise, Copy, Plus, Scales, Star, Trash } from "@phosphor-icons/react";
 import { useApp } from "./app";
@@ -167,7 +167,7 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
             className="small soft"
             onClick={() => {
               update(makeOptionOf(item.id, rival.id));
-              toast(`Staat nu als optie naast ${rival.title}`);
+              toast(`Staat nu als optie naast ${shortName(rival.title, 28)}`);
             }}
           >
             <I icon={Scales} /> Als optie
