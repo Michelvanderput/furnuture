@@ -3,21 +3,6 @@ import type { Listing, Photo, Room, RoomType } from "./types";
 
 export const newId = () => Math.random().toString(36).slice(2, 10);
 
-export const ROOM_EMOJI: Record<RoomType, string> = {
-  woonkamer: "🛋️",
-  keuken: "🍳",
-  slaapkamer: "🛏️",
-  badkamer: "🛁",
-  toilet: "🚽",
-  hal: "🚪",
-  werkkamer: "💻",
-  zolder: "📦",
-  tuin: "🌿",
-  buitenkant: "🏡",
-  plattegrond: "🗺️",
-  overig: "✨",
-};
-
 /** Room types you can furnish (not the facade or the floor plan). */
 export const FURNISHABLE: RoomType[] = ["woonkamer", "keuken", "slaapkamer", "badkamer", "toilet", "hal", "werkkamer", "zolder", "tuin", "overig"];
 

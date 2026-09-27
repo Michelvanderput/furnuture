@@ -27,7 +27,7 @@ export function FalSetting() {
   return (
     <div className="stack small">
       <span>
-        ✨ fal.ai{" "}
+        <strong>AI (fal.ai)</strong>{" "}
         {ready ? (
           <strong>actief</strong>
         ) : stopped ? (

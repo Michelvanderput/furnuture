@@ -2,11 +2,13 @@
 
 import { useState } from "react";
 import { backupFileName, shareOrDownload } from "@/lib/backup";
-import { CATEGORIES, CATEGORY_EMOJI } from "@/lib/categories";
+import { ArrowsClockwise, DownloadSimple, Package, Printer, ShareNetwork, ShoppingBag } from "@phosphor-icons/react";
+import { CATEGORIES } from "@/lib/categories";
 import { patchItem } from "@/lib/items";
 import { refreshPrice } from "@/lib/products";
 import { byShop, euro, isBought, itemsIn, lineCost, mainItems, planCsv, planText, STATUS, totals } from "@/lib/shopping";
 import { useApp } from "./app";
+import { CategoryIcon, I, STATUS_ICON } from "./icons";
 import { ItemRow } from "./ItemRow";
 import { ShopLogo } from "./ui";
 
@@ -37,7 +39,7 @@ export function ShopView() {
       }
     }
     setChecking("");
-    toast(changed ? `${changed} prijs${changed > 1 ? "zen" : ""} veranderd${cheaper ? `, ${cheaper}× goedkoper 🎉` : ""}` : "Alle prijzen zijn gelijk gebleven");
+    toast(changed ? `${changed} prijs${changed > 1 ? "zen" : ""} veranderd${cheaper ? `, ${cheaper}× goedkoper` : ""}` : "Alle prijzen zijn gelijk gebleven");
   }
 
   async function share() {
@@ -56,10 +58,10 @@ export function ShopView() {
 
   return (
     <section className="page">
-      <div className="section-head">
-        <div className="stack tight">
+      <div className="page-head">
+        <div>
           <h1>Winkelen</h1>
-          <p className="muted small">
+          <p className="lead">
             {euro(t.planned - t.spent)} nog te kopen · {euro(t.spent)} besteld of in huis
           </p>
         </div>
@@ -70,12 +72,20 @@ export function ShopView() {
                 <span className="spinner" /> {checking}
               </>
             ) : (
-              "↻ Prijzen checken"
+              <>
+                <I icon={ArrowsClockwise} /> Prijzen checken
+              </>
             )}
           </button>
-          <button onClick={share}>↗ Delen</button>
-          <button onClick={() => shareOrDownload(new Blob([planCsv(project)], { type: "text/csv" }), backupFileName(project).replace(/\.json$/, ".csv"))}>⬇ Excel</button>
-          <button onClick={() => window.print()}>🖨 Print</button>
+          <button onClick={share}>
+            <I icon={ShareNetwork} /> Delen
+          </button>
+          <button onClick={() => shareOrDownload(new Blob([planCsv(project)], { type: "text/csv" }), backupFileName(project).replace(/\.json$/, ".csv"))}>
+            <I icon={DownloadSimple} /> Excel
+          </button>
+          <button className="icon" onClick={() => window.print()} aria-label="Printen" title="Printen">
+            <I icon={Printer} />
+          </button>
         </div>
       </div>
 
@@ -101,8 +111,10 @@ export function ShopView() {
 
       {items.length === 0 && view !== "cijfers" && (
         <div className="empty">
-          <span className="big">🛍️</span>
-          <strong>{hideDone && project.items.length ? "Alles staat in huis! 🎉" : "Nog niets op de lijst"}</strong>
+          <span className="icon-badge accent">
+            <I icon={ShoppingBag} size={28} />
+          </span>
+          <strong>{hideDone && project.items.length ? "Alles staat in huis!" : "Nog niets op de lijst"}</strong>
         </div>
       )}
 
@@ -110,13 +122,13 @@ export function ShopView() {
         byShop(items).map((g) => {
           const open = g.items.filter((i) => !isBought(i));
           return (
-            <div className="shop-group card" key={g.shop}>
-              <header>
+            <div className="stack" key={g.shop}>
+              <div className="row">
                 <ShopLogo url={g.items.find((i) => i.url)?.url} shop={g.shop} />
                 <div className="grow">
-                  <h3>{g.shop}</h3>
-                  <span className="tiny muted">
-                    {g.items.length} items · {euro(g.total)}
+                  <h2 style={{ fontSize: 21 }}>{g.shop}</h2>
+                  <span className="small muted">
+                    {g.items.length} {g.items.length === 1 ? "item" : "items"} · {euro(g.total)}
                   </span>
                 </div>
                 {open.length > 0 && g.shop !== "Nog te vinden" && (
@@ -125,13 +137,13 @@ export function ShopView() {
                     onClick={() => {
                       const before = project;
                       update((p) => ({ ...p, items: p.items.map((i) => (open.some((o) => o.id === i.id) ? { ...i, status: "besteld" } : i)) }));
-                      toast(`📦 ${open.length} items bij ${g.shop} besteld`, () => update(() => before));
+                      toast(`${open.length} items bij ${g.shop} besteld`, () => update(() => before));
                     }}
                   >
-                    📦 Alles besteld
+                    <I icon={Package} /> Alles besteld
                   </button>
                 )}
-              </header>
+              </div>
               <div className="items">
                 {g.items.map((i) => (
                   <ItemRow key={i.id} item={i} showRoom check />
@@ -148,8 +160,8 @@ export function ShopView() {
           return (
             <div className="stack" key={s.id}>
               <div className="row between">
-                <h2>
-                  {s.emoji} {s.label}
+                <h2 className="row" style={{ gap: 10 }}>
+                  <I icon={STATUS_ICON[s.id]} size={22} /> {s.label}
                 </h2>
                 <span className="num strong">{euro(totals(list).planned)}</span>
               </div>
@@ -179,7 +191,8 @@ function Figures() {
   const max = Math.max(1, ...cats.map((c) => c.total));
   return (
     <>
-      <div className="card" style={{ overflowX: "auto" }}>
+      <div className="card">
+        <div className="table-wrap">
         <table className="table">
           <thead>
             <tr>
@@ -204,25 +217,28 @@ function Figures() {
                 </td>
               </tr>
             ))}
-            <tr>
-              <td className="strong">Totaal</td>
-              <td className="r strong">{all.count}</td>
-              <td className="r strong">{euro(all.planned)}</td>
-              <td className="r strong">{euro(all.spent)}</td>
-              <td className="r strong">{project.budget ? euro(project.budget) : "—"}</td>
-              <td className="r strong">{project.budget ? euro(project.budget - all.planned) : ""}</td>
-            </tr>
           </tbody>
+          <tfoot>
+            <tr>
+              <td>Totaal</td>
+              <td className="r">{all.count}</td>
+              <td className="r">{euro(all.planned)}</td>
+              <td className="r">{euro(all.spent)}</td>
+              <td className="r">{project.budget ? euro(project.budget) : "—"}</td>
+              <td className="r">{project.budget ? euro(project.budget - all.planned) : ""}</td>
+            </tr>
+          </tfoot>
         </table>
+        </div>
       </div>
       {cats.length > 0 && (
         <div className="card stack">
-          <h3>Waar gaat het geld naartoe?</h3>
+          <h2>Waar gaat het geld naartoe?</h2>
           {cats.map((c) => (
             <div key={c.id} className="stack tight">
               <div className="row between small">
-                <span>
-                  {CATEGORY_EMOJI[c.id]} {c.label}
+                <span className="row" style={{ gap: 8 }}>
+                  <CategoryIcon category={c.id} size={16} /> {c.label}
                 </span>
                 <span className="num strong">
                   {euro(c.total)} <span className="muted tiny">({Math.round((c.total / Math.max(1, all.planned)) * 100)}%)</span>

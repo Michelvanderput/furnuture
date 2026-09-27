@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { fileToDataUrl } from "@/lib/images";
 import type { FundaResult } from "@/lib/types";
+import { ArrowRight, Camera, HouseLine, ListChecks, Sparkle, Wallet, type Icon } from "@phosphor-icons/react";
+import { Armchair, I } from "./icons";
 import { PasteButton } from "./PasteButton";
 
 /** Loads a house from Funda (via our server, or the fallbacks when Funda blocks that). */
@@ -38,19 +40,21 @@ export function Welcome({ onImport, onBlank }: { onImport: (url: string, data: F
 
   return (
     <div className="welcome">
-      <div className="panel">
+      <main className="panel">
         <div className="brand">
-          <span className="logo">⌂</span>
+          <span className="logo">
+            <I icon={Armchair} size={20} weight="bold" />
+          </span>
           <span>
-            furn<b>u</b>ture
+            furn<em>u</em>ture
           </span>
         </div>
-        <div className="stack">
+        <div className="stack" style={{ gap: 16 }}>
           <h1>
-            Van sleutel tot <em>thuis</em>: alles wat je nodig hebt, per kamer.
+            Van sleutel tot <em>thuis</em>.
           </h1>
-          <p className="muted" style={{ fontSize: 17 }}>
-            Plak de Funda-link van je nieuwe huis. Wij maken de kamers aan, jij verzamelt per kamer wat je wilt kopen — met prijzen, budget en een
+          <p className="intro">
+            Plak de Funda-link van je nieuwe huis. Wij maken de kamers aan; jij verzamelt per kamer wat je gaat kopen, met prijzen, budget en een
             overzicht per winkel.
           </p>
         </div>
@@ -63,24 +67,27 @@ export function Welcome({ onImport, onBlank }: { onImport: (url: string, data: F
         >
           <input type="url" required placeholder="https://www.funda.nl/detail/koop/…" value={url} onChange={(e) => setUrl(e.target.value)} aria-label="Funda-link" />
           <PasteButton label="Plak" onPaste={(t) => setUrl(t.match(/https?:\/\/\S+/)?.[0] ?? t)} />
-          <button className="primary" disabled={busy}>
-            {busy ? <span className="spinner" /> : "Start →"}
+          <button className="accent" disabled={busy}>
+            {busy ? <span className="spinner" /> : <>Start <I icon={ArrowRight} weight="bold" /></>}
           </button>
         </form>
-        {error && <p className="error small">{error}</p>}
+        {error && (
+          <p className="error small" role="alert">
+            {error}
+          </p>
+        )}
         <div className="features">
-          <div>
-            <b>🏡 Kamers uit Funda</b>Foto&apos;s, m² en indeling van je nieuwe huis.
-          </div>
-          <div>
-            <b>🛒 Lijst per kamer</b>Plak een link uit elke webshop: foto, prijs en maten komen vanzelf.
-          </div>
-          <div>
-            <b>💶 Budget in beeld</b>Totaal per kamer, per winkel en wat al besteld is.
-          </div>
-          <div>
-            <b>✨ Slimme hulp</b>AI herkent je kamers en tipt wat je nog mist.
-          </div>
+          {FEATURES.map((f) => (
+            <div className="feature" key={f.title}>
+              <span className="icon-badge">
+                <I icon={f.icon} size={20} />
+              </span>
+              <span>
+                <strong>{f.title}</strong>
+                {f.text}
+              </span>
+            </div>
+          ))}
         </div>
         <details open={!!error}>
           <summary>Lukt het niet, of geen Funda-link?</summary>
@@ -102,10 +109,21 @@ export function Welcome({ onImport, onBlank }: { onImport: (url: string, data: F
             <BlankStart onBlank={onBlank} />
           </div>
         </details>
-      </div>
+      </main>
+      <div className="art" style={{ backgroundImage: `url(${ART})` }} aria-hidden />
     </div>
   );
 }
+
+/** Interior photo for the welcome screen (Unsplash, free to use). */
+const ART = "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?auto=format&fit=crop&w=1400&q=75";
+
+const FEATURES: { icon: Icon; title: string; text: string }[] = [
+  { icon: HouseLine, title: "Kamers uit Funda", text: "Foto's, m² en indeling van je nieuwe huis." },
+  { icon: ListChecks, title: "Lijst per kamer", text: "Plak een link uit elke webshop: foto, prijs en maten komen vanzelf." },
+  { icon: Wallet, title: "Budget in beeld", text: "Totaal per kamer, per winkel en wat al besteld is." },
+  { icon: Sparkle, title: "Slimme hulp", text: "AI herkent je kamers en tipt wat je nog mist." },
+];
 
 function BlankStart({ onBlank }: { onBlank: (name: string, photos: string[]) => void }) {
   const [name, setName] = useState("");
@@ -118,7 +136,7 @@ function BlankStart({ onBlank }: { onBlank: (name: string, photos: string[]) => 
       <div className="row">
         <input placeholder="Bijv. Ons nieuwe huis" value={name} onChange={(e) => setName(e.target.value)} />
         <label className="btn">
-          {busy ? <span className="spinner" /> : "📷"}
+          {busy ? <span className="spinner" /> : <I icon={Camera} label="Foto's kiezen" />}
           <input
             type="file"
             accept="image/*"
@@ -163,7 +181,7 @@ function FundaBookmarklet() {
         alert("Sleep deze knop naar je bladwijzerbalk en klik erop als je op een Funda-woning bent.");
       }}
     >
-      📸 Naar furnuture
+      <I icon={Armchair} size={14} /> Naar furnuture
     </a>
   );
 }

@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { CATEGORY_EMOJI, categoryLabel } from "@/lib/categories";
+import { Check, Scales, Star, TrendDown, TrendUp } from "@phosphor-icons/react";
+import { categoryLabel } from "@/lib/categories";
 import { patchItem } from "@/lib/items";
 import { priceChange } from "@/lib/products";
 import { euro, isBought, lineCost, nextStatus, statusLabel } from "@/lib/shopping";
 import type { Item } from "@/lib/types";
 import { useApp } from "./app";
+import { CategoryIcon, I } from "./icons";
 import { Img } from "./Img";
 import { StatusPill } from "./ui";
 
@@ -15,15 +17,19 @@ export function ItemThumb({ item, size }: { item: Item; size?: number }) {
   const [failed, setFailed] = useState(false);
   const src = failed ? undefined : (item.thumb ?? item.image);
   return (
-    <div
+    <button
+      type="button"
       className={`thumb${src ? "" : " placeholder"}`}
       style={size ? { width: size, height: size } : undefined}
       onClick={() => openItem(item.id)}
-      role="button"
-      aria-label={item.title}
+      aria-label={`${item.title} openen`}
     >
-      {src ? <Img src={src} alt="" loading="lazy" onError={(e) => e.currentTarget.src.includes("/api/image") && setFailed(true)} /> : <span>{CATEGORY_EMOJI[item.category]}</span>}
-    </div>
+      {src ? (
+        <Img src={src} alt="" loading="lazy" onError={(e) => e.currentTarget.src.includes("/api/image") && setFailed(true)} />
+      ) : (
+        <CategoryIcon category={item.category} size={size ? size / 2 : 30} />
+      )}
+    </button>
   );
 }
 
@@ -53,26 +59,40 @@ export function ItemRow({ item, alternatives = 0, showRoom, alt, check }: { item
             const status = item.status === "binnen" ? "gekozen" : "binnen";
             update(patchItem(item.id, { status }));
           }}
-          aria-label={item.status === "binnen" ? "Nog niet in huis" : "In huis"}
+          aria-label={`${item.title}: in huis`}
+          aria-pressed={item.status === "binnen"}
           title="In huis"
         >
-          {item.status === "binnen" ? "✓" : ""}
+          {item.status === "binnen" && <I icon={Check} size={16} weight="bold" />}
         </button>
       )}
       <ItemThumb item={item} />
-      <div className="info" onClick={() => openItem(item.id)}>
+      <button type="button" className="info" onClick={() => openItem(item.id)}>
         <span className="title">{item.title}</span>
         <span className="meta">
           {item.shop && <span>{item.shop}</span>}
-          {!item.url && item.estimate !== undefined && <span className="chip warm">nog kiezen</span>}
+          {!item.url && item.estimate !== undefined && <span className="chip estimate">nog kiezen</span>}
           {room && <span className="chip">{room.name}</span>}
           {!showRoom && !item.shop && <span>{categoryLabel(item.category)}</span>}
-          {item.must && <span className="chip gold">★ must</span>}
-          {alternatives > 0 && <span className="chip accent">+{alternatives} optie{alternatives > 1 ? "s" : ""}</span>}
-          {change !== null && <span className={`chip ${change < 0 ? "ok" : "danger"}`}>{change < 0 ? `▼ ${euro(-change)}` : `▲ ${euro(change)}`}</span>}
-          {alt && <span className="chip">alternatief</span>}
+          {item.must && (
+            <span className="chip must">
+              <I icon={Star} size={12} weight="fill" /> must-have
+            </span>
+          )}
+          {alternatives > 0 && (
+            <span className="chip accent">
+              <I icon={Scales} size={13} /> {alternatives} optie{alternatives > 1 ? "s" : ""}
+            </span>
+          )}
+          {change !== null && (
+            <span className={`chip ${change < 0 ? "ok" : "danger"}`}>
+              <I icon={change < 0 ? TrendDown : TrendUp} size={13} weight="bold" />
+              {change < 0 ? `${euro(-change)} goedkoper` : `${euro(change)} duurder`}
+            </span>
+          )}
+          {alt && <span className="chip">optie</span>}
         </span>
-      </div>
+      </button>
       <div className="price">
         <Price item={item} />
         {item.qty > 1 && <span className="tiny muted">{item.qty}×</span>}
@@ -82,7 +102,7 @@ export function ItemRow({ item, alternatives = 0, showRoom, alt, check }: { item
             onClick={() => {
               const next = nextStatus(item.status);
               update(patchItem(item.id, { status: next }));
-              if (next === "binnen") toast(`🎉 ${item.title.slice(0, 40)} staat in huis`);
+              if (next === "binnen") toast(`${item.title.slice(0, 40)} staat in huis`);
             }}
           />
         )}

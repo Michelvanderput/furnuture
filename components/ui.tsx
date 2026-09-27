@@ -3,6 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { euro, statusLabel, type Totals } from "@/lib/shopping";
 import type { ItemStatus } from "@/lib/types";
+import { CaretLeft, CaretRight, MagnifyingGlass, Minus, Plus, X } from "@phosphor-icons/react";
+import { I, STATUS_ICON } from "./icons";
 import { Img } from "./Img";
 
 /** A dialog: a bottom sheet on phones, a centred card on bigger screens. Esc or a tap outside closes it. */
@@ -35,7 +37,7 @@ export function Sheet({
         <header>
           <h2>{title}</h2>
           <button className="ghost icon" onClick={onClose} aria-label="Sluiten">
-            ✕
+            <I icon={X} size={20} />
           </button>
         </header>
         <div className="content">{children}</div>
@@ -70,26 +72,30 @@ export function Ring({ pct, over, children }: { pct: number; over?: boolean; chi
 
 export function StatusPill({ status, onClick }: { status: ItemStatus; onClick?: () => void }) {
   const s = statusLabel(status);
+  const content = (
+    <>
+      <I icon={STATUS_ICON[status]} size={14} weight="bold" />
+      {s.label}
+    </>
+  );
   return onClick ? (
-    <button className={`chip status status-${status}`} onClick={onClick} title="Tik voor de volgende stap">
-      {s.emoji} {s.label}
+    <button className={`chip status status-${status}`} onClick={onClick} title="Tik voor de volgende stap" aria-label={`Status: ${s.label}. Tik voor de volgende stap`}>
+      {content}
     </button>
   ) : (
-    <span className={`chip status status-${status}`}>
-      {s.emoji} {s.label}
-    </span>
+    <span className={`chip status status-${status}`}>{content}</span>
   );
 }
 
 export function Stepper({ value, onChange, min = 1 }: { value: number; onChange: (n: number) => void; min?: number }) {
   return (
     <span className="stepper">
-      <button type="button" onClick={() => onChange(Math.max(min, value - 1))} aria-label="Minder">
-        −
+      <button type="button" onClick={() => onChange(Math.max(min, value - 1))} aria-label="Minder" disabled={value <= min}>
+        <I icon={Minus} size={16} weight="bold" />
       </button>
-      <span>{value}</span>
+      <span aria-live="polite">{value}</span>
       <button type="button" onClick={() => onChange(value + 1)} aria-label="Meer">
-        +
+        <I icon={Plus} size={16} weight="bold" />
       </button>
     </span>
   );
@@ -133,18 +139,18 @@ export function Lightbox({ photos, index, onClose }: { photos: string[]; index: 
     return () => document.removeEventListener("keydown", onKey);
   }, [photos.length, onClose]);
   return (
-    <div className="lightbox" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <Img src={photos[i]} width={1440} alt="" />
-      <button onClick={onClose} aria-label="Sluiten">
-        ✕
+    <div className="lightbox" role="dialog" aria-modal="true" aria-label={`Foto ${i + 1} van ${photos.length}`} onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <Img src={photos[i]} width={1440} alt={`Foto ${i + 1} van ${photos.length}`} />
+      <button className="close" onClick={onClose} aria-label="Sluiten" autoFocus>
+        <I icon={X} size={22} />
       </button>
       {photos.length > 1 && (
         <>
-          <button className="nav prev" onClick={() => setI((n) => (n - 1 + photos.length) % photos.length)} aria-label="Vorige">
-            ‹
+          <button className="nav prev" onClick={() => setI((n) => (n - 1 + photos.length) % photos.length)} aria-label="Vorige foto">
+            <I icon={CaretLeft} size={22} />
           </button>
-          <button className="nav next" onClick={() => setI((n) => (n + 1) % photos.length)} aria-label="Volgende">
-            ›
+          <button className="nav next" onClick={() => setI((n) => (n + 1) % photos.length)} aria-label="Volgende foto">
+            <I icon={CaretRight} size={22} />
           </button>
         </>
       )}
@@ -172,7 +178,7 @@ export function ToastHost({ children }: { children: React.ReactNode }) {
     <ToastContext.Provider value={show}>
       {children}
       {toast && (
-        <div className="toast" role="status">
+        <div className="toast" role="status" aria-live="polite">
           <span>{toast.text}</span>
           {toast.undo && (
             <button
@@ -199,6 +205,12 @@ export function ShopLogo({ url, shop }: { url?: string; shop: string }) {
   } catch {
     // no logo
   }
+  if (shop === "Nog te vinden")
+    return (
+      <span className="shop-logo" style={{ color: "var(--estimate)", background: "var(--estimate-tint)" }}>
+        <I icon={MagnifyingGlass} size={20} />
+      </span>
+    );
   return (
     <span className="shop-logo">
       {host && !failed ? (

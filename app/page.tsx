@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ChartDonut, GearSix, House, Plus, ShoppingBag, SquaresFour, type Icon } from "@phosphor-icons/react";
 import { AddSheet } from "@/components/AddSheet";
 import { AppContext, type App } from "@/components/app";
 import { Dashboard } from "@/components/Dashboard";
 import { HouseView } from "@/components/HouseView";
+import { Armchair, I } from "@/components/icons";
 import { ItemSheet } from "@/components/ItemSheet";
 import { RoomsView } from "@/components/RoomsView";
 import { RoomView } from "@/components/RoomView";
@@ -115,36 +117,36 @@ function Home() {
   }
 
   const current = route.view === "kamer" && !project.rooms.some((r) => r.id === route.id) ? ({ view: "kamers" } as Route) : route;
-  const tabs: { route: Route; label: string; ico: string; on: boolean }[] = [
-    { route: { view: "overzicht" }, label: "Overzicht", ico: "◎", on: current.view === "overzicht" },
-    { route: { view: "kamers" }, label: "Kamers", ico: "▦", on: current.view === "kamers" || current.view === "kamer" },
-    { route: { view: "winkelen" }, label: "Winkelen", ico: "🛍", on: current.view === "winkelen" },
-    { route: { view: "woning" }, label: "Woning", ico: "⌂", on: current.view === "woning" },
+  const tabs: { route: Route; label: string; icon: Icon; on: boolean }[] = [
+    { route: { view: "overzicht" }, label: "Overzicht", icon: ChartDonut, on: current.view === "overzicht" },
+    { route: { view: "kamers" }, label: "Kamers", icon: SquaresFour, on: current.view === "kamers" || current.view === "kamer" },
+    { route: { view: "winkelen" }, label: "Winkelen", icon: ShoppingBag, on: current.view === "winkelen" },
+    { route: { view: "woning" }, label: "Woning", icon: House, on: current.view === "woning" },
   ];
 
   return (
     <AppContext.Provider value={app}>
       <header className="topbar">
         <div className="wrap">
-          <a className="brand" href="#/">
-            <span className="logo">⌂</span>
+          <a className="brand" href="#/" aria-label="furnuture, naar het overzicht">
+            <span className="logo">
+              <I icon={Armchair} size={20} weight="bold" />
+            </span>
             <span>
-              furn<b>u</b>ture
+              furn<em>u</em>ture
             </span>
           </a>
           <nav className="tabs" aria-label="Hoofdmenu">
             {tabs.map((t) => (
               <a key={t.label} href={href(t.route)} className={t.on ? "on" : ""} aria-current={t.on ? "page" : undefined}>
-                <span className="ico" aria-hidden>
-                  {t.ico}
-                </span>
+                <I icon={t.icon} size={22} weight={t.on ? "fill" : "regular"} />
                 {t.label}
               </a>
             ))}
           </nav>
           <div className="actions">
             <button className="ghost icon" onClick={() => setSettings(true)} aria-label="Instellingen" title="Budget, stijl, AI en back-up">
-              ⚙︎
+              <I icon={GearSix} size={22} />
             </button>
           </div>
         </div>
@@ -157,7 +159,7 @@ function Home() {
         {current.view === "woning" && <HouseView />}
       </main>
       <button className="fab" aria-label="Toevoegen" onClick={() => setAdd({ roomId: roomId ?? null })}>
-        <span className="plus">＋</span>
+        <I icon={Plus} size={24} weight="bold" />
         <span className="label">Toevoegen</span>
       </button>
       {add && <AddSheet {...add} onClose={() => setAdd(null)} />}

@@ -2,15 +2,17 @@
 
 import { useMemo, useState } from "react";
 import { aiAdvice, aiStyle, type Advice, type StyleCheck } from "@/lib/ai";
-import { CATEGORIES, CATEGORY_EMOJI } from "@/lib/categories";
+import { ArrowLeft, CaretDown, CaretRight, Check, Compass, Palette, PencilSimple, Plus, Sparkle, Star, Trash } from "@phosphor-icons/react";
+import { CATEGORIES } from "@/lib/categories";
 import { euroCents, FAL_COST } from "@/lib/fal";
 import { addItems, patchRoom, removeRoom } from "@/lib/items";
-import { FURNISHABLE, newId, ROOM_EMOJI, roomPhotos } from "@/lib/rooms";
+import { FURNISHABLE, newId, roomPhotos } from "@/lib/rooms";
 import { go } from "@/lib/route";
 import { alternativesOf, euro, isBought, itemsIn, lineCost, mainItems, totals } from "@/lib/shopping";
-import type { Item, Room, RoomType } from "@/lib/types";
+import type { Category, Item, Room, RoomType } from "@/lib/types";
 import { roomLabel } from "@/lib/categories";
 import { useApp } from "./app";
+import { CategoryIcon, I, RoomIcon } from "./icons";
 import { Img } from "./Img";
 import { ItemRow } from "./ItemRow";
 import { BudgetBar, EuroInput, Lightbox, Sheet } from "./ui";
@@ -39,7 +41,7 @@ export function RoomView({ roomId }: { roomId: string }) {
 
   const groups = useMemo(() => {
     if (sort !== "soort") return [{ key: "all", label: "", items: list }];
-    return CATEGORIES.map((c) => ({ key: c.id, label: `${CATEGORY_EMOJI[c.id]} ${c.label}`, items: list.filter((i) => i.category === c.id) })).filter((g) => g.items.length);
+    return CATEGORIES.map((c) => ({ key: c.id, label: c.label, items: list.filter((i) => i.category === c.id) })).filter((g) => g.items.length);
   }, [list, sort]);
 
   const over = !!room.budget && t.planned > room.budget;
@@ -47,31 +49,34 @@ export function RoomView({ roomId }: { roomId: string }) {
   return (
     <section className="page">
       <div className="stack tight">
-        <a href="#/kamers" className="small">
-          ← Alle kamers
+        <a href="#/kamers" className="back">
+          <I icon={ArrowLeft} size={16} /> Alle kamers
         </a>
-        <div className="section-head">
-          <div className="stack tight">
-            <h1>
-              {ROOM_EMOJI[room.type]} {room.name}
-            </h1>
-            <div className="row wrap-row small muted">
-              {room.floor && <span>{room.floor}</span>}
-              {room.area && <span>· {room.area} m²</span>}
-              <span>
-                · {t.count} {t.count === 1 ? "item" : "items"}
-              </span>
-              {room.note && <span>· {room.note}</span>}
+        <div className="page-head">
+          <div className="row top" style={{ gap: 14 }}>
+            <span className="icon-badge accent" style={{ width: 48, height: 48 }}>
+              <RoomIcon type={room.type} size={26} />
+            </span>
+            <div>
+              <h1>{room.name}</h1>
+              <p className="lead small">
+                {[room.floor, room.area && `${room.area} m²`, `${t.count} ${t.count === 1 ? "item" : "items"}`].filter(Boolean).join(" · ")}
+                {room.note ? ` — ${room.note}` : ""}
+              </p>
             </div>
           </div>
-          <button onClick={() => setEditing(true)}>✎ Kamer bewerken</button>
+          <button onClick={() => setEditing(true)}>
+            <I icon={PencilSimple} /> Bewerken
+          </button>
         </div>
       </div>
 
       {photos.length > 0 && (
-        <div className="gallery">
+        <div className="gallery" aria-label={`Foto's van ${room.name}`}>
           {photos.map((p, i) => (
-            <Img key={p.id} src={p.url} width={640} alt={room.name} loading="lazy" onClick={() => setLightbox(i)} />
+            <button key={p.id} onClick={() => setLightbox(i)} aria-label={`Foto ${i + 1} vergroten`}>
+              <Img src={p.url} width={640} alt="" loading="lazy" />
+            </button>
           ))}
         </div>
       )}
@@ -80,8 +85,8 @@ export function RoomView({ roomId }: { roomId: string }) {
         <div className="row between wrap-row">
           <div className="stack tight">
             <span className="eyebrow">Totaal voor deze kamer</span>
-            <span className="row" style={{ alignItems: "baseline", gap: 8 }}>
-              <span style={{ fontSize: 30, fontWeight: 800, letterSpacing: "-0.03em" }} className="num">
+            <span className="row wrap-row" style={{ alignItems: "baseline", gap: 10 }}>
+              <span style={{ fontSize: 34, fontWeight: 700, letterSpacing: "-0.02em" }} className="num">
                 {euro(t.planned)}
               </span>
               {room.budget ? (
@@ -90,14 +95,18 @@ export function RoomView({ roomId }: { roomId: string }) {
                 </span>
               ) : (
                 <button className="ghost small" onClick={() => setEditing(true)}>
-                  ＋ Budget instellen
+                  <I icon={Plus} size={16} /> Budget instellen
                 </button>
               )}
             </span>
           </div>
           <div className="row wrap-row">
-            {t.spent > 0 && <span className="chip ok">✓ {euro(t.spent)} besteld/in huis</span>}
-            {t.estimated > 0 && <span className="chip warm">± {euro(t.estimated)} geschat</span>}
+            {t.spent > 0 && (
+              <span className="chip ok">
+                <I icon={Check} size={13} weight="bold" /> {euro(t.spent)} besteld of in huis
+              </span>
+            )}
+            {t.estimated > 0 && <span className="chip estimate">± {euro(t.estimated)} geschat</span>}
             {t.unpriced > 0 && <span className="chip">{t.unpriced} zonder prijs</span>}
           </div>
         </div>
@@ -114,7 +123,7 @@ export function RoomView({ roomId }: { roomId: string }) {
                 ["alles", "Alles"],
                 ["kopen", "Nog kopen"],
                 ["gekocht", "Besteld & in huis"],
-                ["must", "★ Must-haves"],
+                ["must", "Must-haves"],
               ] as [Filter, string][]
             ).map(([f, label]) => (
               <button key={f} className={filter === f ? "on" : ""} onClick={() => setFilter(f)}>
@@ -123,24 +132,26 @@ export function RoomView({ roomId }: { roomId: string }) {
             ))}
           </div>
           <div className="row">
-            <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} style={{ width: "auto", minHeight: 36 }} aria-label="Sorteren">
+            <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} style={{ width: "auto" }} aria-label="Sorteren">
               <option value="soort">Per soort</option>
               <option value="prijs">Duurste eerst</option>
               <option value="nieuw">Nieuwste eerst</option>
             </select>
             <button className="primary" onClick={() => openAdd({ roomId: room.id })}>
-              ＋ Toevoegen
+              <I icon={Plus} /> Toevoegen
             </button>
           </div>
         </div>
 
         {all.length === 0 ? (
           <div className="empty">
-            <span className="big">{ROOM_EMOJI[room.type]}</span>
+            <span className="icon-badge accent">
+              <RoomIcon type={room.type} size={28} />
+            </span>
             <strong>Nog niets voor {room.name.toLowerCase()}</strong>
             <span className="small">Plak een link uit een webshop, zet iets op de lijst om later te zoeken{fal ? ", of laat de AI tips geven" : ""}.</span>
-            <button className="primary" onClick={() => openAdd({ roomId: room.id })}>
-              ＋ Eerste product toevoegen
+            <button className="accent" onClick={() => openAdd({ roomId: room.id })}>
+              <I icon={Plus} /> Eerste product toevoegen
             </button>
           </div>
         ) : list.length === 0 ? (
@@ -149,9 +160,11 @@ export function RoomView({ roomId }: { roomId: string }) {
           groups.map((g) => (
             <div className="stack tight" key={g.key}>
               {g.label && (
-                <div className="row between">
-                  <span className="eyebrow">{g.label}</span>
-                  <span className="tiny muted num">{euro(totals(g.items).planned)}</span>
+                <div className="group-head">
+                  <span className="eyebrow">
+                    <CategoryIcon category={g.key as Category} size={16} /> {g.label}
+                  </span>
+                  <span className="small muted num">{euro(totals(g.items).planned)}</span>
                 </div>
               )}
               <div className="items">
@@ -176,13 +189,14 @@ function ItemWithAlternatives({ item }: { item: Item }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <div onDoubleClick={() => setOpen((o) => !o)}>
-        <ItemRow item={item} alternatives={alts.length} />
-      </div>
+      <ItemRow item={item} alternatives={alts.length} />
       {alts.length > 0 && (
-        <button className="ghost small" style={{ alignSelf: "flex-start", marginLeft: 34, marginTop: -4 }} onClick={() => setOpen((o) => !o)}>
-          {open ? "▾ Opties verbergen" : `▸ ${alts.length} optie${alts.length > 1 ? "s" : ""} vergelijken`}
-        </button>
+        <div style={{ padding: "4px 12px" }}>
+          <button className="ghost small more-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+            <I icon={open ? CaretDown : CaretRight} size={14} />
+            {open ? "Opties verbergen" : `${alts.length} optie${alts.length > 1 ? "s" : ""} bekijken`}
+          </button>
+        </div>
       )}
       {open && alts.map((a) => <ItemRow key={a.id} item={a} alt />)}
     </>
@@ -235,17 +249,24 @@ function AiCard({ room }: { room: Room }) {
 
   return (
     <div className="card ai-card stack">
-      <div className="section-head">
+      <div className="card-head">
         <div className="stack tight">
-          <h3>✨ Slimme hulp voor {room.name.toLowerCase()}</h3>
-          <p className="small muted">De AI bekijkt de foto&apos;s, de maat en je lijst.</p>
+          <div className="title">
+            <span className="icon-badge accent">
+              <I icon={Sparkle} size={20} />
+            </span>
+            <div>
+              <h3>Slimme hulp</h3>
+              <p className="small muted">De AI bekijkt de foto&apos;s, de maat en je lijst.</p>
+            </div>
+          </div>
         </div>
         <div className="row wrap-row">
-          <button className="ai" onClick={() => run("advice")} disabled={!!busy}>
-            {busy === "advice" ? <span className="spinner" /> : "🧭"} Wat mis ik nog? <span className="tiny">({euroCents(FAL_COST.advice)})</span>
+          <button className="accent" onClick={() => run("advice")} disabled={!!busy}>
+            {busy === "advice" ? <span className="spinner" /> : <I icon={Compass} />} Wat mis ik nog? <span className="cost">{euroCents(FAL_COST.advice)}</span>
           </button>
           <button onClick={() => run("style")} disabled={!!busy || withImages < 2} title={withImages < 2 ? "Voeg eerst minstens 2 producten met foto toe" : undefined}>
-            {busy === "style" ? <span className="spinner" /> : "🎨"} Stijlcheck
+            {busy === "style" ? <span className="spinner" /> : <I icon={Palette} />} Stijlcheck
           </button>
         </div>
       </div>
@@ -256,19 +277,29 @@ function AiCard({ room }: { room: Room }) {
           <div className="stack tight">
             {advice.suggestions.map((s) => (
               <div className="suggestion" key={s.title}>
-                <span className="emoji">{CATEGORY_EMOJI[s.category]}</span>
+                <span className="icon-badge">
+                  <CategoryIcon category={s.category} size={20} />
+                </span>
                 <div className="grow stack tight">
-                  <strong className="small">
-                    {s.title}
-                    {s.qty > 1 ? ` (${s.qty}×)` : ""} {s.must && <span className="chip gold">must</span>}
-                  </strong>
+                  <span className="row wrap-row" style={{ gap: 6 }}>
+                    <strong className="small">
+                      {s.title}
+                      {s.qty > 1 ? ` (${s.qty}×)` : ""}
+                    </strong>
+                    {s.must && (
+                      <span className="chip must">
+                        <I icon={Star} size={12} weight="fill" /> must-have
+                      </span>
+                    )}
+                  </span>
                   <span className="tiny muted">
                     {s.estimate ? `± ${euro(s.estimate)}${s.qty > 1 ? " per stuk" : ""} · ` : ""}
                     {s.why}
                   </span>
                 </div>
-                <button className="small soft" disabled={added.has(s.title)} onClick={() => addSuggestion(s)}>
-                  {added.has(s.title) ? "✓" : "＋ Lijst"}
+                <button className="small soft" disabled={added.has(s.title)} onClick={() => addSuggestion(s)} aria-label={added.has(s.title) ? `${s.title} staat op de lijst` : `${s.title} op de lijst zetten`}>
+                  {added.has(s.title) ? <I icon={Check} weight="bold" /> : <I icon={Plus} />}
+                  {added.has(s.title) ? "" : "Lijst"}
                 </button>
               </div>
             ))}
@@ -280,10 +311,10 @@ function AiCard({ room }: { room: Room }) {
                 onClick={() => {
                   const musts = advice.suggestions.filter((s) => s.must && !added.has(s.title));
                   musts.forEach(addSuggestion);
-                  toast(`✓ ${musts.length} must-haves op de lijst`);
+                  toast(`${musts.length} must-haves op de lijst`);
                 }}
               >
-                ＋ Alle must-haves
+                <I icon={Plus} /> Alle must-haves
               </button>
             )}
             <span className="tiny muted">Prijzen zijn schattingen: koppel later een echte link.</span>
@@ -300,7 +331,7 @@ function AiCard({ room }: { room: Room }) {
       {style && (
         <div className="stack tight">
           <div className="row">
-            <strong style={{ fontSize: 22 }}>{style.score}/10</strong>
+            <strong style={{ fontSize: 26, fontFamily: "var(--font-heading)" }}>{style.score}/10</strong>
             <span className="small">{style.verdict}</span>
           </div>
           {style.palette.length > 0 && (
@@ -344,7 +375,7 @@ export function RoomSheet({ room, onClose }: { room: Room; onClose: () => void }
               toast(`${room.name} verwijderd`, () => update(() => before));
             }}
           >
-            🗑 Verwijderen
+            <I icon={Trash} /> Verwijderen
           </button>
           <span className="grow" />
           <button className="primary" onClick={onClose}>
@@ -363,7 +394,7 @@ export function RoomSheet({ room, onClose }: { room: Room; onClose: () => void }
           <select value={room.type} onChange={(e) => set({ type: e.target.value as RoomType })}>
             {FURNISHABLE.map((t) => (
               <option key={t} value={t}>
-                {ROOM_EMOJI[t]} {roomLabel(t)}
+                {roomLabel(t)}
               </option>
             ))}
           </select>

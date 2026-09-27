@@ -2,7 +2,9 @@
 
 import { useRef, useState } from "react";
 import { backupBlob, backupFileName, readBackup, shareOrDownload } from "@/lib/backup";
+import { DownloadSimple, House, UploadSimple } from "@phosphor-icons/react";
 import { useApp } from "./app";
+import { I } from "./icons";
 import { FalSetting } from "./FalSetting";
 import { EuroInput, Sheet } from "./ui";
 
@@ -42,8 +44,12 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
         <strong>Bewaren & delen</strong>
         <p className="tiny muted">Alles wordt op dit apparaat bewaard. Met een back-up zet je het over naar een ander apparaat of deel je het met je partner.</p>
         <div className="row wrap-row">
-          <button onClick={() => shareOrDownload(backupBlob(project), backupFileName(project))}>⬇ Back-up opslaan</button>
-          <button onClick={() => file.current?.click()}>⬆ Back-up terugzetten</button>
+          <button onClick={() => shareOrDownload(backupBlob(project), backupFileName(project))}>
+            <I icon={DownloadSimple} /> Back-up opslaan
+          </button>
+          <button onClick={() => file.current?.click()}>
+            <I icon={UploadSimple} /> Back-up terugzetten
+          </button>
           <input
             ref={file}
             type="file"
@@ -79,7 +85,7 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
               onClose();
             }}
           >
-            🏠 Andere woning
+            <I icon={House} /> Andere woning
           </button>
           <button
             className="danger"

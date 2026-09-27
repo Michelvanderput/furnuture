@@ -5,9 +5,11 @@ import { aiRooms, applyRooms, type RoomProposal } from "@/lib/ai";
 import { roomLabel } from "@/lib/categories";
 import { euroCents, FAL_COST } from "@/lib/fal";
 import { fileToDataUrl } from "@/lib/images";
-import { newId, ROOM_EMOJI } from "@/lib/rooms";
-import type { HouseFacts, Photo } from "@/lib/types";
+import { newId } from "@/lib/rooms";
+import type { HouseFacts, Photo, RoomType } from "@/lib/types";
 import { useApp } from "./app";
+import { ArrowSquareOut, Plus, Sparkle } from "@phosphor-icons/react";
+import { I, RoomIcon } from "./icons";
 import { Img } from "./Img";
 import { Lightbox } from "./ui";
 
@@ -33,11 +35,8 @@ export function HouseHero() {
   return (
     <div className="hero">
       {cover && <Img className="cover" src={cover.url} width={1440} alt="" />}
-      <div className="shade" />
       <div className="content">
-        <span className="eyebrow" style={{ color: "rgba(255,255,255,0.85)" }}>
-          Ons nieuwe huis{f.neighborhood ? ` · ${f.neighborhood}` : ""}
-        </span>
+        <span className="eyebrow">Ons nieuwe huis{f.neighborhood ? ` · ${f.neighborhood}` : ""}</span>
         <h1>{l?.title || "Ons nieuwe huis"}</h1>
         {chips.length > 0 && (
           <div className="facts">
@@ -81,8 +80,8 @@ export function HouseView() {
     update((p) => ({ ...p, listing: p.listing && { ...p.listing, photos: p.listing.photos.map((ph) => (ph.id === id ? { ...ph, ...patch } : ph)) } }));
 
   const byRoom = [
-    ...project.rooms.map((r) => ({ key: r.id, label: `${ROOM_EMOJI[r.type]} ${r.name}`, photos: others.filter((p) => p.roomId === r.id) })),
-    { key: "", label: "Overige foto's", photos: others.filter((p) => !p.roomId || !project.rooms.some((r) => r.id === p.roomId)) },
+    ...project.rooms.map((r) => ({ key: r.id, label: r.name, type: r.type, photos: others.filter((p) => p.roomId === r.id) })),
+    { key: "", label: "Overige foto's", type: "overig" as RoomType, photos: others.filter((p) => !p.roomId || !project.rooms.some((r) => r.id === p.roomId)) },
   ].filter((g) => g.photos.length);
 
   return (
@@ -91,22 +90,27 @@ export function HouseView() {
 
       {fal && l && (
         <div className="card ai-card stack">
-          <div className="section-head">
-            <div className="stack tight">
-              <h3>✨ Kamers herkennen</h3>
+          <div className="card-head">
+            <div className="title" style={{ alignItems: "flex-start" }}>
+              <span className="icon-badge accent">
+                <I icon={Sparkle} size={20} />
+              </span>
+              <div className="stack tight" style={{ maxWidth: 560 }}>
+              <h3>Kamers herkennen</h3>
               <p className="small muted">
                 De AI leest de plattegrond, de omschrijving en alle foto&apos;s: welke kamers, hoe groot, op welke verdieping, en welke foto bij welke kamer
                 hoort.
               </p>
+              </div>
             </div>
-            <button className="ai" onClick={detect} disabled={!!busy}>
+            <button className="accent" onClick={detect} disabled={!!busy}>
               {busy ? (
                 <>
                   <span className="spinner" /> Bezig…
                 </>
               ) : (
                 <>
-                  ✨ Herken kamers <span className="tiny">({euroCents(FAL_COST.rooms)})</span>
+                  <I icon={Sparkle} /> Herken kamers <span className="cost">{euroCents(FAL_COST.rooms)}</span>
                 </>
               )}
             </button>
@@ -117,8 +121,8 @@ export function HouseView() {
               <div className="grid two" style={{ gap: 8 }}>
                 {proposal.rooms.map((r) => (
                   <div key={r.id} className="suggestion">
-                    <span className="emoji" style={{ background: "var(--accent-tint)" }}>
-                      {ROOM_EMOJI[r.type]}
+                    <span className="icon-badge">
+                      <RoomIcon type={r.type} size={20} />
                     </span>
                     <div className="grow stack tight">
                       <strong className="small">{r.name}</strong>
@@ -142,7 +146,7 @@ export function HouseView() {
                       const before = project;
                       update((p) => applyRooms(p, proposal));
                       setProposal(null);
-                      toast(`✓ ${proposal.rooms.length} kamers ingedeeld`, () => update(() => before));
+                      toast(`${proposal.rooms.length} kamers ingedeeld`, () => update(() => before));
                     }}
                   >
                     Toepassen
@@ -156,7 +160,7 @@ export function HouseView() {
 
       {l?.facts && Object.keys(l.facts).length > 0 && (
         <div className="card stack">
-          <h3>Kenmerken</h3>
+          <h2>Kenmerken</h2>
           <div className="grid stats">
             {FACTS.filter(([k]) => l.facts?.[k]).map(([k, label]) => (
               <div key={k} className="stack tight">
@@ -167,7 +171,7 @@ export function HouseView() {
           </div>
           {l.url && (
             <a className="small" href={l.url} target="_blank" rel="noreferrer">
-              Bekijk op Funda ↗
+              Bekijk op Funda <I icon={ArrowSquareOut} size={14} />
             </a>
           )}
         </div>
@@ -184,11 +188,13 @@ export function HouseView() {
 
       {plans.length > 0 && (
         <div className="stack">
-          <h2>🗺️ Plattegrond</h2>
+          <h2>Plattegrond</h2>
           <div className="grid two">
             {plans.map((p, i) => (
               <div key={p.id} className="card flat" style={{ padding: 8, background: "#fff" }}>
-                <Img src={p.url} width={1200} alt="Plattegrond" loading="lazy" style={{ width: "100%", cursor: "zoom-in" }} onClick={() => setLightbox({ list: plans.map((x) => x.url), i })} />
+                <button style={{ padding: 0, border: 0, width: "100%", background: "transparent", cursor: "zoom-in" }} onClick={() => setLightbox({ list: plans.map((x) => x.url), i })} aria-label="Plattegrond vergroten">
+                  <Img src={p.url} width={1200} alt="Plattegrond" loading="lazy" style={{ width: "100%" }} />
+                </button>
               </div>
             ))}
           </div>
@@ -198,11 +204,11 @@ export function HouseView() {
       <div className="stack">
         <div className="section-head">
           <div className="stack tight">
-            <h2>📷 Foto&apos;s per kamer</h2>
+            <h2>Foto&apos;s per kamer</h2>
             <p className="small muted">Staat een foto bij de verkeerde kamer? Kies de goede onder de foto.</p>
           </div>
           <label className="btn">
-            ＋ Foto&apos;s
+            <I icon={Plus} /> Foto&apos;s
             <input
               type="file"
               accept="image/*"
@@ -224,11 +230,15 @@ export function HouseView() {
         </div>
         {byRoom.map((g) => (
           <div className="stack tight" key={g.key || "rest"}>
-            <span className="eyebrow">{g.label}</span>
+            <span className="eyebrow row" style={{ gap: 8 }}>
+              <RoomIcon type={g.type} size={16} /> {g.label}
+            </span>
             <div className="photo-grid">
               {g.photos.map((p) => (
                 <div className="photo-tile" key={p.id}>
-                  <Img src={p.url} width={480} alt="" loading="lazy" onClick={() => setLightbox({ list: g.photos.map((x) => x.url), i: g.photos.indexOf(p) })} />
+                  <button onClick={() => setLightbox({ list: g.photos.map((x) => x.url), i: g.photos.indexOf(p) })} aria-label="Foto vergroten">
+                    <Img src={p.url} width={480} alt="" loading="lazy" />
+                  </button>
                   <select
                     value={p.roomId ?? (p.room === "plattegrond" ? "plan" : p.room === "buitenkant" ? "out" : "")}
                     onChange={(e) => {

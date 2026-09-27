@@ -9,7 +9,9 @@ import { addItems, chooseAlternative, duplicateItem, moveItem, patchItem, remove
 import { itemFromLink, priceChange, refreshPrice } from "@/lib/products";
 import { alternativesOf, euro, lineCost, STATUS } from "@/lib/shopping";
 import type { Category, Item } from "@/lib/types";
+import { ArrowSquareOut, ArrowsClockwise, Copy, MagnifyingGlass, Plus, Sparkle, Star, Trash } from "@phosphor-icons/react";
 import { useApp } from "./app";
+import { CategoryIcon, I, STATUS_ICON } from "./icons";
 import { Img } from "./Img";
 import { ItemThumb, Price } from "./ItemRow";
 import { EuroInput, Sheet, Stepper } from "./ui";
@@ -88,7 +90,7 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
     if (got.image) productThumb(got.image).then((thumb) => update(patchItem(got.id, { thumb }))).catch(() => undefined);
     setFound((f) => f?.filter((x) => x.url !== a.url) ?? null);
     setBusy("");
-    toast("✓ Toegevoegd als optie");
+    toast("Toegevoegd als optie");
   }
 
   const pickImage = (image: string) => {
@@ -112,7 +114,7 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
               toast("Verwijderd", () => update(() => before));
             }}
           >
-            🗑 Verwijderen
+            <I icon={Trash} /> Verwijderen
           </button>
           <button
             className="ghost"
@@ -121,7 +123,7 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
               toast("Gedupliceerd");
             }}
           >
-            ⧉ Dupliceren
+            <I icon={Copy} /> Dupliceren
           </button>
           <span className="grow" />
           <button className="primary" onClick={onClose}>
@@ -139,7 +141,7 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
             className="primary small"
             onClick={() => {
               update(chooseAlternative(item.id));
-              toast("✓ Gekozen");
+              toast("Gekozen");
             }}
           >
             Kies deze
@@ -149,8 +151,8 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
 
       <div className="row top wrap-row" style={{ gap: 18 }}>
         <div className="stack tight" style={{ width: 180 }}>
-          <div style={{ width: 180, height: 180, borderRadius: 16, overflow: "hidden", border: "1px solid var(--line)", background: "#fff", display: "grid", placeItems: "center" }}>
-            {item.image || item.thumb ? <Img src={item.image ?? item.thumb!} width={480} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontSize: 50 }}>🛋️</span>}
+          <div style={{ width: 180, height: 180, borderRadius: 16, overflow: "hidden", border: "1px solid var(--line)", background: item.image || item.thumb ? "#fff" : "var(--surface-2)", display: "grid", placeItems: "center" }}>
+            {item.image || item.thumb ? <Img src={item.image ?? item.thumb!} width={480} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ color: "var(--stone)" }}><CategoryIcon category={item.category} size={56} /></span>}
           </div>
           {item.images.length > 1 && (
             <div className="row wrap-row" style={{ gap: 6 }}>
@@ -217,12 +219,12 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
               <div className="segmented">
                 {STATUS.map((s) => (
                   <button key={s.id} className={item.status === s.id ? "on" : ""} onClick={() => set({ status: s.id })}>
-                    {s.emoji} {s.label}
+                    <I icon={STATUS_ICON[s.id]} size={16} /> {s.label}
                   </button>
                 ))}
               </div>
               <button className={`chip ${item.must ? "gold" : ""}`} onClick={() => set({ must: !item.must })} title="Must-have: dit moet er echt zijn als je verhuist">
-                {item.must ? "★ Must-have" : "☆ Must-have"}
+                <I icon={Star} size={14} weight={item.must ? "fill" : "regular"} /> Must-have
               </button>
             </div>
           )}
@@ -233,10 +235,10 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
         {item.url ? (
           <div className="row wrap-row">
             <a className="btn" href={item.url} target="_blank" rel="noreferrer">
-              Bekijk bij {item.shop ?? "de winkel"} ↗
+              Bekijk bij {item.shop ?? "de winkel"} <I icon={ArrowSquareOut} size={16} />
             </a>
             <button onClick={checkPrice} disabled={!!busy}>
-              {busy === "price" ? <span className="spinner" /> : "↻"} Prijs checken
+              {busy === "price" ? <span className="spinner" /> : <I icon={ArrowsClockwise} />} Prijs checken
             </button>
             {change !== null && <span className={`chip ${change < 0 ? "ok" : "danger"}`}>{change < 0 ? `${euro(-change)} goedkoper dan eerst` : `${euro(change)} duurder dan eerst`}</span>}
           </div>
@@ -279,16 +281,16 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
           <hr className="divider" />
           <div className="section-head">
             <div>
-              <h3>Opties vergelijken</h3>
+              <h2 style={{ fontSize: 20 }}>Opties vergelijken</h2>
               <p className="tiny muted">Twijfel je? Zet alternatieven naast elkaar en kies er één.</p>
             </div>
             <div className="row wrap-row">
               <button className="small" onClick={() => (onClose(), openAdd({ alternativeOf: item.id }))}>
-                ＋ Optie
+                <I icon={Plus} /> Optie
               </button>
               {fal && (
                 <button className="small ai" onClick={findAlternatives} disabled={!!busy}>
-                  {busy === "alt" ? <span className="spinner" /> : "✨"} Zoek alternatieven <span className="tiny">({euroCents(FAL_COST.alternatives)})</span>
+                  {busy === "alt" ? <span className="spinner" /> : <I icon={Sparkle} />} Zoek alternatieven <span className="cost">{euroCents(FAL_COST.alternatives)}</span>
                 </button>
               )}
             </div>
@@ -337,7 +339,7 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
                                 update(chooseAlternative(x.id));
                                 onClose();
                                 openItem(x.id);
-                                toast("✓ Gekozen");
+                                toast("Gekozen");
                               }}
                             >
                               Kies
@@ -356,7 +358,9 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
               {found.length === 0 && <p className="small muted">Geen goede alternatieven gevonden.</p>}
               {found.map((a) => (
                 <div className="suggestion" key={a.url}>
-                  <span className="emoji">🔎</span>
+                  <span className="icon-badge accent">
+                    <I icon={MagnifyingGlass} size={20} />
+                  </span>
                   <div className="grow stack tight">
                     <strong className="small">{a.title}</strong>
                     <span className="tiny muted">
@@ -365,11 +369,11 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
                     </span>
                   </div>
                   <div className="row">
-                    <a className="btn small" href={a.url} target="_blank" rel="noreferrer">
-                      ↗
+                    <a className="btn small icon" href={a.url} target="_blank" rel="noreferrer" aria-label={`${a.title} bekijken bij ${a.shop}`}>
+                      <I icon={ArrowSquareOut} />
                     </a>
                     <button className="small soft" disabled={!!busy} onClick={() => addAlternative(a)}>
-                      {busy === a.url ? <span className="spinner" /> : "＋ Optie"}
+                      {busy === a.url ? <span className="spinner" /> : <><I icon={Plus} /> Optie</>}
                     </button>
                   </div>
                 </div>

@@ -10,7 +10,9 @@ import { itemFromLink, sameLink } from "@/lib/products";
 import { newId } from "@/lib/rooms";
 import { extractLinks } from "@/lib/shopping";
 import type { Category, Item } from "@/lib/types";
+import { Camera, LinkSimple, PencilSimple } from "@phosphor-icons/react";
 import { useApp } from "./app";
+import { I } from "./icons";
 import { PasteButton } from "./PasteButton";
 import { EuroInput, Sheet } from "./ui";
 
@@ -52,7 +54,7 @@ export function AddSheet({ roomId: initialRoom, alternativeOf, links: initialLin
         const urls = [it.image, ...it.images].filter((u): u is string => !!u);
         if (urls.length) firstWorkingThumb(urls).then((r) => r && update(patchItem(it.id, { thumb: r.thumb, image: r.image })));
       }
-      toast(added.length === 1 ? `✓ ${added[0].title.slice(0, 50)} toegevoegd` : `✓ ${added.length} producten toegevoegd`, () =>
+      toast(added.length === 1 ? `${added[0].title.slice(0, 50)} toegevoegd` : `${added.length} producten toegevoegd`, () =>
         update((p) => ({ ...p, items: p.items.filter((i) => !added.some((a) => a.id === i.id)) })),
       );
     }
@@ -97,13 +99,13 @@ export function AddSheet({ roomId: initialRoom, alternativeOf, links: initialLin
       <div className="row wrap-row between">
         <div className="segmented" role="tablist">
           <button className={mode === "link" ? "on" : ""} onClick={() => setMode("link")}>
-            🔗 Link
+            <I icon={LinkSimple} /> Link
           </button>
           <button className={mode === "screenshot" ? "on" : ""} onClick={() => setMode("screenshot")}>
-            📸 Screenshot
+            <I icon={Camera} /> Screenshot
           </button>
           <button className={mode === "zelf" ? "on" : ""} onClick={() => setMode("zelf")}>
-            ✏️ Zelf
+            <I icon={PencilSimple} /> Zelf
           </button>
         </div>
         {!main && (
@@ -132,7 +134,7 @@ export function AddSheet({ roomId: initialRoom, alternativeOf, links: initialLin
               <span className="tiny muted">
                 {links.length ? `${links.length} link${links.length > 1 ? "s" : ""} gevonden` : "Werkt met bijna elke webshop: foto, prijs en maten komen vanzelf."}
               </span>
-              <PasteButton label="📋 Plakken" onPaste={(t) => setText((x) => (x ? `${x}\n${t}` : t))} />
+              <PasteButton onPaste={(t) => setText((x) => (x ? `${x}\n${t}` : t))} />
             </div>
           </div>
           {errors.length > 0 && (
@@ -188,7 +190,7 @@ function FromScreenshot({ roomId, alternativeOf, onDone }: { roomId: string | nu
         alternativeOf,
       };
       update(addItems([item]));
-      toast(`✓ ${p.title.slice(0, 50)} toegevoegd`);
+      toast(`${p.title.slice(0, 50)} toegevoegd`);
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -222,7 +224,9 @@ function FromScreenshot({ roomId, alternativeOf, onDone }: { roomId: string | nu
           </span>
         ) : (
           <>
-            <div style={{ fontSize: 30 }}>📸</div>
+            <span className="icon-badge accent">
+              <I icon={Camera} size={22} />
+            </span>
             <strong>Kies of sleep een screenshot</strong>
             <div className="tiny">De AI leest naam, prijs, winkel en maten ({euroCents(FAL_COST.screenshot)}).</div>
           </>
@@ -262,7 +266,7 @@ function Manual({ roomId, alternativeOf, onDone }: { roomId: string | null; alte
           alternativeOf,
         };
         update(addItems([item]));
-        toast(`✓ ${item.title.slice(0, 50)} toegevoegd`);
+        toast(`${item.title.slice(0, 50)} toegevoegd`);
         onDone();
       }}
     >

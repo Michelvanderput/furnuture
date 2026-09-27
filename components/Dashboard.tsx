@@ -1,13 +1,15 @@
 "use client";
 
+import { ArrowRight, Check, CheckCircle, Coins, Scales, Star, TrendDown, Tray, Wallet } from "@phosphor-icons/react";
 import { patchItem } from "@/lib/items";
 import { priceChange } from "@/lib/products";
-import { ROOM_EMOJI, roomPhotos } from "@/lib/rooms";
+import { roomPhotos } from "@/lib/rooms";
 import { href } from "@/lib/route";
 import { euro, isBought, itemsIn, lineCost, mainItems, suggestSplit, totals } from "@/lib/shopping";
 import type { Project } from "@/lib/types";
 import { useApp } from "./app";
 import { HouseHero } from "./HouseView";
+import { I, RoomIcon } from "./icons";
 import { Img } from "./Img";
 import { ItemRow } from "./ItemRow";
 import { BudgetBar, EuroInput, Ring } from "./ui";
@@ -19,7 +21,11 @@ export function Dashboard() {
   const left = budget ? budget - t.planned : undefined;
   const drops = mainItems(project.items).filter((i) => (priceChange(i) ?? 0) < 0);
   const loose = mainItems(itemsIn(project.items, null));
-  const biggest = [...mainItems(project.items)].filter((i) => !isBought(i)).sort((a, b) => lineCost(b).value - lineCost(a).value).slice(0, 5);
+  const biggest = [...mainItems(project.items)]
+    .filter((i) => !isBought(i))
+    .sort((a, b) => lineCost(b).value - lineCost(a).value)
+    .slice(0, 5);
+  const pct = budget ? (t.planned / budget) * 100 : t.planned ? (t.spent / t.planned) * 100 : 0;
 
   return (
     <section className="page">
@@ -27,48 +33,55 @@ export function Dashboard() {
 
       <div className="grid stats">
         <div className="stat">
-          <span className="label">Totaal gepland</span>
-          <span className="value">{euro(t.planned)}</span>
-          <span className="tiny muted">{t.estimated ? `waarvan ± ${euro(t.estimated)} geschat` : `${t.count} items`}</span>
-        </div>
-        <div className="stat">
-          <span className="label">{left === undefined ? "Budget" : left >= 0 ? "Nog te besteden" : "Boven budget"}</span>
-          <span className="value" style={{ color: left !== undefined && left < 0 ? "var(--danger)" : undefined }}>
-            {left === undefined ? "—" : euro(Math.abs(left))}
+          <span className="label">
+            <I icon={Coins} size={16} /> Totaal gepland
           </span>
-          <span className="tiny muted">{budget ? `van ${euro(budget)}` : "stel hieronder in"}</span>
+          <span className="value">{euro(t.planned)}</span>
+          <span className="sub">{t.estimated ? `waarvan ± ${euro(t.estimated)} geschat` : `${t.count} items`}</span>
         </div>
         <div className="stat">
-          <span className="label">Besteld & in huis</span>
+          <span className="label">
+            <I icon={Wallet} size={16} /> {left === undefined ? "Budget" : left >= 0 ? "Nog te besteden" : "Boven budget"}
+          </span>
+          <span className={`value${left !== undefined && left < 0 ? " bad" : ""}`}>{left === undefined ? "—" : euro(Math.abs(left))}</span>
+          <span className="sub">{budget ? `van ${euro(budget)}` : "nog niet ingesteld"}</span>
+        </div>
+        <div className="stat">
+          <span className="label">
+            <I icon={CheckCircle} size={16} /> Besteld & in huis
+          </span>
           <span className="value">{euro(t.spent)}</span>
-          <span className="tiny muted">
+          <span className="sub">
             {t.bought} van {t.count} items
           </span>
         </div>
         <div className="stat">
-          <span className="label">Must-haves</span>
+          <span className="label">
+            <I icon={Star} size={16} /> Must-haves
+          </span>
           <span className="value">{euro(t.must)}</span>
-          <span className="tiny muted">het minimum om te verhuizen</span>
+          <span className="sub">minimaal nodig bij de verhuizing</span>
         </div>
       </div>
 
       <NextSteps project={project} />
 
-      <div className="grid two">
-        <div className="card stack">
-          <div className="row" style={{ gap: 20 }}>
-            <Ring pct={budget ? (t.planned / budget) * 100 : t.count ? (t.spent / Math.max(1, t.planned)) * 100 : 0} over={!!budget && t.planned > budget}>
-              <div className="big num">{budget ? Math.round((t.planned / budget) * 100) : Math.round((t.spent / Math.max(1, t.planned)) * 100)}%</div>
+      <div className="grid two" style={{ alignItems: "start" }}>
+        <div className="card stack" style={{ gap: 20 }}>
+          <h2>Budget</h2>
+          <div className="row wrap-row" style={{ gap: 24 }}>
+            <Ring pct={pct} over={!!budget && t.planned > budget}>
+              <div className="big">{Math.round(pct)}%</div>
               <div className="tiny muted">{budget ? "van budget" : "gekocht"}</div>
             </Ring>
-            <div className="stack grow">
+            <div className="stack grow" style={{ minWidth: 200 }}>
               <label className="field">
-                Totaalbudget inrichting
+                Totaalbudget voor de inrichting
                 <EuroInput value={budget} onChange={(b) => update((p) => ({ ...p, budget: b }))} placeholder="bijv. 15000" />
               </label>
               {budget && project.rooms.length > 0 && (
                 <button
-                  className="small soft"
+                  className="soft"
                   onClick={() => {
                     if (project.rooms.some((r) => r.budget) && !confirm("Het budget per kamer opnieuw verdelen? Wat je per kamer had ingesteld, wordt overschreven.")) return;
                     const split = suggestSplit(budget, project.rooms);
@@ -77,7 +90,7 @@ export function Dashboard() {
                     toast("Budget verdeeld over de kamers", () => update(() => before));
                   }}
                 >
-                  ⚖︎ Verdeel slim over de kamers
+                  <I icon={Scales} /> Verdeel over de kamers
                 </button>
               )}
             </div>
@@ -85,41 +98,41 @@ export function Dashboard() {
           <BudgetBar totals={t} budget={budget} />
           <div className="legend">
             <span>
+              <i style={{ background: "var(--ok)" }} />
+              Besteld of in huis
+            </span>
+            <span>
+              <i style={{ background: "var(--stone)" }} />
+              Gekozen of idee
+            </span>
+            <span>
               <i style={{ background: "var(--accent)" }} />
-              Besteld/in huis
-            </span>
-            <span>
-              <i style={{ background: "color-mix(in srgb, var(--accent) 35%, transparent)" }} />
-              Gekozen/idee
-            </span>
-            <span>
-              <i style={{ background: "color-mix(in srgb, var(--warm) 45%, transparent)" }} />
               Geschat
             </span>
           </div>
         </div>
 
-        <div className="card stack tight">
+        <div className="card stack" style={{ gap: 8 }}>
           <div className="row between">
-            <h3>Per kamer</h3>
-            <a className="small" href="#/kamers">
-              Alle kamers →
+            <h2>Per kamer</h2>
+            <a className="small strong row" style={{ gap: 4 }} href="#/kamers">
+              Alle kamers <I icon={ArrowRight} size={14} />
             </a>
           </div>
           {project.rooms.map((r) => {
             const rt = totals(itemsIn(project.items, r.id));
             const photo = roomPhotos(project.listing, r.id)[0];
             return (
-              <a key={r.id} className="room-mini" href={href({ view: "kamer", id: r.id })}>
-                <span className="thumb">{photo ? <Img src={photo.url} width={160} alt="" loading="lazy" /> : ROOM_EMOJI[r.type]}</span>
-                <span className="grow stack tight">
+              <a key={r.id} className="room-row" href={href({ view: "kamer", id: r.id })}>
+                <span className="thumb">{photo ? <Img src={photo.url} width={160} alt="" loading="lazy" /> : <RoomIcon type={r.type} size={22} />}</span>
+                <span className="grow stack" style={{ gap: 6 }}>
                   <span className="row between">
                     <strong className="clip">{r.name}</strong>
                     <span className="num strong">{euro(rt.planned)}</span>
                   </span>
                   <BudgetBar totals={rt} budget={r.budget} />
                   <span className="tiny muted">
-                    {rt.count ? `${rt.bought}/${rt.count} gekocht` : "nog leeg"}
+                    {rt.count ? `${rt.bought} van ${rt.count} gekocht` : "nog leeg"}
                     {r.budget ? ` · budget ${euro(r.budget)}` : ""}
                   </span>
                 </span>
@@ -130,10 +143,15 @@ export function Dashboard() {
       </div>
 
       {(drops.length > 0 || loose.length > 0) && (
-        <div className="grid two">
+        <div className="grid two" style={{ alignItems: "start" }}>
           {drops.length > 0 && (
-            <div className="card stack">
-              <h3>📉 Prijs gedaald</h3>
+            <div className="stack">
+              <div className="row" style={{ gap: 10 }}>
+                <span className="icon-badge" style={{ color: "var(--ok)" }}>
+                  <I icon={TrendDown} size={20} />
+                </span>
+                <h2>Prijs gedaald</h2>
+              </div>
               <div className="items">
                 {drops.map((i) => (
                   <ItemRow key={i.id} item={i} showRoom />
@@ -142,19 +160,24 @@ export function Dashboard() {
             </div>
           )}
           {loose.length > 0 && (
-            <div className="card stack">
-              <div className="row between">
-                <h3>📥 Nog geen kamer</h3>
-                <span className="tiny muted">Tik op een item om een kamer te kiezen</span>
+            <div className="stack">
+              <div className="row" style={{ gap: 10 }}>
+                <span className="icon-badge">
+                  <I icon={Tray} size={20} />
+                </span>
+                <div>
+                  <h2>Nog geen kamer</h2>
+                  <p className="tiny muted">Kies rechts de kamer</p>
+                </div>
               </div>
               <div className="items">
                 {loose.slice(0, 6).map((i) => (
-                  <div key={i.id} className="row">
+                  <div key={i.id} className="row" style={{ gap: 0, paddingRight: 12 }}>
                     <div className="grow">
                       <ItemRow item={i} />
                     </div>
                     <select
-                      aria-label="Kamer"
+                      aria-label={`Kamer voor ${i.title}`}
                       style={{ width: 130 }}
                       value=""
                       onChange={(e) => e.target.value && update(patchItem(i.id, { roomId: e.target.value }))}
@@ -175,11 +198,11 @@ export function Dashboard() {
       )}
 
       {biggest.length > 0 && (
-        <div className="card stack">
-          <div className="row between">
-            <h3>💶 Grootste uitgaven nog te doen</h3>
-            <a className="small" href="#/winkelen">
-              Naar winkelen →
+        <div className="stack">
+          <div className="section-head">
+            <h2>Grootste uitgaven nog te doen</h2>
+            <a className="small strong row" style={{ gap: 4 }} href="#/winkelen">
+              Naar winkelen <I icon={ArrowRight} size={14} />
             </a>
           </div>
           <div className="items">
@@ -197,28 +220,40 @@ export function Dashboard() {
 function NextSteps({ project }: { project: Project }) {
   const { openAdd, fal } = useApp();
   const steps = [
-    { done: project.rooms.some((r) => r.area || r.floor), label: "Kamers controleren", hint: fal ? "✨ laat de AI ze herkennen" : "namen, m² en foto's", href: "#/woning" },
-    { done: project.budget !== undefined, label: "Budget instellen", hint: "hieronder", href: undefined },
+    { done: project.rooms.some((r) => r.area || r.floor), label: "Kamers controleren", hint: fal ? "laat de AI ze herkennen" : "namen, m² en foto's", href: "#/woning" },
+    { done: project.budget !== undefined, label: "Budget instellen", hint: "hieronder" },
     { done: project.items.length > 0, label: "Eerste product toevoegen", hint: "plak een webshoplink", action: () => openAdd({ roomId: project.rooms[0]?.id ?? null }) },
-    { done: project.items.some((i) => i.status !== "idee"), label: "Iets kiezen of bestellen", hint: "tik op de status van een item", href: undefined },
+    { done: project.items.some((i) => i.status !== "idee"), label: "Iets kiezen of bestellen", hint: "tik op de status" },
   ];
   if (steps.every((s) => s.done)) return null;
   return (
-    <div className="card tint stack tight">
-      <strong>Aan de slag</strong>
-      <div className="row wrap-row">
-        {steps.map((s, n) => (
-          <a
-            key={s.label}
-            className={`chip ${s.done ? "ok" : ""}`}
-            href={s.href}
-            onClick={s.action ? (e) => (e.preventDefault(), s.action!()) : undefined}
-            style={{ padding: "6px 12px", cursor: s.href || s.action ? "pointer" : undefined }}
-          >
-            {s.done ? "✓" : `${n + 1}.`} {s.label}
-            {!s.done && <span className="muted" style={{ fontWeight: 500 }}> · {s.hint}</span>}
-          </a>
-        ))}
+    <div className="stack">
+      <h2>Aan de slag</h2>
+      <div className="steps">
+        {steps.map((s, n) => {
+          const inner = (
+            <>
+              <span className="n">{s.done ? <I icon={Check} size={13} weight="bold" /> : n + 1}</span>
+              {s.label}
+              {!s.done && <span className="hint">· {s.hint}</span>}
+            </>
+          );
+          if (s.action && !s.done)
+            return (
+              <button key={s.label} className="step" onClick={s.action}>
+                {inner}
+              </button>
+            );
+          return s.href && !s.done ? (
+            <a key={s.label} className="step" href={s.href}>
+              {inner}
+            </a>
+          ) : (
+            <span key={s.label} className={`step${s.done ? " done" : ""}`} style={{ cursor: "default" }}>
+              {inner}
+            </span>
+          );
+        })}
       </div>
     </div>
   );

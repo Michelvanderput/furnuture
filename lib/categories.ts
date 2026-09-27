@@ -35,26 +35,6 @@ export const CATEGORIES: { id: Category; label: string; group: "meubels" | "afwe
   { id: "overig", label: "Overig", group: "accessoires" },
 ];
 
-export const CATEGORY_EMOJI: Record<Category, string> = {
-  banken: "🛋️",
-  stoelen: "🪑",
-  tafels: "🍽️",
-  kasten: "🗄️",
-  bedden: "🛏️",
-  keuken: "🍳",
-  vloeren: "🪵",
-  verf: "🎨",
-  behang: "🧻",
-  tegels: "🔲",
-  sanitair: "🚿",
-  raamdecoratie: "🪟",
-  verlichting: "💡",
-  vloerkleden: "🧶",
-  decoratie: "🖼️",
-  planten: "🪴",
-  overig: "📦",
-};
-
 export const roomLabel = (id: RoomType) => ROOMS.find((r) => r.id === id)?.label ?? id;
 export const categoryLabel = (id: Category) => CATEGORIES.find((c) => c.id === id)?.label ?? id;
 

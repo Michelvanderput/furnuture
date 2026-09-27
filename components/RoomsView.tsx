@@ -3,11 +3,13 @@
 import { useState } from "react";
 import { roomLabel } from "@/lib/categories";
 import { moveRoom } from "@/lib/items";
-import { FURNISHABLE, newRoom, ROOM_EMOJI, roomPhotos } from "@/lib/rooms";
+import { ArrowDown, ArrowsDownUp, ArrowUp, Check, Plus } from "@phosphor-icons/react";
+import { FURNISHABLE, newRoom, roomPhotos } from "@/lib/rooms";
 import { go, href } from "@/lib/route";
 import { euro, itemsIn, mainItems, totals } from "@/lib/shopping";
 import type { Room, RoomType } from "@/lib/types";
 import { useApp } from "./app";
+import { I, RoomIcon } from "./icons";
 import { Img } from "./Img";
 import { ItemRow } from "./ItemRow";
 import { BudgetBar } from "./ui";
@@ -20,7 +22,13 @@ export function RoomCard({ room }: { room: Room }) {
   return (
     <a className="room-card" href={href({ view: "kamer", id: room.id })}>
       <div className="pic">
-        {photo ? <Img src={photo.url} width={640} alt="" loading="lazy" /> : <span className="emoji">{ROOM_EMOJI[room.type]}</span>}
+        {photo ? (
+          <Img src={photo.url} width={640} alt="" loading="lazy" />
+        ) : (
+          <span className="placeholder">
+            <RoomIcon type={room.type} size={40} />
+          </span>
+        )}
         {(room.area || room.floor) && (
           <span className="badge">
             {room.area ? `${room.area} m²` : ""}
@@ -32,7 +40,11 @@ export function RoomCard({ room }: { room: Room }) {
       <div className="body">
         <div className="row between">
           <h3 className="clip">{room.name}</h3>
-          <span className="tiny muted">{t.count ? `${t.bought}/${t.count} ✓` : ""}</span>
+          {t.count > 0 && (
+            <span className="tiny muted nowrap">
+              {t.bought}/{t.count} gekocht
+            </span>
+          )}
         </div>
         <div className="row between" style={{ alignItems: "baseline" }}>
           <span className="total num">{euro(t.planned)}</span>
@@ -67,30 +79,33 @@ export function RoomsView() {
 
   return (
     <section className="page">
-      <div className="section-head">
+      <div className="page-head">
         <div className="stack tight">
           <h1>Kamers</h1>
-          <p className="muted small">
+          <p className="lead">
             {project.rooms.length} ruimtes · {euro(totals(project.items).planned)} gepland
           </p>
         </div>
         <div className="row">
-          <button className="ghost" onClick={() => setOrdering((o) => !o)}>
-            {ordering ? "Klaar" : "↕ Volgorde"}
+          <button className="ghost" onClick={() => setOrdering((o) => !o)} aria-pressed={ordering}>
+            {ordering ? <I icon={Check} /> : <I icon={ArrowsDownUp} />} {ordering ? "Klaar" : "Volgorde"}
           </button>
-          <button className="primary" onClick={() => setAdding((a) => !a)}>
-            ＋ Kamer
+          <button className="primary" onClick={() => setAdding((a) => !a)} aria-expanded={adding}>
+            <I icon={Plus} /> Kamer
           </button>
         </div>
       </div>
 
       {adding && (
-        <div className="card flat row wrap-row">
-          {FURNISHABLE.map((t) => (
-            <button key={t} className="small" onClick={() => add(t)}>
-              {ROOM_EMOJI[t]} {roomLabel(t)}
-            </button>
-          ))}
+        <div className="card flat stack">
+          <span className="small strong">Wat voor ruimte?</span>
+          <div className="row wrap-row" style={{ gap: 8 }}>
+            {FURNISHABLE.map((t) => (
+              <button key={t} className="small" onClick={() => add(t)}>
+                <RoomIcon type={t} size={16} /> {roomLabel(t)}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -98,15 +113,15 @@ export function RoomsView() {
         <div className="card stack tight">
           {project.rooms.map((r, i) => (
             <div key={r.id} className="row between">
-              <span>
-                {ROOM_EMOJI[r.type]} {r.name}
+              <span className="row" style={{ gap: 10 }}>
+                <RoomIcon type={r.type} size={18} /> {r.name}
               </span>
-              <span className="row">
-                <button className="small icon" disabled={i === 0} onClick={() => update(moveRoom(r.id, -1))} aria-label="Omhoog">
-                  ↑
+              <span className="row" style={{ gap: 6 }}>
+                <button className="small icon" disabled={i === 0} onClick={() => update(moveRoom(r.id, -1))} aria-label={`${r.name} omhoog`}>
+                  <I icon={ArrowUp} />
                 </button>
-                <button className="small icon" disabled={i === project.rooms.length - 1} onClick={() => update(moveRoom(r.id, 1))} aria-label="Omlaag">
-                  ↓
+                <button className="small icon" disabled={i === project.rooms.length - 1} onClick={() => update(moveRoom(r.id, 1))} aria-label={`${r.name} omlaag`}>
+                  <I icon={ArrowDown} />
                 </button>
               </span>
             </div>
@@ -135,7 +150,7 @@ export function RoomsView() {
 
       {loose.length > 0 && (
         <div className="stack">
-          <h2>📥 Nog geen kamer</h2>
+          <h2>Nog geen kamer</h2>
           <div className="items">
             {loose.map((i) => (
               <ItemRow key={i.id} item={i} />

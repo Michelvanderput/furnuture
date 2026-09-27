@@ -8,8 +8,8 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "Plak je Funda-link en plan per kamer wat je gaat kopen: prijzen, budget en een overzicht per winkel.",
     start_url: "/",
     display: "standalone",
-    background_color: "#f4f3ee",
-    theme_color: "#1f6f5c",
+    background_color: "#faf5f2",
+    theme_color: "#1c1917",
     lang: "nl",
     // Share a shop link from another app straight to the list (Android; iOS has no share target for web apps).
     share_target: { action: "/", method: "GET", params: { title: "title", text: "text", url: "url" } },
