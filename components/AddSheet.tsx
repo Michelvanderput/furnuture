@@ -42,8 +42,12 @@ export function AddSheet({ roomId: initialRoom, alternativeOf, links: initialLin
         continue;
       }
       setBusy(list.length > 1 ? `Ophalen ${n + 1} van ${list.length}…` : "Ophalen…");
-      const { item, error } = await itemFromLink(url, roomId);
-      if (error) failed.push(`${error} — aangevuld met wat bekend is; vul de rest zelf in${fal ? " of gebruik een screenshot" : ""}.`);
+      const { item, error, notAProduct } = await itemFromLink(url, roomId);
+      if (notAProduct) {
+        failed.push(`${error} Niet toegevoegd.`);
+        continue;
+      }
+      if (error) failed.push(`${error} De link staat op je lijst; vul naam en prijs zelf in${fal ? " of gebruik een screenshot" : ""}.`);
       added.push({ ...item, alternativeOf, must: main?.must });
     }
     setBusy("");

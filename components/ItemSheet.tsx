@@ -47,8 +47,9 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
     if (!/^https?:\/\//.test(link.trim())) return;
     setBusy("link");
     setNote("");
-    const { item: got, error } = await itemFromLink(link.trim(), item.roomId);
+    const { item: got, error, notAProduct } = await itemFromLink(link.trim(), item.roomId);
     setBusy("");
+    if (notAProduct) return setNote(`${error} Probeer een andere link.`);
     if (error) setNote(error);
     set({
       url: got.url,

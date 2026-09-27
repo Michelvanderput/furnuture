@@ -34,7 +34,7 @@ const host = (url: string) => {
  * A webshop link as an item (title, photo, price, size, category). When the shop
  * blocks us the link is kept anyway (with `error`): fill it in by hand or from a screenshot.
  */
-export async function itemFromLink(url: string, roomId: string | null): Promise<{ item: Item; error?: string }> {
+export async function itemFromLink(url: string, roomId: string | null): Promise<{ item: Item; error?: string; notAProduct?: boolean }> {
   const base: Item = { id: newId(), roomId, title: host(url), url, images: [], qty: 1, category: "overig", status: "idee", note: "", addedAt: Date.now(), source: "link" };
   try {
     const p = await readProduct(url);
@@ -54,7 +54,9 @@ export async function itemFromLink(url: string, roomId: string | null): Promise<
       },
     };
   } catch (e) {
-    return { item: { ...base, shop: host(url) }, error: `${host(url)}: ${e instanceof Error ? e.message : e}` };
+    // A dead link, or not a product page: nothing worth keeping.
+    const notAProduct = e instanceof ProductError && [400, 404, 410, 422].includes(e.status);
+    return { item: { ...base, shop: host(url) }, error: `${host(url)}: ${e instanceof Error ? e.message : e}`, notAProduct };
   }
 }
 

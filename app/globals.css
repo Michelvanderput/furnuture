@@ -98,7 +98,8 @@
 }
 
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; scroll-padding-top: 80px; scroll-padding-bottom: 24px; }
+@media (max-width: 760px) { html { scroll-padding-top: 64px; scroll-padding-bottom: calc(var(--nav-h) + 96px + env(safe-area-inset-bottom)); } }
 body {
   margin: 0;
   background: var(--bg);
@@ -442,9 +443,9 @@ details[open] > summary { margin-bottom: var(--space-3); }
 .shop-logo { width: 40px; height: 40px; border-radius: 12px; background: #fff; border: 1px solid var(--line); display: grid; place-items: center; overflow: hidden; flex-shrink: 0; font-weight: 700; color: #1c1917; }
 .shop-logo img { width: 22px; height: 22px; }
 .steps { display: flex; gap: var(--space-2); flex-wrap: wrap; }
-.step { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; min-height: 44px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); color: var(--ink); font-size: 14px; font-weight: 600; cursor: pointer; }
+.step { display: inline-flex; align-items: center; gap: 10px; padding: 8px 14px; min-height: 44px; text-align: left; white-space: normal; line-height: 1.35; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); color: var(--ink); font-size: 14px; font-weight: 600; cursor: pointer; }
 .step:hover { text-decoration: none; border-color: var(--line-strong); }
-.step .n { width: 22px; height: 22px; border-radius: 99px; display: grid; place-items: center; background: var(--surface-3); font-size: 12px; }
+.step .n { flex-shrink: 0; width: 22px; height: 22px; border-radius: 99px; display: grid; place-items: center; background: var(--surface-3); font-size: 12px; }
 .step.done { color: var(--muted); background: transparent; }
 .step.done .n { background: var(--ok); color: #fff; }
 .step .hint { font-weight: 400; color: var(--muted); }
@@ -509,3 +510,4 @@ details[open] > summary { margin-bottom: var(--space-3); }
   .found-card .actions .btn.icon { display: none; }
   .found-card .body .tiny:last-of-type { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 }
+@media (max-width: 560px) { .steps { flex-direction: column; } .step { width: 100%; } }

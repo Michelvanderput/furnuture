@@ -32,6 +32,10 @@ export function Dashboard() {
     <section className="page">
       <HouseHero />
 
+      {/* What to do next comes first; the figures follow once there is something to count. */}
+      <RoomDetect compact />
+      <NextSteps project={project} />
+
       <div className="grid stats">
         <div className="stat">
           <span className="label">
@@ -65,9 +69,7 @@ export function Dashboard() {
         </div>
       </div>
 
-      <RoomDetect compact />
 
-      <NextSteps project={project} />
 
       <div className="grid two" style={{ alignItems: "start" }}>
         <div className="card stack" style={{ gap: 20 }}>
@@ -237,8 +239,10 @@ function NextSteps({ project }: { project: Project }) {
           const inner = (
             <>
               <span className="n">{s.done ? <I icon={Check} size={13} weight="bold" /> : n + 1}</span>
-              {s.label}
-              {!s.done && <span className="hint">· {s.hint}</span>}
+              <span>
+                {s.label}
+                {!s.done && <span className="hint"> · {s.hint}</span>}
+              </span>
             </>
           );
           if (s.action && !s.done)
