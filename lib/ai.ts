@@ -258,7 +258,7 @@ export async function aiScreenshot(image: string, onProgress?: Progress): Promis
 }
 
 // ---------------------------------------------------------------------------
-// 4. Alternatives on the web
+// 4. Products on the web: alternatives for a product, or real products for a placeholder
 
 export interface Alternative {
   title: string;
@@ -268,20 +268,33 @@ export interface Alternative {
   why: string;
 }
 
-export async function aiAlternatives(item: Item, onProgress?: Progress): Promise<Alternative[]> {
+/**
+ * Searches the web for products: similar ones for a product with a link, or matching
+ * ones for something still to find ("eettafel voor 4-6 personen, ± € 450"). The model
+ * only gives links; the app reads each shop page itself for photo, price and size
+ * (see findProducts in products.ts).
+ */
+export async function aiAlternatives(item: Item, project?: Project, onProgress?: Progress): Promise<Alternative[]> {
   const c = lineCost(item);
-  const dims = item.dims ? ` Maten: ${[item.dims.w, item.dims.d, item.dims.h].filter(Boolean).join(" × ")} cm.` : "";
-  const prompt =
-    `Product: "${item.title}"${item.shop ? ` van ${item.shop}` : ""}${c.known ? `, € ${Math.round(c.value / item.qty)}` : ""} (${categoryLabel(item.category)}).${dims}` +
-    "\nZoek op internet 3 tot 4 vergelijkbare producten die nu te koop zijn bij Nederlandse webshops: zelfde soort, vergelijkbare maat en stijl, bij voorkeur goedkoper, of duidelijk beter voor weinig meer. " +
-    "Geef alleen echte productpagina's die je gevonden hebt (geen categorie- of zoekpagina's)." +
+  const each = c.known ? Math.round(c.value / item.qty) : undefined;
+  const dims = item.dims?.w ? ` Maten: ${[item.dims.w, item.dims.d, item.dims.h].filter(Boolean).join(" × ")} cm.` : "";
+  const room = project?.rooms.find((r) => r.id === item.roomId);
+  const context = `${room ? ` Voor de ${room.name.toLowerCase()}${room.area ? ` (${room.area} m²)` : ""}.` : ""}${project?.style ? ` Stijl: ${project.style}.` : ""}`;
+  const prompt = item.url
+    ? `Product: "${item.title}"${item.shop ? ` van ${item.shop}` : ""}${each ? `, € ${each}` : ""} (${categoryLabel(item.category)}).${dims}${context}` +
+      "\nZoek op internet 5 vergelijkbare producten die nu te koop zijn bij Nederlandse webshops: zelfde soort, vergelijkbare maat en stijl, bij voorkeur goedkoper, of duidelijk beter voor weinig meer."
+    : `Gezocht: "${item.title}" (${categoryLabel(item.category)})${each ? `, budget rond € ${each} per stuk` : ""}.${dims}${context}` +
+      "\nZoek op internet 5 concrete producten die hier goed bij passen en nu te koop zijn bij Nederlandse webshops, in verschillende prijsklassen rond het budget.";
+  const full =
+    prompt +
+    " Geef alleen echte productpagina's (de pagina van één product, geen categorie-, zoek- of vergelijkingspagina's), bij voorkeur van de winkel zelf." +
     `\nAntwoord als JSON: {"options":[{"title":"","shop":"","price":0,"url":"https://…","why":"max 10 woorden, bv. 'zelfde maat, € 60 goedkoper'"}]}`;
   type Answer = { options?: { title?: unknown; shop?: unknown; price?: unknown; url?: unknown; why?: unknown }[] };
-  const a = await ask<Answer>(`alt:${item.id}`, { prompt, web: true, maxTokens: 900 }, "✨ Alternatieven zoeken", onProgress);
+  const a = await ask<Answer>(`alt:${item.id}`, { prompt: full, web: true, maxTokens: 1100 }, item.url ? "✨ Alternatieven zoeken" : "✨ Producten zoeken", onProgress);
   return (a.options ?? [])
     .map((o) => ({ title: text(o.title, 120), shop: text(o.shop, 40), price: typeof o.price === "number" && o.price > 0 ? o.price : undefined, url: text(o.url, 500), why: text(o.why, 100) }))
     .filter((o) => o.title && /^https?:\/\/[^/]+\/.+/.test(o.url) && o.url !== item.url)
-    .slice(0, 4);
+    .slice(0, 6);
 }
 
 // ---------------------------------------------------------------------------

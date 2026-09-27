@@ -1,23 +1,22 @@
 "use client";
 
 import { useState } from "react";
-import { aiAlternatives, type Alternative } from "@/lib/ai";
 import { CATEGORIES } from "@/lib/categories";
-import { euroCents, FAL_COST } from "@/lib/fal";
 import { productThumb } from "@/lib/images";
-import { addItems, chooseAlternative, duplicateItem, moveItem, patchItem, removeItem } from "@/lib/items";
+import { chooseAlternative, duplicateItem, moveItem, patchItem, removeItem } from "@/lib/items";
 import { itemFromLink, priceChange, refreshPrice } from "@/lib/products";
 import { alternativesOf, euro, lineCost, STATUS } from "@/lib/shopping";
 import type { Category, Item } from "@/lib/types";
-import { ArrowSquareOut, ArrowsClockwise, Copy, MagnifyingGlass, Plus, Sparkle, Star, Trash } from "@phosphor-icons/react";
+import { ArrowSquareOut, ArrowsClockwise, Copy, Plus, Star, Trash } from "@phosphor-icons/react";
 import { useApp } from "./app";
 import { CategoryIcon, I, STATUS_ICON } from "./icons";
 import { Img } from "./Img";
+import { ProductFinder } from "./ProductFinder";
 import { ItemThumb, Price } from "./ItemRow";
 import { EuroInput, Sheet, Stepper } from "./ui";
 
 export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) {
-  const { project, update, toast, openAdd, openItem, fal } = useApp();
+  const { project, update, toast, openAdd, openItem } = useApp();
   const item = project.items.find((i) => i.id === id)!;
   const main = item.alternativeOf ? project.items.find((i) => i.id === item.alternativeOf) : undefined;
   const alts = alternativesOf(project.items, item.id);
@@ -25,7 +24,6 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
   const [busy, setBusy] = useState("");
   const [note, setNote] = useState("");
   const [link, setLink] = useState("");
-  const [found, setFound] = useState<Alternative[] | null>(null);
   const change = priceChange(item);
 
   async function checkPrice() {
@@ -68,29 +66,6 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
     });
     if (got.image) productThumb(got.image).then((thumb) => update(patchItem(item.id, { thumb }))).catch(() => undefined);
     setLink("");
-  }
-
-  async function findAlternatives() {
-    setBusy("alt");
-    setNote("");
-    try {
-      setFound(await aiAlternatives(item, (m) => m && setNote(m)));
-      setNote("");
-    } catch (e) {
-      setNote(`Zoeken lukte niet: ${e instanceof Error ? e.message : e}`);
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function addAlternative(a: Alternative) {
-    setBusy(a.url);
-    const { item: got } = await itemFromLink(a.url, item.roomId);
-    update(addItems([{ ...got, title: got.title.length > 3 && !got.title.includes(".") ? got.title : a.title, price: got.price ?? a.price, shop: got.shop ?? a.shop, alternativeOf: item.id, source: "ai", why: a.why }]));
-    if (got.image) productThumb(got.image).then((thumb) => update(patchItem(got.id, { thumb }))).catch(() => undefined);
-    setFound((f) => f?.filter((x) => x.url !== a.url) ?? null);
-    setBusy("");
-    toast("Toegevoegd als optie");
   }
 
   const pickImage = (image: string) => {
@@ -223,7 +198,7 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
                   </button>
                 ))}
               </div>
-              <button className={`chip ${item.must ? "gold" : ""}`} onClick={() => set({ must: !item.must })} title="Must-have: dit moet er echt zijn als je verhuist">
+              <button className={`chip ${item.must ? "must" : ""}`} aria-pressed={!!item.must} onClick={() => set({ must: !item.must })} title="Must-have: dit moet er echt zijn als je verhuist">
                 <I icon={Star} size={14} weight={item.must ? "fill" : "regular"} /> Must-have
               </button>
             </div>
@@ -243,18 +218,30 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
             {change !== null && <span className={`chip ${change < 0 ? "ok" : "danger"}`}>{change < 0 ? `${euro(-change)} goedkoper dan eerst` : `${euro(change)} duurder dan eerst`}</span>}
           </div>
         ) : (
-          <form
-            className="row"
-            onSubmit={(e) => {
-              e.preventDefault();
-              fillFromLink();
-            }}
-          >
-            <input type="url" placeholder="Gevonden? Plak hier de link van het product" value={link} onChange={(e) => setLink(e.target.value)} />
-            <button className="primary" disabled={!link || !!busy}>
-              {busy === "link" ? <span className="spinner" /> : "Koppel"}
-            </button>
-          </form>
+          <div className="card ai-card stack">
+            <div className="stack tight">
+              <h2 style={{ fontSize: 20 }}>Nog te vinden</h2>
+              {item.why && <p className="small muted">{item.why}</p>}
+            </div>
+            <ProductFinder item={item} />
+            <form
+              className="stack tight"
+              onSubmit={(e) => {
+                e.preventDefault();
+                fillFromLink();
+              }}
+            >
+              <label className="field" htmlFor="own-link">
+                Zelf iets gevonden? Plak de link
+              </label>
+              <div className="row">
+                <input id="own-link" type="url" inputMode="url" placeholder="https://…" value={link} onChange={(e) => setLink(e.target.value)} />
+                <button className="primary" disabled={!link || !!busy}>
+                  {busy === "link" ? <span className="spinner" /> : "Koppel"}
+                </button>
+              </div>
+            </form>
+          </div>
         )}
         {note && <p className="small muted">{note}</p>}
       </div>
@@ -286,13 +273,8 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
             </div>
             <div className="row wrap-row">
               <button className="small" onClick={() => (onClose(), openAdd({ alternativeOf: item.id }))}>
-                <I icon={Plus} /> Optie
+                <I icon={Plus} /> Zelf een optie toevoegen
               </button>
-              {fal && (
-                <button className="small ai" onClick={findAlternatives} disabled={!!busy}>
-                  {busy === "alt" ? <span className="spinner" /> : <I icon={Sparkle} />} Zoek alternatieven <span className="cost">{euroCents(FAL_COST.alternatives)}</span>
-                </button>
-              )}
             </div>
           </div>
           {alts.length > 0 && (
@@ -353,34 +335,7 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
               </table>
             </div>
           )}
-          {found && (
-            <div className="stack tight">
-              {found.length === 0 && <p className="small muted">Geen goede alternatieven gevonden.</p>}
-              {found.map((a) => (
-                <div className="suggestion" key={a.url}>
-                  <span className="icon-badge accent">
-                    <I icon={MagnifyingGlass} size={20} />
-                  </span>
-                  <div className="grow stack tight">
-                    <strong className="small">{a.title}</strong>
-                    <span className="tiny muted">
-                      {a.shop}
-                      {a.price ? ` · ${euro(a.price, true)}` : ""} · {a.why}
-                    </span>
-                  </div>
-                  <div className="row">
-                    <a className="btn small icon" href={a.url} target="_blank" rel="noreferrer" aria-label={`${a.title} bekijken bij ${a.shop}`}>
-                      <I icon={ArrowSquareOut} />
-                    </a>
-                    <button className="small soft" disabled={!!busy} onClick={() => addAlternative(a)}>
-                      {busy === a.url ? <span className="spinner" /> : <><I icon={Plus} /> Optie</>}
-                    </button>
-                  </div>
-                </div>
-              ))}
-              <p className="tiny muted">Gevonden door AI op internet: controleer prijs en maten in de winkel.</p>
-            </div>
-          )}
+          {item.url && <ProductFinder item={item} />}
         </div>
       )}
     </Sheet>

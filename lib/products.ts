@@ -5,6 +5,12 @@ import type { Item, ProductInfo } from "./types";
 export const sameLink = (a: string, b: string) =>
   a.replace(/[?#].*$/, "").replace(/\/$/, "") === b.replace(/[?#].*$/, "").replace(/\/$/, "");
 
+export class ProductError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
 export async function readProduct(url: string): Promise<ProductInfo> {
   const res = await fetch("/api/product", {
     method: "POST",
@@ -12,7 +18,7 @@ export async function readProduct(url: string): Promise<ProductInfo> {
     body: JSON.stringify({ url }),
   });
   const data = (await res.json().catch(() => ({}))) as ProductInfo & { error?: string };
-  if (!res.ok) throw new Error(data.error ?? "Ophalen mislukt");
+  if (!res.ok) throw new ProductError(data.error ?? "Ophalen mislukt", res.status);
   return data;
 }
 
@@ -67,4 +73,42 @@ export function priceChange(item: Item): number | null {
   if (!h || h.length < 2 || item.price === undefined) return null;
   const diff = item.price - h[0].value;
   return Math.abs(diff) >= 0.5 ? diff : null;
+}
+
+/** A product found on the web, read from the shop's own page where possible. */
+export interface Found {
+  title: string;
+  shop: string;
+  url: string;
+  why: string;
+  price?: number;
+  image?: string;
+  images: string[];
+  dims?: Item["dims"];
+  category?: Item["category"];
+  /** Read from the shop's page (photo and price are real), not only the AI's word. */
+  verified: boolean;
+}
+
+/**
+ * Reads the pages of products the AI found, all at once: photo, current price and size
+ * come from the shop itself. Links that do not lead to a product (gone, or made up)
+ * are dropped; a shop that blocks us keeps the AI's data, without photo.
+ */
+export async function verifyFound(options: { title: string; shop: string; url: string; why: string; price?: number }[]): Promise<Found[]> {
+  const results = await Promise.all(
+    options.map(async (o): Promise<Found | null> => {
+      try {
+        const p = await readProduct(o.url);
+        return { ...o, title: p.title || o.title, shop: p.shop || o.shop, url: p.url || o.url, price: p.priceValue ?? o.price, image: p.image, images: p.images ?? [], dims: p.dims, category: p.category, verified: true };
+      } catch (e) {
+        // 404 / not a product page: a dead or invented link.
+        if (e instanceof ProductError && (e.status === 400 || e.status === 404 || e.status === 410 || e.status === 422)) return null;
+        return { ...o, images: [], verified: false };
+      }
+    }),
+  );
+  const found = results.filter((f): f is Found => !!f);
+  // With photo first.
+  return [...found.filter((f) => f.image), ...found.filter((f) => !f.image)];
 }

@@ -69,13 +69,13 @@ export async function POST(req: Request) {
       (await fromWebsite(url).catch((e) => {
         throw new FetchError(
           `Funda blokkeert ophalen vanaf onze server${e instanceof FetchError ? "" : " (geen verbinding)"}. ` +
-            "Gebruik hieronder de knop 'Foto's van Funda halen', plak de paginabron of upload de foto's.",
+            "Kijk hieronder bij 'Lukt het niet?' voor de andere manieren.",
           502,
         );
       }));
     if (!result.title) result.title = decodeURIComponent(new URL(url).pathname.split("/").filter(Boolean).at(-2) ?? "");
     if (result.photos.length === 0) {
-      throw new FetchError("Geen foto's gevonden. Gebruik de knop 'Foto's van Funda halen' of upload de foto's.", 422);
+      throw new FetchError("Geen foto's gevonden. Kijk hieronder bij 'Lukt het niet?' voor de andere manieren.", 422);
     }
     return NextResponse.json(result);
   } catch (e) {

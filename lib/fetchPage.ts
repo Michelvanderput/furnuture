@@ -76,10 +76,9 @@ export async function safeFetch(raw: string, init: RequestInit = {}, maxRedirect
 export async function fetchHtml(raw: string): Promise<{ html: string; finalUrl: string }> {
   const res = await safeFetch(raw);
   if (!res.ok) {
+    if (res.status === 404 || res.status === 410) throw new FetchError("Deze pagina bestaat niet (meer).", 404);
     throw new FetchError(
-      res.status === 403 || res.status === 429
-        ? "De website blokkeert automatisch ophalen. Plak de paginabron of upload de foto's handmatig."
-        : `De website gaf een foutmelding (${res.status}).`,
+      res.status === 403 || res.status === 429 ? "De website blokkeert automatisch ophalen." : `De website gaf een foutmelding (${res.status}).`,
       502,
     );
   }
