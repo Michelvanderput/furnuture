@@ -82,7 +82,19 @@ export const isPlaceholder = (i: Item) => !i.url && i.price === undefined;
 export function placeholderFor(items: Item[], product: Item, taken: Set<string> = new Set()): Item | undefined {
   if (product.alternativeOf || product.category === "overig") return undefined;
   const matches = items.filter((p) => p.roomId === product.roomId && isPlaceholder(p) && !p.alternativeOf && p.category === product.category && !taken.has(p.id) && p.id !== product.id);
-  return matches.length === 1 ? matches[0] : undefined;
+  if (matches.length <= 1) return matches[0];
+  // Several of the same kind ("Nachtkastjes", "Kledingkast"): the one whose name the product shares.
+  const named = matches.filter((p) => sharesName(p.suggestion ?? p.title, product.title));
+  return named.length === 1 ? named[0] : undefined;
+}
+
+/** Words of 4+ letters, lower case, without plural endings: "Kledingkasten" → "kledingkast". */
+const words = (s: string) =>
+  (s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").match(/[a-z]{4,}/g) ?? []).map((w) => w.replace(/(en|jes|je|s)$/, ""));
+/** Does the product's name contain a word of what was to find ("kledingkast" in "KLEDINGKAST 2 DEUREN")? */
+export function sharesName(wanted: string, title: string): boolean {
+  const have = words(title);
+  return words(wanted).some((w) => w.length >= 4 && have.some((h) => h === w || h.includes(w) || w.includes(h)));
 }
 
 /** The product's data in the placeholder's place: its room, quantity, must-have, note and where it came from stay. */

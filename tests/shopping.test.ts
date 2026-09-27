@@ -102,3 +102,17 @@ describe("a product takes the place of what was still to find", () => {
     expect(next.items.map((i) => i.id)).toEqual(["ph", "st", "st2", "new2"]);
   });
 });
+
+describe("which placeholder a product fills", () => {
+  it("uses the name when there are several of the same kind", async () => {
+    const { placeholderFor, sharesName } = await import("@/lib/items");
+    expect(sharesName("Kledingkast (2-deurs)", "KLEDINGKAST 2 DEUREN EN 2 LADES MOLLY")).toBe(true);
+    expect(sharesName("Nachtkastjes (2×)", "KLEDINGKAST 2 DEUREN EN 2 LADES MOLLY")).toBe(false);
+    const items = [
+      item({ id: "n", title: "Nachtkastjes", category: "kasten", estimate: 50, qty: 2 }),
+      item({ id: "k", title: "Kledingkast (2-deurs)", category: "kasten", estimate: 250 }),
+    ];
+    const product = item({ id: "p", title: "KLEDINGKAST 2 DEUREN EN 2 LADES MOLLY", category: "kasten", url: "https://x.nl/k", price: 229 });
+    expect(placeholderFor(items, product)?.id).toBe("k");
+  });
+});
