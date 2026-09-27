@@ -47,20 +47,25 @@ describe("planning", () => {
     expect(addWorkdays("2026-10-02", 2)).toBe("2026-10-05"); // over the weekend
     expect(addWorkdays("2026-10-03", 1)).toBe("2026-10-05"); // Saturday → Monday
   });
-  it("plans phase after phase, in one room one after another, and flags jobs that end after moving in", () => {
+  it("plans like a builder: per room in order, rough work first, one job at a time for yourself", () => {
     const tasks = [
       task({ id: "floor", kind: "vloeren", roomIds: ["w"], days: 2 }),
       task({ id: "paint", kind: "schilderen", roomIds: ["w"], days: 3, who: "zelf" }),
       task({ id: "demo", kind: "sloop", roomIds: ["w"], days: 1 }),
       task({ id: "wiring", kind: "elektra", days: 1 }),
+      task({ id: "bath", kind: "badkamer", roomIds: ["b"], days: 5 }),
+      task({ id: "paint2", kind: "schilderen", roomIds: ["s"], days: 1, who: "zelf" }),
     ];
     const plan = autoPlan(tasks, "2026-10-01"); // Thursday
     const by = Object.fromEntries(plan.map((t) => [t.id, t]));
     expect(by.demo.start).toBe("2026-10-01");
-    expect(by.wiring.start).toBe("2026-10-02");
-    expect(by.paint.start).toBe("2026-10-05"); // phase 6: first the paint …
-    expect(by.floor.start).toBe("2026-10-08"); // … then the floor, same room
-    expect(taskEnd(by.floor)).toBe("2026-10-09");
-    expect(lateTasks({ moveDate: "2026-10-08", tasks: plan }).map((t) => t.id)).toEqual(["floor"]);
+    expect(by.wiring.start).toBe("2026-10-01"); // another trade, the whole house: side by side
+    expect(by.bath.start).toBe("2026-10-02"); // after the wiring, next to the living room
+    expect(by.paint.start).toBe("2026-10-02"); // after the demolition in the same room
+    expect(taskEnd(by.paint)).toBe("2026-10-06");
+    expect(by.paint2.start).toBe("2026-10-07"); // yourself: after your other paint job
+    expect(by.floor.start).toBe("2026-10-07"); // after the paint in the same room
+    expect(taskEnd(by.floor)).toBe("2026-10-08");
+    expect(lateTasks({ moveDate: "2026-10-07", tasks: plan }).map((t) => t.id).sort()).toEqual(["bath", "floor"]);
   });
 });

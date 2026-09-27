@@ -120,7 +120,7 @@ export interface Suggestion {
 export function suggestions(p: Project, roomId?: string): Suggestion[] {
   const out: Suggestion[] = [];
   const rooms = roomId ? p.rooms.filter((r) => r.id === roomId) : p.rooms;
-  for (const r of rooms) out.push(...roomSuggestions(r));
+  for (const r of rooms) out.push(...roomSuggestions(r, p.rooms.find((x) => x.type === r.type)?.id === r.id));
   if (!roomId) out.push(...houseSuggestions(p));
   const tasks = renovationOf(p).tasks;
   const have = new Set(tasks.map((t) => keyOf(t.title, t.roomIds[0])));
@@ -136,7 +136,8 @@ export function similarTask(tasks: Task[], kind: RenoKind, roomId?: string): Tas
 }
 const keyOf = (title: string, roomId?: string) => `${roomId ?? "huis"}:${title.toLowerCase()}`;
 
-function roomSuggestions(r: Room): Suggestion[] {
+/** `first`: the first room of its kind (the stairs are suggested once, not for every landing). */
+function roomSuggestions(r: Room, first = true): Suggestion[] {
   const a = r.area ?? ({ woonkamer: 30, keuken: 10, slaapkamer: 12, badkamer: 6, toilet: 2, hal: 8, werkkamer: 9, zolder: 20, tuin: 50 } as Record<string, number>)[r.type] ?? 10;
   const s = (title: string, kind: RenoKind, who: "zelf" | "vakman", estimate: number, why: string, beforeMove = true, days?: number): Suggestion => ({
     key: keyOf(title, r.id),
@@ -155,7 +156,7 @@ function roomSuggestions(r: Room): Suggestion[] {
     list.push(s(`Muren en plafond schilderen`, "schilderen", "zelf", paint * 3.5, `± ${paint} m² verven; zelf ± € 3,50/m² aan verf en spullen (schilder ± € 20/m²).`, true, Math.max(1, Math.round(paint / 40))));
     if (r.type !== "hal") list.push(s(`Nieuwe vloer leggen`, "vloeren", "vakman", a * 45, `${a} m² laminaat of pvc, gelegd ± € 45/m² (zelf ± € 25/m²). Leg de vloer na het schilderen.`, true, Math.max(1, Math.round(a / 20))));
   }
-  if (r.type === "hal") list.push(s("Trap bekleden", "timmerwerk", "vakman", 1400, "Een open of versleten trap: bekleden met laminaat of pvc, ± € 1.400."));
+  if (r.type === "hal" && first) list.push(s("Trap bekleden", "timmerwerk", "vakman", 1400, "Een open of versleten trap: bekleden met laminaat of pvc, ± € 1.400."));
   if (r.type === "keuken") {
     list.push(s("Keuken opknappen (fronten, werkblad)", "keuken", "zelf", 1500, "Nieuwe fronten, greepjes en werkblad: veel effect voor weinig geld."));
     list.push(s("Nieuwe keuken", "keuken", "vakman", 9000, "Een complete keuken incl. apparatuur en plaatsen, middenklasse ± € 9.000. Levertijd vaak 6–10 weken.", true, 5));
@@ -164,7 +165,7 @@ function roomSuggestions(r: Room): Suggestion[] {
     list.push(s("Badkamer opfrissen (kitten, voegen, kranen)", "badkamer", "zelf", 300, "Nieuwe kitnaden, voegen en kranen: een badkamer voelt meteen schoon."));
     list.push(s("Badkamer vernieuwen", "badkamer", "vakman", Math.max(9000, a * 1600), `Complete badkamer, ${a} m²: ± € 1.600/m², minimaal ± € 9.000. Duurt ± 2 weken.`, true, 10));
   }
-  if (r.type === "toilet") list.push(s("Toilet vernieuwen", "badkamer", "vakman", 2500, "Nieuwe tegels, hangtoilet en fonteintje: ± € 2.500."));
+  if (r.type === "toilet") list.push(s("Toilet vernieuwen", "badkamer", "vakman", 2500, "Nieuwe tegels, hangtoilet en fonteintje: ± € 2.500.", true, 5));
   if (r.type === "tuin") list.push(s("Tuin opknappen", "tuin", "zelf", a * 20, `${a} m²: zelf ± € 20/m² aan planten, grond en tegels (hovenier ± € 60/m²).`, false));
   return list;
 }
@@ -241,32 +242,31 @@ export const taskEnd = (t: Task) => (t.start ? addWorkdays(t.start, t.days ?? KI
 export const daysBetween = (a: string, b: string) => Math.round((parse(b).getTime() - parse(a).getTime()) / 86_400_000);
 
 /**
- * Plans every job that is not done, phase after phase from the key date: jobs of one
- * phase run side by side, except in the same room (one after the other there).
- * Jobs done by yourself never overlap each other (you can be in one place at a time).
+ * Plans every job that is not done, from the key date, as a builder would:
+ * - in one room the work follows the phases (walls before paint before floor);
+ * - demolition and pipes for the whole house come before all finishing work;
+ * - one trade does one job at a time, and you can only do one job yourself at a time;
+ * - everything else runs side by side (paint a bedroom while the bathroom is being done).
  */
 export function autoPlan(tasks: Task[], keyDate: string): Task[] {
-  let phaseStart = keyDate;
+  const todo = tasks.filter((t) => t.status !== "klaar").sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind));
+  const busyUntil = new Map<string, string>(); // lane -> last day taken
+  let roughEnd: string | undefined; // end of house-wide demolition and pipes
   const out = new Map<string, Task>();
-  for (const phase of PHASES) {
-    // Within a phase the order of the kinds too: paint before the floor.
-    const inPhase = tasks
-      .filter((t) => KINDS[t.kind].phase === phase.id && t.status !== "klaar")
-      .sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind));
-    if (!inPhase.length) continue;
-    let phaseEnd = phaseStart;
-    const busyUntil = new Map<string, string>(); // room (or "zelf") -> last day taken
-    for (const t of inPhase) {
-      const lanes = [...(t.roomIds.length ? t.roomIds : ["huis"]), ...(t.who === "zelf" ? ["zelf"] : [])];
-      const after = lanes.map((l) => busyUntil.get(l)).filter((d): d is string => !!d).sort().at(-1);
-      const start = after ? nextWorkday(after) : addWorkdays(phaseStart, 1);
-      const planned = { ...t, start, days: t.days ?? KINDS[t.kind].days };
-      const end = taskEnd(planned)!;
-      lanes.forEach((l) => busyUntil.set(l, end));
-      if (end > phaseEnd) phaseEnd = end;
-      out.set(t.id, planned);
-    }
-    phaseStart = nextWorkday(phaseEnd);
+  for (const t of todo) {
+    const phase = KINDS[t.kind].phase;
+    const lanes = [
+      ...t.roomIds.map((r) => `kamer:${r}`),
+      ...(t.roomIds.length ? [] : [`vak:${t.kind}`]),
+      ...(t.who === "zelf" ? ["zelf"] : [`vak:${t.kind}`]),
+    ];
+    const after = [...lanes.map((l) => busyUntil.get(l)), phase > 2 ? roughEnd : undefined].filter((d): d is string => !!d).sort().at(-1);
+    const start = after ? nextWorkday(after) : addWorkdays(keyDate, 1);
+    const planned = { ...t, start, days: t.days ?? KINDS[t.kind].days };
+    const end = taskEnd(planned)!;
+    lanes.forEach((l) => busyUntil.set(l, end));
+    if (phase <= 2 && !t.roomIds.length && (!roughEnd || end > roughEnd)) roughEnd = end;
+    out.set(t.id, planned);
   }
   return tasks.map((t) => out.get(t.id) ?? t);
 }
