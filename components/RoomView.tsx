@@ -203,14 +203,22 @@ function ItemWithAlternatives({ item }: { item: Item }) {
   );
 }
 
+/** The last answers per room, for this session: coming back to a room shows them again (asking again costs). */
+const lastAdvice = new Map<string, Advice>();
+const lastStyle = new Map<string, StyleCheck>();
+
 /** ✨ What is missing, and does it go together? */
 function AiCard({ room }: { room: Room }) {
   const { project, update, fal, toast } = useApp();
-  const [advice, setAdvice] = useState<Advice | null>(null);
-  const [style, setStyle] = useState<StyleCheck | null>(null);
+  const [advice, setAdviceState] = useState<Advice | null>(() => lastAdvice.get(room.id) ?? null);
+  const [style, setStyleState] = useState<StyleCheck | null>(() => lastStyle.get(room.id) ?? null);
+  const setAdvice = (a: Advice) => (lastAdvice.set(room.id, a), setAdviceState(a));
+  const setStyle = (a: StyleCheck) => (lastStyle.set(room.id, a), setStyleState(a));
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const [added, setAdded] = useState<Set<string>>(new Set());
+  // A suggestion counts as added when an item with its name is in this room.
+  const onList = new Set(project.items.filter((i) => i.roomId === room.id).flatMap((i) => [i.title.toLowerCase(), i.suggestion?.toLowerCase() ?? ""]));
+  const added = { has: (title: string) => onList.has(title.toLowerCase()) };
   if (!fal) return null;
   const withImages = project.items.filter((i) => i.roomId === room.id && !i.alternativeOf && /^https?:/.test(i.image ?? "")).length;
 
@@ -227,8 +235,7 @@ function AiCard({ room }: { room: Room }) {
     }
   }
 
-  const addSuggestion = (s: Advice["suggestions"][number]) => {
-    const item: Item = {
+  const toItem = (s: Advice["suggestions"][number]): Item => ({
       id: newId(),
       roomId: room.id,
       title: s.title,
@@ -240,12 +247,11 @@ function AiCard({ room }: { room: Room }) {
       must: s.must,
       note: "",
       why: s.why,
+      suggestion: s.title,
       addedAt: Date.now(),
       source: "ai",
-    };
-    update(addItems([item]));
-    setAdded((a) => new Set(a).add(s.title));
-  };
+  });
+  const addSuggestion = (s: Advice["suggestions"][number]) => update(addItems([toItem(s)]));
 
   return (
     <div className="card ai-card stack">
@@ -310,7 +316,7 @@ function AiCard({ room }: { room: Room }) {
                 className="small"
                 onClick={() => {
                   const musts = advice.suggestions.filter((s) => s.must && !added.has(s.title));
-                  musts.forEach(addSuggestion);
+                  update(addItems(musts.map(toItem)));
                   toast(`${musts.length} must-haves op de lijst`);
                 }}
               >

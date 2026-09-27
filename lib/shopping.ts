@@ -92,13 +92,13 @@ const SHARE: Record<RoomType, number> = {
   slaapkamer: 12,
   badkamer: 5,
   toilet: 1.5,
-  hal: 4,
+  hal: 1.5,
   werkkamer: 8,
   zolder: 4,
   tuin: 8,
   buitenkant: 0,
   plattegrond: 0,
-  overig: 4,
+  overig: 2,
 };
 /** A budget split over the rooms, rounded to tens. The main bedroom gets a bit more. */
 export function suggestSplit(budget: number, rooms: Room[]): Record<string, number> {

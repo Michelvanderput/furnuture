@@ -48,15 +48,44 @@ export function AddSheet({ roomId: initialRoom, alternativeOf, links: initialLin
     }
     setBusy("");
     if (added.length) {
-      update(addItems(added));
-      // Thumbnails in the background: instant list, and the photo survives an expiring shop link.
+      const before = project;
+      // A product for something still to find ("Bank (3-zits)", ± € 800) takes its place instead of standing next to it.
+      const taken = new Set<string>();
+      const replaced: { item: Item; placeholder: Item }[] = [];
+      const fresh: Item[] = [];
       for (const it of added) {
+        const matches = alternativeOf
+          ? []
+          : project.items.filter((p) => p.roomId === it.roomId && !p.url && !p.alternativeOf && p.category === it.category && it.category !== "overig" && !taken.has(p.id));
+        if (matches.length === 1) {
+          taken.add(matches[0].id);
+          replaced.push({ item: it, placeholder: matches[0] });
+        } else fresh.push(it);
+      }
+      update((p) => ({
+        ...p,
+        items: [
+          ...p.items.map((x) => {
+            const r = replaced.find((y) => y.placeholder.id === x.id);
+            if (!r) return x;
+            // The product's data, with the placeholder's place: room, quantity, must-have, note, where it came from.
+            return { ...r.item, id: x.id, roomId: x.roomId, qty: x.qty, must: x.must, note: x.note, suggestion: x.suggestion ?? x.title, why: x.why, estimate: x.estimate, status: x.status === "idee" ? "gekozen" : x.status };
+          }),
+          ...fresh,
+        ],
+      }));
+      // Thumbnails in the background: instant list, and the photo survives an expiring shop link.
+      for (const it of [...fresh, ...replaced.map((r) => ({ ...r.item, id: r.placeholder.id }))]) {
         const urls = [it.image, ...it.images].filter((u): u is string => !!u);
         if (urls.length) firstWorkingThumb(urls).then((r) => r && update(patchItem(it.id, { thumb: r.thumb, image: r.image })));
       }
-      toast(added.length === 1 ? `${added[0].title.slice(0, 50)} toegevoegd` : `${added.length} producten toegevoegd`, () =>
-        update((p) => ({ ...p, items: p.items.filter((i) => !added.some((a) => a.id === i.id)) })),
-      );
+      const text =
+        replaced.length === 1 && !fresh.length
+          ? `${replaced[0].item.title.slice(0, 40)} vervangt "${replaced[0].placeholder.title.slice(0, 30)}"`
+          : added.length === 1
+            ? `${added[0].title.slice(0, 50)} toegevoegd`
+            : `${added.length} producten toegevoegd${replaced.length ? `, ${replaced.length} op de plek van een "nog te vinden"` : ""}`;
+      toast(text, () => update(() => before));
     }
     if (failed.length) setErrors(failed);
     else onClose();

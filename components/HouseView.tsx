@@ -1,14 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { aiRooms, applyRooms, type RoomProposal } from "@/lib/ai";
 import { roomLabel } from "@/lib/categories";
-import { euroCents, FAL_COST } from "@/lib/fal";
 import { fileToDataUrl } from "@/lib/images";
 import { newId } from "@/lib/rooms";
 import type { HouseFacts, Photo, RoomType } from "@/lib/types";
 import { useApp } from "./app";
-import { ArrowSquareOut, Plus, Sparkle } from "@phosphor-icons/react";
+import { ArrowSquareOut, Plus } from "@phosphor-icons/react";
+import { RoomDetect } from "./RoomDetect";
 import { I, RoomIcon } from "./icons";
 import { Img } from "./Img";
 import { Lightbox } from "./ui";
@@ -53,28 +52,12 @@ export function HouseHero() {
 }
 
 export function HouseView() {
-  const { project, update, fal, toast } = useApp();
+  const { project, update } = useApp();
   const l = project.listing;
-  const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
-  const [proposal, setProposal] = useState<RoomProposal | null>(null);
   const [lightbox, setLightbox] = useState<{ list: string[]; i: number } | null>(null);
   const photos = l?.photos ?? [];
   const plans = photos.filter((p) => p.room === "plattegrond");
   const others = photos.filter((p) => p.room !== "plattegrond");
-
-  async function detect() {
-    if (!l) return;
-    setError("");
-    setBusy("…");
-    try {
-      setProposal(await aiRooms(l, (m) => setBusy(m || "…")));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy("");
-    }
-  }
 
   const setPhoto = (id: string, patch: Partial<Photo>) =>
     update((p) => ({ ...p, listing: p.listing && { ...p.listing, photos: p.listing.photos.map((ph) => (ph.id === id ? { ...ph, ...patch } : ph)) } }));
@@ -88,75 +71,7 @@ export function HouseView() {
     <section className="page">
       <HouseHero />
 
-      {fal && l && (
-        <div className="card ai-card stack">
-          <div className="card-head">
-            <div className="title" style={{ alignItems: "flex-start" }}>
-              <span className="icon-badge accent">
-                <I icon={Sparkle} size={20} />
-              </span>
-              <div className="stack tight" style={{ maxWidth: 560 }}>
-              <h3>Kamers herkennen</h3>
-              <p className="small muted">
-                De AI leest de plattegrond, de omschrijving en alle foto&apos;s: welke kamers, hoe groot, op welke verdieping, en welke foto bij welke kamer
-                hoort.
-              </p>
-              </div>
-            </div>
-            <button className="accent" onClick={detect} disabled={!!busy}>
-              {busy ? (
-                <>
-                  <span className="spinner" /> Bezig…
-                </>
-              ) : (
-                <>
-                  <I icon={Sparkle} /> Herken kamers <span className="cost">{euroCents(FAL_COST.rooms)}</span>
-                </>
-              )}
-            </button>
-          </div>
-          {error && <p className="error small">{error}</p>}
-          {proposal && (
-            <div className="stack">
-              <div className="grid two" style={{ gap: 8 }}>
-                {proposal.rooms.map((r) => (
-                  <div key={r.id} className="suggestion">
-                    <span className="icon-badge">
-                      <RoomIcon type={r.type} size={20} />
-                    </span>
-                    <div className="grow stack tight">
-                      <strong className="small">{r.name}</strong>
-                      <span className="tiny muted">
-                        {[r.floor, r.area && `${r.area} m²`, `${r.photoIdx.length} foto's`].filter(Boolean).join(" · ")}
-                        {r.note ? ` · ${r.note}` : ""}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="row wrap-row between">
-                <span className="tiny muted">Kamers van dezelfde soort houden hun producten en budget. Alles is daarna nog aan te passen.</span>
-                <div className="row">
-                  <button className="ghost" onClick={() => setProposal(null)}>
-                    Niet doen
-                  </button>
-                  <button
-                    className="primary"
-                    onClick={() => {
-                      const before = project;
-                      update((p) => applyRooms(p, proposal));
-                      setProposal(null);
-                      toast(`${proposal.rooms.length} kamers ingedeeld`, () => update(() => before));
-                    }}
-                  >
-                    Toepassen
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      <RoomDetect />
 
       {l?.facts && Object.keys(l.facts).length > 0 && (
         <div className="card stack">

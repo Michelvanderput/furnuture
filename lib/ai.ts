@@ -117,7 +117,7 @@ export async function aiRooms(listing: Listing, onProgress?: Progress): Promise<
     `\nAntwoord als JSON: {"rooms":[{"name":"Woonkamer","type":"woonkamer","floor":"Begane grond","area_m2":32,"photos":[0,3],"note":"open keuken, grote tuindeuren op het zuiden"}],"photo_types":["woonkamer","buitenkant",…]}` +
     `\n"type" is een van: ${TYPES}. "photo_types" heeft per foto (in volgorde) een van: ${TYPES}, buitenkant, plattegrond. "note": max 12 woorden over wat handig is om te weten bij het inrichten.`;
   type Answer = { rooms?: { name?: unknown; type?: unknown; floor?: unknown; area_m2?: unknown; photos?: unknown; note?: unknown }[]; photo_types?: unknown[] };
-  const a = await ask<Answer>(`rooms:${fingerprint(listing.url + listing.photos.length)}`, { prompt, images: [...sent.map((x) => x.u), ...planUrls], maxTokens: 2500 }, "✨ Kamers herkennen", onProgress);
+  const a = await ask<Answer>(`rooms:${fingerprint(listing.url + listing.photos.length)}`, { prompt, images: [...sent.map((x) => x.u), ...planUrls], maxTokens: 2500 }, "Kamers herkennen", onProgress);
   const rooms = (a.rooms ?? [])
     .filter((r) => text(r.name))
     .slice(0, 20)
@@ -206,7 +206,7 @@ export async function aiAdvice(project: Project, room: Room, onProgress?: Progre
     `\nAntwoord als JSON: {"summary":"1-2 zinnen","suggestions":[{"title":"Eettafel voor 4-6 personen, ca. 180×90 cm","category":"tafels","estimate":450,"qty":1,"must":true,"why":"max 12 woorden"}],"tips":["max 3 korte tips"]}` +
     `\nMaximaal 10 suggesties, belangrijkste eerst. "category" is een van: ${CATS}.`;
   type Answer = { summary?: unknown; suggestions?: { title?: unknown; category?: unknown; estimate?: unknown; qty?: unknown; must?: unknown; why?: unknown }[]; tips?: unknown[] };
-  const a = await ask<Answer>(`advice:${room.id}`, { prompt, images, maxTokens: 1800 }, "✨ Advies", onProgress);
+  const a = await ask<Answer>(`advice:${room.id}`, { prompt, images, maxTokens: 1800 }, "Advies", onProgress);
   return {
     summary: text(a.summary, 400),
     suggestions: (a.suggestions ?? [])
@@ -242,7 +242,7 @@ export async function aiScreenshot(image: string, onProgress?: Progress): Promis
     `\nAntwoord als JSON: {"title":"productnaam zoals de winkel hem noemt","price":199.95,"shop":"IKEA","category":"banken","dims":{"w":200,"d":90,"h":80},"url":"https://… als zichtbaar in de adresbalk, anders null"}` +
     `\nPrijs als getal in euro (de huidige prijs, niet de doorgestreepte). Maten in cm (breedte, diepte, hoogte) als ze erop staan, anders null. "category" is een van: ${CATS}.`;
   type Answer = { title?: unknown; price?: unknown; shop?: unknown; category?: unknown; dims?: { w?: unknown; d?: unknown; h?: unknown }; url?: unknown };
-  const a = await ask<Answer>("shot", { prompt, images: [image], maxTokens: 400 }, "✨ Screenshot lezen", onProgress);
+  const a = await ask<Answer>("shot", { prompt, images: [image], maxTokens: 400 }, "Screenshot lezen", onProgress);
   const url = text(a.url, 500);
   const price = typeof a.price === "number" && a.price > 0 ? Math.round(a.price * 100) / 100 : undefined;
   const dims = a.dims && { w: num(a.dims.w), d: num(a.dims.d), h: num(a.dims.h) };
@@ -288,11 +288,18 @@ export async function aiAlternatives(item: Item, project?: Project, onProgress?:
   const full =
     prompt +
     " Geef alleen echte productpagina's (de pagina van één product, geen categorie-, zoek- of vergelijkingspagina's), bij voorkeur van de winkel zelf." +
-    `\nAntwoord als JSON: {"options":[{"title":"","shop":"","price":0,"url":"https://…","why":"max 10 woorden, bv. 'zelfde maat, € 60 goedkoper'"}]}`;
+    `\nAntwoord als JSON: {"options":[{"title":"","shop":"","price":0,"url":"https://…","why":"max 8 woorden over het verschil in maat, stijl of materiaal, zonder prijs"}]}`;
   type Answer = { options?: { title?: unknown; shop?: unknown; price?: unknown; url?: unknown; why?: unknown }[] };
-  const a = await ask<Answer>(`alt:${item.id}`, { prompt: full, web: true, maxTokens: 1100 }, item.url ? "✨ Alternatieven zoeken" : "✨ Producten zoeken", onProgress);
+  const a = await ask<Answer>(`alt:${item.id}`, { prompt: full, web: true, maxTokens: 1100 }, item.url ? "Alternatieven zoeken" : "Producten zoeken", onProgress);
   return (a.options ?? [])
-    .map((o) => ({ title: text(o.title, 120), shop: text(o.shop, 40), price: typeof o.price === "number" && o.price > 0 ? o.price : undefined, url: text(o.url, 500), why: text(o.why, 100) }))
+    .map((o) => ({
+      title: text(o.title, 120),
+      shop: text(o.shop, 40),
+      price: typeof o.price === "number" && o.price > 0 ? o.price : undefined,
+      url: text(o.url, 500),
+      // The real price difference comes from the shop; the model's own sums are dropped.
+      why: text(o.why, 100).replace(/[,;]?\s*€\s*[\d.,]+\s*(goedkoper|duurder)\b/gi, "").trim(),
+    }))
     .filter((o) => o.title && /^https?:\/\/[^/]+\/.+/.test(o.url) && o.url !== item.url)
     .slice(0, 6);
 }
@@ -322,7 +329,7 @@ export async function aiStyle(project: Project, room: Room, onProgress?: Progres
     "\nPassen de producten bij elkaar en bij de ruimte (kleur, materiaal, stijl, verhoudingen)? Wees eerlijk en concreet." +
     `\nAntwoord als JSON: {"score":8,"verdict":"1-2 zinnen","palette":["#hex", 5 kleuren die samen het kleurenpalet van deze kamer vormen],"tips":["max 3 concrete tips, bv. welk product eruit valt en wat beter past"]}`;
   type Answer = { score?: unknown; verdict?: unknown; palette?: unknown[]; tips?: unknown[] };
-  const a = await ask<Answer>(`style:${room.id}`, { prompt, images, maxTokens: 700 }, "✨ Stijlcheck", onProgress);
+  const a = await ask<Answer>(`style:${room.id}`, { prompt, images, maxTokens: 700 }, "Stijlcheck", onProgress);
   return {
     score: Math.max(1, Math.min(10, num(a.score) ?? 5)),
     verdict: text(a.verdict, 300),

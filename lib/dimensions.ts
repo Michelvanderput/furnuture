@@ -44,22 +44,30 @@ export function dimsFromJsonLd(product: Record<string, unknown> | undefined): Di
 
 const LABELS: [keyof Dims, RegExp][] = [
   ["w", /\b(?:breedte|width|b)\s*[:=]?\s*([\d.,]+)\s*(mm|cm|m)\b/i],
-  ["d", /\b(?:diepte|depth|lengte|length|d|l)\s*[:=]?\s*([\d.,]+)\s*(mm|cm|m)\b/i],
+  ["d", /\b(?:diepte|depth|d)\s*[:=]?\s*([\d.,]+)\s*(mm|cm|m)\b/i],
   ["h", /\b(?:hoogte|height|h)\s*[:=]?\s*([\d.,]+)\s*(mm|cm|m)\b/i],
 ];
+/** "Lengte" is the long side: the width of a table or bed when there is no "breedte", else its depth. */
+const LENGTH = /\b(?:lengte|length|l)\s*[:=]?\s*([\d.,]+)\s*(mm|cm|m)\b/i;
 
 /** Sizes of the box, not of the product: "Verpakking … Hoogte: 19 cm". */
 const PACKAGING = /verpakking|pakket|package|packaging|doos\b|colli/i;
 
 /** "Breedte: 220 cm", "Diepte 95cm", "Hoogte: 0,8 m" in specification text (packaging sizes skipped). */
 export function dimsFromLabels(text: string): Dims {
-  const out: Dims = {};
-  for (const [key, re] of LABELS) {
+  const first = (re: RegExp) => {
     for (const m of text.matchAll(new RegExp(re.source, "gi"))) {
       if (PACKAGING.test(text.slice(Math.max(0, m.index - 160), m.index))) continue;
-      out[key] = sane(toCm(num(m[1]), m[2]));
-      break;
+      return sane(toCm(num(m[1]), m[2]));
     }
+    return undefined;
+  };
+  const out: Dims = {};
+  for (const [key, re] of LABELS) out[key] = first(re);
+  const length = first(LENGTH);
+  if (length !== undefined) {
+    if (out.w === undefined) out.w = length;
+    else if (out.d === undefined) out.d = length;
   }
   return out;
 }

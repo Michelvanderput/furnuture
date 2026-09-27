@@ -19,10 +19,14 @@ import { Img } from "./Img";
  * still to find. The AI finds the links; each shop page is then read for its photo,
  * current price and size, so every card shows the real product.
  */
+/** What was found per item in this session: after choosing one, the others can still be added as options. */
+const lastFound = new Map<string, Found[]>();
+
 export function ProductFinder({ item }: { item: Item }) {
   const { project, update, toast, fal } = useApp();
   const [phase, setPhase] = useState<"" | "ai" | "shops">("");
-  const [found, setFound] = useState<Found[] | null>(null);
+  const [found, setFoundState] = useState<Found[] | null>(() => lastFound.get(item.id)?.filter((f) => f.url !== item.url) ?? null);
+  const setFound = (list: Found[] | null) => (list ? lastFound.set(item.id, list) : lastFound.delete(item.id), setFoundState(list));
   const [error, setError] = useState("");
   const [added, setAdded] = useState<Set<string>>(new Set());
   const placeholder = !item.url;
@@ -70,7 +74,7 @@ export function ProductFinder({ item }: { item: Item }) {
       }),
     );
     thumbFor(item.id, f.image);
-    toast("Gekozen");
+    toast("Gekozen. De andere kun je hieronder als optie toevoegen.");
   }
 
   /** Added next to the current product, to compare. */

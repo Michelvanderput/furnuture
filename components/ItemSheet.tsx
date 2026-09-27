@@ -9,7 +9,7 @@ import { alternativesOf, euro, lineCost, STATUS } from "@/lib/shopping";
 import type { Category, Item } from "@/lib/types";
 import { ArrowSquareOut, ArrowsClockwise, Copy, Plus, Star, Trash } from "@phosphor-icons/react";
 import { useApp } from "./app";
-import { CategoryIcon, I, STATUS_ICON } from "./icons";
+import { I, STATUS_ICON } from "./icons";
 import { Img } from "./Img";
 import { ProductFinder } from "./ProductFinder";
 import { ItemThumb, Price } from "./ItemRow";
@@ -73,6 +73,33 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
     productThumb(image).then((thumb) => update(patchItem(item.id, { thumb }))).catch(() => undefined);
   };
 
+  const findCard = (
+          <div className="card ai-card stack">
+            <div className="stack tight">
+              <h2 style={{ fontSize: 20 }}>Nog te vinden</h2>
+              {item.why && <p className="small muted">{item.why}</p>}
+            </div>
+            <ProductFinder item={item} />
+            <form
+              className="stack tight"
+              onSubmit={(e) => {
+                e.preventDefault();
+                fillFromLink();
+              }}
+            >
+              <label className="field" htmlFor="own-link">
+                Zelf iets gevonden? Plak de link
+              </label>
+              <div className="row">
+                <input id="own-link" type="url" inputMode="url" placeholder="https://…" value={link} onChange={(e) => setLink(e.target.value)} />
+                <button className="primary" disabled={!link || !!busy}>
+                  {busy === "link" ? <span className="spinner" /> : "Koppel"}
+                </button>
+              </div>
+            </form>
+          </div>
+  );
+
   return (
     <Sheet
       wide
@@ -124,10 +151,13 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
         </div>
       )}
 
+      {!item.url && findCard}
+
       <div className="row top wrap-row" style={{ gap: 18 }}>
-        <div className="stack tight" style={{ width: 180 }}>
-          <div style={{ width: 180, height: 180, borderRadius: 16, overflow: "hidden", border: "1px solid var(--line)", background: item.image || item.thumb ? "#fff" : "var(--surface-2)", display: "grid", placeItems: "center" }}>
-            {item.image || item.thumb ? <Img src={item.image ?? item.thumb!} width={480} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ color: "var(--stone)" }}><CategoryIcon category={item.category} size={56} /></span>}
+        {(item.image || item.thumb) && (
+        <div className="stack tight item-photo">
+          <div className="frame">
+            <Img src={item.image ?? item.thumb!} width={480} alt="" />
           </div>
           {item.images.length > 1 && (
             <div className="row wrap-row" style={{ gap: 6 }}>
@@ -139,6 +169,7 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
             </div>
           )}
         </div>
+        )}
         <div className="stack grow" style={{ minWidth: 260 }}>
           <label className="field">
             Naam
@@ -158,10 +189,8 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
               <Stepper value={item.qty} onChange={(qty) => set({ qty })} />
             </label>
             <div className="field">
-              <span className="field" style={{ gap: 0 }}>
-                Totaal
-              </span>
-              <strong style={{ fontSize: 20 }}>
+              Totaal
+              <strong className="field-value">
                 <Price item={item} />
               </strong>
             </div>
@@ -191,9 +220,9 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
           </div>
           {!main && (
             <div className="row wrap-row">
-              <div className="segmented">
+              <div className="segmented fill" role="group" aria-label="Status">
                 {STATUS.map((s) => (
-                  <button key={s.id} className={item.status === s.id ? "on" : ""} onClick={() => set({ status: s.id })}>
+                  <button key={s.id} className={item.status === s.id ? "on" : ""} aria-pressed={item.status === s.id} onClick={() => set({ status: s.id })}>
                     <I icon={STATUS_ICON[s.id]} size={16} /> {s.label}
                   </button>
                 ))}
@@ -217,32 +246,7 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
             </button>
             {change !== null && <span className={`chip ${change < 0 ? "ok" : "danger"}`}>{change < 0 ? `${euro(-change)} goedkoper dan eerst` : `${euro(change)} duurder dan eerst`}</span>}
           </div>
-        ) : (
-          <div className="card ai-card stack">
-            <div className="stack tight">
-              <h2 style={{ fontSize: 20 }}>Nog te vinden</h2>
-              {item.why && <p className="small muted">{item.why}</p>}
-            </div>
-            <ProductFinder item={item} />
-            <form
-              className="stack tight"
-              onSubmit={(e) => {
-                e.preventDefault();
-                fillFromLink();
-              }}
-            >
-              <label className="field" htmlFor="own-link">
-                Zelf iets gevonden? Plak de link
-              </label>
-              <div className="row">
-                <input id="own-link" type="url" inputMode="url" placeholder="https://…" value={link} onChange={(e) => setLink(e.target.value)} />
-                <button className="primary" disabled={!link || !!busy}>
-                  {busy === "link" ? <span className="spinner" /> : "Koppel"}
-                </button>
-              </div>
-            </form>
-          </div>
-        )}
+        ) : null}
         {note && <p className="small muted">{note}</p>}
       </div>
 

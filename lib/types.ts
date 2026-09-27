@@ -113,6 +113,8 @@ export interface Item {
   source?: "link" | "ai" | "screenshot" | "manual";
   /** Why the AI suggested it. */
   why?: string;
+  /** The AI suggestion this item came from (it stays when a real product is chosen). */
+  suggestion?: string;
 }
 
 export interface Dims {

@@ -54,3 +54,11 @@ describe("real shop pages", () => {
     expect(dimsFromLabels("Afmetingen Breedte: 220 cm Hoogte: 80 cm. Verpakking Hoogte: 19 cm")).toEqual({ w: 220, h: 80 });
   });
 });
+
+describe("length on tables", () => {
+  it("reads 'Lengte' as the width when there is no 'Breedte', and keeps 'Diepte' as the depth", async () => {
+    const { dimsFromLabels } = await import("@/lib/dimensions");
+    expect(dimsFromLabels("Afmetingen Lengte: 180 cm Hoogte: 76 cm Diepte: 90 cm")).toEqual({ w: 180, d: 90, h: 76 });
+    expect(dimsFromLabels("Breedte: 90 cm Lengte: 200 cm")).toEqual({ w: 90, d: 200, h: undefined });
+  });
+});

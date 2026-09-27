@@ -12,6 +12,7 @@ import { HouseHero } from "./HouseView";
 import { I, RoomIcon } from "./icons";
 import { Img } from "./Img";
 import { ItemRow } from "./ItemRow";
+import { RoomDetect, roomsRecognised } from "./RoomDetect";
 import { BudgetBar, EuroInput, Ring } from "./ui";
 
 export function Dashboard() {
@@ -63,6 +64,8 @@ export function Dashboard() {
           <span className="sub">minimaal nodig bij de verhuizing</span>
         </div>
       </div>
+
+      <RoomDetect compact />
 
       <NextSteps project={project} />
 
@@ -220,7 +223,7 @@ export function Dashboard() {
 function NextSteps({ project }: { project: Project }) {
   const { openAdd, fal } = useApp();
   const steps = [
-    { done: project.rooms.some((r) => r.area || r.floor), label: "Kamers controleren", hint: fal ? "laat de AI ze herkennen" : "namen, m² en foto's", href: "#/woning" },
+    { done: roomsRecognised(project.rooms), label: "Kamers controleren", hint: fal ? "laat de AI ze herkennen" : "namen, m² en foto's", href: "#/woning" },
     { done: project.budget !== undefined, label: "Budget instellen", hint: "hieronder" },
     { done: project.items.length > 0, label: "Eerste product toevoegen", hint: "plak een webshoplink", action: () => openAdd({ roomId: project.rooms[0]?.id ?? null }) },
     { done: project.items.some((i) => i.status !== "idee"), label: "Iets kiezen of bestellen", hint: "tik op de status" },
