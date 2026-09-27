@@ -1,6 +1,6 @@
 import { guessCategory } from "./categories";
 import { assignPhotos, defaultRooms, newId } from "./rooms";
-import type { Category, Dims, Item, ItemStatus, Listing, Project, Room, RoomType } from "./types";
+import type { Category, Dims, Item, ItemStatus, Listing, Project, Renovation, Room, RoomType } from "./types";
 
 type Raw = Record<string, unknown>;
 
@@ -72,7 +72,19 @@ export function migrate(raw: unknown): Project {
     listing: listing ? { ...listing, photos: assignPhotos(listing.photos, rooms) } : null,
     rooms,
     items,
+    renovation: migrateRenovation(r.renovation),
     budget: typeof r.budget === "number" ? r.budget : undefined,
     style: typeof r.style === "string" ? r.style : undefined,
+  };
+}
+
+function migrateRenovation(raw: unknown): Renovation | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Partial<Renovation>;
+  return {
+    keyDate: r.keyDate,
+    moveDate: r.moveDate,
+    budget: r.budget,
+    tasks: (Array.isArray(r.tasks) ? r.tasks : []).map((t) => ({ ...t, roomIds: t.roomIds ?? [], quotes: t.quotes ?? [], note: t.note ?? "", beforeMove: t.beforeMove ?? true })),
   };
 }

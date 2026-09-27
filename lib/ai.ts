@@ -3,7 +3,8 @@ import { CATEGORIES, categoryLabel } from "./categories";
 import { falRun, FalError, VISION, type Progress } from "./fal";
 import { FURNISHABLE, newId } from "./rooms";
 import { lineCost } from "./shopping";
-import type { Category, Dims, Item, Listing, Project, Room, RoomType } from "./types";
+import { KINDS, renovationOf } from "./renovation";
+import type { Category, Dims, Item, Listing, Project, RenoKind, Room, RoomType } from "./types";
 
 /**
  * The AI helpers. One fast vision-language model (Gemini Flash via fal) reads photos,
@@ -337,4 +338,91 @@ export async function aiStyle(project: Project, room: Room, onProgress?: Progres
     palette: (a.palette ?? []).map((c) => text(c, 9)).filter((c) => /^#[0-9a-f]{6}$/i.test(c)).slice(0, 6),
     tips: (a.tips ?? []).map((t) => text(t, 160)).filter(Boolean).slice(0, 3),
   };
+}
+
+// ---------------------------------------------------------------------------
+// 6. Renovation plan: what needs doing in this house?
+
+export interface RenoProposal {
+  title: string;
+  kind: RenoKind;
+  roomId?: string;
+  who: "zelf" | "vakman";
+  estimate?: number;
+  days?: number;
+  beforeMove: boolean;
+  why: string;
+}
+
+const RENO_KINDS = Object.keys(KINDS).join(", ");
+
+/**
+ * Reads the photos (the state of floors, walls, kitchen, bathroom), the description,
+ * build year and energy label, and proposes the jobs worth doing, with a rough price.
+ */
+export async function aiRenovationPlan(project: Project, onProgress?: Progress): Promise<RenoProposal[]> {
+  const l = project.listing;
+  const withPhotos = project.rooms.map((r) => ({ r, photos: (l?.photos ?? []).filter((p) => p.roomId === r.id).slice(0, 2) })).filter((x) => x.photos.length);
+  const images: string[] = [];
+  const photoText: string[] = [];
+  for (const { r, photos } of withPhotos.slice(0, 12)) {
+    for (const p of photos) {
+      const u = smallPhoto(p.url, 512);
+      if (!u || images.length >= 20) continue;
+      images.push(u);
+      photoText.push(`Foto ${images.length}: ${r.name}`);
+    }
+  }
+  const planned = renovationOf(project).tasks.map((t) => `- ${t.title}`).join("\n") || "(nog niets)";
+  const prompt =
+    `${factsText(l)}\nEnergielabel: ${l?.facts?.energyLabel ?? "onbekend"}\n\nOmschrijving van de makelaar:\n${(l?.description ?? "").slice(0, 3000)}\n\n` +
+    `Ruimtes: ${project.rooms.map((r) => `${r.name}${r.area ? ` (${r.area} m²)` : ""}`).join(", ")}\n` +
+    (project.style ? `Gewenste stijl: ${project.style}\n` : "") +
+    `\nAl gepland:\n${planned}\n\n${photoText.join("\n")}\n\n` +
+    "Bekijk de staat van vloeren, wanden, plafonds, keuken, badkamer, kozijnen en installaties op de foto's, en lees de omschrijving (bijv. 'vernieuwd in 2019'). " +
+    "Welke verbouwklussen zijn verstandig voor de nieuwe bewoners? Alleen wat echt nodig of zinvol is, niet wat al goed is of al gepland. Denk ook aan verduurzaming bij een oud huis of slecht label, en aan wat vóór de verhuizing moet (stof, vloeren, elektra). " +
+    "Geef realistische Nederlandse prijzen inclusief btw." +
+    `\nAntwoord als JSON: {"tasks":[{"title":"Vloer woonkamer vervangen door pvc","kind":"vloeren","room":"Woonkamer","who":"vakman","estimate":1500,"days":2,"before_move":true,"why":"max 15 woorden: wat je op de foto ziet of leest"}]}` +
+    `\nMaximaal 10 klussen. "kind" is een van: ${RENO_KINDS}. "room" is exact een van de ruimtes hierboven, of "Hele huis". "who" is "zelf" of "vakman".`;
+  type Answer = { tasks?: { title?: unknown; kind?: unknown; room?: unknown; who?: unknown; estimate?: unknown; days?: unknown; before_move?: unknown; why?: unknown }[] };
+  const a = await ask<Answer>(`reno:${fingerprint(l?.url ?? "")}`, { prompt, images, maxTokens: 2000 }, "Verbouwplan", onProgress);
+  return (a.tasks ?? [])
+    .filter((t) => text(t.title))
+    .slice(0, 10)
+    .map((t) => {
+      const room = project.rooms.find((r) => r.name.toLowerCase() === text(t.room).toLowerCase());
+      const kind = (Object.keys(KINDS) as RenoKind[]).includes(t.kind as RenoKind) ? (t.kind as RenoKind) : "overig";
+      return {
+        title: text(t.title, 90),
+        kind,
+        roomId: room?.id,
+        who: t.who === "zelf" ? "zelf" : "vakman",
+        estimate: num(t.estimate),
+        days: Math.min(30, num(t.days) ?? KINDS[kind].days),
+        beforeMove: t.before_move !== false,
+        why: text(t.why, 140),
+      };
+    });
+}
+
+// ---------------------------------------------------------------------------
+// 7. A quote from a photo or screenshot
+
+export interface QuoteRead {
+  company: string;
+  amount: number;
+  note: string;
+  contact?: string;
+}
+
+export async function aiQuote(image: string, onProgress?: Progress): Promise<QuoteRead> {
+  const prompt =
+    "Dit is een foto of screenshot van een offerte voor een klus aan een huis. Lees af: de naam van het bedrijf, het totaalbedrag INCLUSIEF btw (reken het uit als er alleen een bedrag exclusief 21% btw staat), " +
+    "wat er in de prijs zit (kort), en een telefoonnummer of e-mail als die er staan. Is het geen offerte, geef dan amount: null." +
+    `\nAntwoord als JSON: {"company":"","amount":1234.5,"note":"max 20 woorden: wat inbegrepen is, geldig tot…","contact":"tel of e-mail of null"}`;
+  type Answer = { company?: unknown; amount?: unknown; note?: unknown; contact?: unknown };
+  const a = await ask<Answer>("quote", { prompt, images: [image], maxTokens: 400 }, "Offerte lezen", onProgress);
+  const amount = typeof a.amount === "number" && a.amount > 0 ? Math.round(a.amount * 100) / 100 : undefined;
+  if (!amount) throw new FalError("Op deze afbeelding staat geen offerte met een bedrag.");
+  return { company: text(a.company, 60) || "Offerte", amount, note: text(a.note, 200), contact: text(a.contact, 80) || undefined };
 }

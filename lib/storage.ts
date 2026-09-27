@@ -55,8 +55,8 @@ const req = <T>(r: IDBRequest<T>) =>
   });
 
 /** Budget and style are tiny and change together: one record, compared by value. */
-type Parts = { listing: unknown; rooms: unknown; items: unknown; settings: string };
-const partsOf = (p: Project): Parts => ({ listing: p.listing, rooms: p.rooms, items: p.items, settings: JSON.stringify({ budget: p.budget, style: p.style }) });
+type Parts = { listing: unknown; rooms: unknown; items: unknown; renovation: unknown; settings: string };
+const partsOf = (p: Project): Parts => ({ listing: p.listing, rooms: p.rooms, items: p.items, renovation: p.renovation, settings: JSON.stringify({ budget: p.budget, style: p.style }) });
 
 /** What was last written, per part: the next save compares against this. */
 let saved: Parts | null = null;
@@ -69,14 +69,14 @@ export async function loadProject(): Promise<{ project: Project; current: boolea
     const format = await req(s.get(VERSION_KEY));
     const t = d.transaction(STORE).objectStore(STORE);
     if (format === FORMAT) {
-      const [listing, rooms, items, settings] = await Promise.all(["listing", "rooms", "items", "settings"].map((k) => req(t.get(k))));
+      const [listing, rooms, items, renovation, settings] = await Promise.all(["listing", "rooms", "items", "renovation", "settings"].map((k) => req(t.get(k))));
       let st: { budget?: number; style?: string } = {};
       try {
         st = typeof settings === "string" ? JSON.parse(settings) : {};
       } catch {
         // keep defaults
       }
-      return { project: migrate({ listing, rooms, items, budget: st.budget, style: st.style }), current: true };
+      return { project: migrate({ listing, rooms, items, renovation, budget: st.budget, style: st.style }), current: true };
     }
     if (format === 2) {
       // Version 2: listing, products, plans and one design per photo. Designs and plans are gone.

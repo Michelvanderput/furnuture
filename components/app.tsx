@@ -10,6 +10,8 @@ export interface App {
   openItem: (id: string) => void;
   /** Opens "add": for a room (null = no room yet), optionally as an alternative, with links already filled in. */
   openAdd: (opts?: { roomId?: string | null; alternativeOf?: string; links?: string[] }) => void;
+  /** Opens a renovation job. */
+  openTask: (id: string) => void;
   toast: (text: string, undo?: () => void) => void;
   /** fal.ai is set up: the ✨ features are available. */
   fal: boolean;

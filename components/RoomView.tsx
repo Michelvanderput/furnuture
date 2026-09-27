@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { aiAdvice, aiStyle, type Advice, type StyleCheck } from "@/lib/ai";
-import { ArrowLeft, CaretDown, CaretRight, Check, Compass, Palette, PencilSimple, Plus, Sparkle, Star, Trash } from "@phosphor-icons/react";
+import { ArrowLeft, CaretDown, CaretRight, Check, Compass, Hammer, Palette, PencilSimple, Plus, Sparkle, Star, Trash } from "@phosphor-icons/react";
 import { CATEGORIES } from "@/lib/categories";
 import { euroCents, FAL_COST } from "@/lib/fal";
 import { addItems, patchRoom, removeRoom } from "@/lib/items";
@@ -12,6 +12,10 @@ import { alternativesOf, euro, isBought, itemsIn, lineCost, mainItems, totals } 
 import type { Category, Item, Room, RoomType } from "@/lib/types";
 import { roomLabel } from "@/lib/categories";
 import { useApp } from "./app";
+import { newTask, RenoSuggestions } from "./RenovationView";
+import { TaskRow } from "./TaskRow";
+import { renovationOf, renoTotals } from "@/lib/renovation";
+import { addTasks } from "@/lib/tasks";
 import { CategoryIcon, I, RoomIcon } from "./icons";
 import { Img } from "./Img";
 import { ItemRow } from "./ItemRow";
@@ -176,6 +180,8 @@ export function RoomView({ roomId }: { roomId: string }) {
           ))
         )}
       </div>
+
+      <RoomRenovation room={room} />
 
       {lightbox !== null && <Lightbox photos={photos.map((p) => p.url)} index={lightbox} onClose={() => setLightbox(null)} />}
       {editing && <RoomSheet room={room} onClose={() => setEditing(false)} />}
@@ -423,5 +429,50 @@ export function RoomSheet({ room, onClose }: { room: Room; onClose: () => void }
         <input placeholder="Bijv. muur 3,40 m breed, raam op het zuiden" value={room.note ?? ""} onChange={(e) => set({ note: e.target.value || undefined })} />
       </label>
     </Sheet>
+  );
+}
+
+/** Renovation jobs for this room, and what usually comes up in a room like it. */
+function RoomRenovation({ room }: { room: Room }) {
+  const { project, update, openTask } = useApp();
+  const tasks = renovationOf(project).tasks.filter((t) => t.roomIds.includes(room.id));
+  const total = renoTotals(tasks).total;
+  return (
+    <div className="stack">
+      <div className="section-head">
+        <div className="row" style={{ gap: 10 }}>
+          <span className="icon-badge">
+            <I icon={Hammer} size={20} />
+          </span>
+          <div>
+            <h2 style={{ fontSize: 21 }}>Klussen in deze kamer</h2>
+            <p className="tiny muted">{tasks.length ? `${tasks.length} klussen · ± ${euro(total)}` : "Schilderen, vloer, elektra: alles wat er eerst moet gebeuren."}</p>
+          </div>
+        </div>
+        <div className="row">
+          <a className="btn ghost small" href="#/verbouwing">
+            Hele verbouwing
+          </a>
+          <button
+            className="small"
+            onClick={() => {
+              const t = newTask([room.id]);
+              update(addTasks([t]));
+              openTask(t.id);
+            }}
+          >
+            <I icon={Plus} /> Klus
+          </button>
+        </div>
+      </div>
+      {tasks.length > 0 && (
+        <div className="items">
+          {tasks.map((t) => (
+            <TaskRow key={t.id} task={t} showRooms={false} />
+          ))}
+        </div>
+      )}
+      <RenoSuggestions project={project} roomId={room.id} compact />
+    </div>
   );
 }

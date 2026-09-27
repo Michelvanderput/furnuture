@@ -123,10 +123,77 @@ export interface Dims {
   h?: number;
 }
 
+/** Kinds of renovation work; their order is the order work is done in (see lib/renovation.ts). */
+export type RenoKind =
+  | "sloop"
+  | "elektra"
+  | "leidingwerk"
+  | "installaties"
+  | "isolatie"
+  | "kozijnen"
+  | "stucwerk"
+  | "timmerwerk"
+  | "keuken"
+  | "badkamer"
+  | "schilderen"
+  | "vloeren"
+  | "tuin"
+  | "schoonmaak"
+  | "overig";
+
+/** From idea to done: request quotes, plan, do. */
+export type RenoStatus = "idee" | "offerte" | "gepland" | "bezig" | "klaar";
+
+/** A quote from a contractor. */
+export interface Quote {
+  id: string;
+  company: string;
+  /** Total in euros, including VAT. */
+  amount: number;
+  note?: string;
+  contact?: string;
+  addedAt: number;
+}
+
+/** A renovation job ("klus"): for rooms, or the whole house when `roomIds` is empty. */
+export interface Task {
+  id: string;
+  title: string;
+  kind: RenoKind;
+  roomIds: string[];
+  /** Do it yourself, or hire someone. */
+  who: "zelf" | "vakman";
+  status: RenoStatus;
+  /** Rough cost when there is no chosen quote (for "zelf": the materials). */
+  estimate?: number;
+  quotes: Quote[];
+  chosenQuote?: string;
+  /** Planned start (yyyy-mm-dd) and working days. */
+  start?: string;
+  days?: number;
+  /** Has to be done before moving in (dust, floors, electrics). */
+  beforeMove: boolean;
+  note: string;
+  /** Why it was suggested, and subsidy hints (AI or rules). */
+  why?: string;
+  addedAt: number;
+  source?: "suggestie" | "ai" | "zelf";
+}
+
+export interface Renovation {
+  /** Key handover and moving day (yyyy-mm-dd). */
+  keyDate?: string;
+  moveDate?: string;
+  /** Budget for renovating, in euros. */
+  budget?: number;
+  tasks: Task[];
+}
+
 export interface Project {
   listing: Listing | null;
   rooms: Room[];
   items: Item[];
+  renovation?: Renovation;
   /** Total budget for furnishing, in euros. */
   budget?: number;
   /** Preferred style, for the AI ("Scandinavisch, licht hout"). */

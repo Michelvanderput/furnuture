@@ -63,6 +63,8 @@ export const FAL_COST = {
   screenshot: 0.005,
   alternatives: 0.03,
   style: 0.01,
+  renovation: 0.02,
+  quote: 0.005,
 } as const;
 const EUR = 0.92;
 export const euroCents = (usd: number) => (usd < 0.01 ? "< 1 cent" : `± ${Math.max(1, Math.round(usd * EUR * 100))} cent`);

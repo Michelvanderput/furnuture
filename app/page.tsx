@@ -1,17 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChartDonut, GearSix, House, Plus, ShoppingBag, SquaresFour, type Icon } from "@phosphor-icons/react";
+import { ChartDonut, GearSix, Hammer, House, Plus, ShoppingBag, SquaresFour, type Icon } from "@phosphor-icons/react";
 import { AddSheet } from "@/components/AddSheet";
 import { AppContext, type App } from "@/components/app";
 import { Dashboard } from "@/components/Dashboard";
 import { HouseView } from "@/components/HouseView";
 import { Armchair, I } from "@/components/icons";
 import { ItemSheet } from "@/components/ItemSheet";
+import { newTask, RenovationView } from "@/components/RenovationView";
 import { RoomsView } from "@/components/RoomsView";
 import { RoomView } from "@/components/RoomView";
 import { SettingsSheet } from "@/components/SettingsSheet";
 import { ShopView } from "@/components/ShopView";
+import { TaskSheet } from "@/components/TaskSheet";
 import { ToastHost, useToast } from "@/components/ui";
 import { Welcome } from "@/components/Welcome";
 import { extractFundaPhotos } from "@/lib/extract";
@@ -19,6 +21,7 @@ import { falEnabled } from "@/lib/fal";
 import { assignPhotos, defaultRooms, newId } from "@/lib/rooms";
 import { href, useRoute, type Route } from "@/lib/route";
 import { extractLinks } from "@/lib/shopping";
+import { addTasks } from "@/lib/tasks";
 import type { FundaResult, Listing, Project, RoomType } from "@/lib/types";
 import { useProject } from "@/lib/useProject";
 
@@ -50,6 +53,7 @@ function Home() {
   const toast = useToast();
   const [fal, setFal] = useState(false);
   const [item, setItem] = useState<string | null>(null);
+  const [task, setTask] = useState<string | null>(null);
   const [add, setAdd] = useState<{ roomId?: string | null; alternativeOf?: string; links?: string[] } | null>(null);
   const [settings, setSettings] = useState(false);
 
@@ -99,8 +103,9 @@ function Home() {
   }, [roomId, add, item]);
 
   const openItem = useCallback((id: string) => setItem(id), []);
+  const openTask = useCallback((id: string) => setTask(id), []);
   const openAdd = useCallback((opts?: { roomId?: string | null; alternativeOf?: string; links?: string[] }) => setAdd(opts ?? {}), []);
-  const app: App = useMemo(() => ({ project, update, openItem, openAdd, toast, fal }), [project, update, openItem, openAdd, toast, fal]);
+  const app: App = useMemo(() => ({ project, update, openItem, openAdd, openTask, toast, fal }), [project, update, openItem, openAdd, openTask, toast, fal]);
 
   if (!loaded) return <div className="splash">Laden…</div>;
   if (!project.listing && !project.rooms.length) {
@@ -120,6 +125,7 @@ function Home() {
   const tabs: { route: Route; label: string; icon: Icon; on: boolean }[] = [
     { route: { view: "overzicht" }, label: "Overzicht", icon: ChartDonut, on: current.view === "overzicht" },
     { route: { view: "kamers" }, label: "Kamers", icon: SquaresFour, on: current.view === "kamers" || current.view === "kamer" },
+    { route: { view: "verbouwing" }, label: "Verbouwing", icon: Hammer, on: current.view === "verbouwing" },
     { route: { view: "winkelen" }, label: "Winkelen", icon: ShoppingBag, on: current.view === "winkelen" },
     { route: { view: "woning" }, label: "Woning", icon: House, on: current.view === "woning" },
   ];
@@ -155,15 +161,32 @@ function Home() {
         {current.view === "overzicht" && <Dashboard />}
         {current.view === "kamers" && <RoomsView />}
         {current.view === "kamer" && <RoomView key={current.id} roomId={current.id} />}
+        {current.view === "verbouwing" && <RenovationView />}
         {current.view === "winkelen" && <ShopView />}
         {current.view === "woning" && <HouseView />}
       </main>
-      <button className="fab" aria-label="Toevoegen" onClick={() => setAdd({ roomId: roomId ?? null })}>
-        <I icon={Plus} size={24} weight="bold" />
-        <span className="label">Toevoegen</span>
-      </button>
+      {current.view === "verbouwing" ? (
+        <button
+          className="fab"
+          aria-label="Klus toevoegen"
+          onClick={() => {
+            const t = newTask();
+            update(addTasks([t]));
+            setTask(t.id);
+          }}
+        >
+          <I icon={Plus} size={24} weight="bold" />
+          <span className="label">Klus</span>
+        </button>
+      ) : (
+        <button className="fab" aria-label="Product toevoegen" onClick={() => setAdd({ roomId: roomId ?? null })}>
+          <I icon={Plus} size={24} weight="bold" />
+          <span className="label">Toevoegen</span>
+        </button>
+      )}
       {add && <AddSheet {...add} onClose={() => setAdd(null)} />}
       {item && project.items.some((i) => i.id === item) && <ItemSheet id={item} onClose={() => setItem(null)} />}
+      {task && (project.renovation?.tasks ?? []).some((t) => t.id === task) && <TaskSheet id={task} onClose={() => setTask(null)} />}
       {settings && <SettingsSheet onClose={() => setSettings(false)} />}
     </AppContext.Provider>
   );

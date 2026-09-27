@@ -7,13 +7,14 @@ export type Route =
   | { view: "overzicht" }
   | { view: "kamers" }
   | { view: "kamer"; id: string }
+  | { view: "verbouwing" }
   | { view: "winkelen" }
   | { view: "woning" };
 
 export function parseRoute(hash: string): Route {
   const [, view, id] = hash.replace(/^#/, "").split("/");
   if (view === "kamer" && id) return { view: "kamer", id: decodeURIComponent(id) };
-  if (view === "kamers" || view === "winkelen" || view === "woning") return { view };
+  if (view === "kamers" || view === "verbouwing" || view === "winkelen" || view === "woning") return { view };
   return { view: "overzicht" };
 }
 

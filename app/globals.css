@@ -514,3 +514,53 @@ details[open] > summary { margin-bottom: var(--space-3); }
 .toast > span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .toast button { flex-shrink: 0; }
 @media (max-width: 560px) { .toast { font-size: 14px; padding-left: 14px; } .grid.stats.facts-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ---------- renovation ---------- */
+.reno-idee { background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line); }
+.reno-offerte { background: var(--stone-tint); color: var(--ink-2); }
+.reno-gepland { background: var(--info-tint); color: var(--info); }
+.reno-bezig { background: var(--accent-tint); color: var(--accent-ink); }
+.reno-klaar { background: var(--ok-tint); color: var(--ok); }
+.item .thumb.task-icon { background: var(--stone-tint); border-color: transparent; color: var(--ink-2); }
+.item.quote { gap: var(--space-3); flex-wrap: wrap; }
+.card.warn-card { background: var(--danger-tint); border-color: color-mix(in srgb, var(--danger) 30%, transparent); color: var(--danger); box-shadow: none; }
+.card.warn-card .small { color: var(--ink-2); }
+.phase-head { display: flex; align-items: center; gap: var(--space-3); padding: 0 4px; }
+.phase-n { width: 28px; height: 28px; border-radius: 99px; display: grid; place-items: center; background: var(--primary); color: var(--on-primary); font-weight: 700; font-size: 13px; flex-shrink: 0; }
+.phase-n.done { background: var(--ok); color: #fff; }
+.sugg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--space-2); }
+.sugg { justify-content: flex-start; text-align: left; white-space: normal; gap: var(--space-3); padding: 10px 12px; min-height: 60px; border-radius: 14px; background: var(--surface); font-weight: 400; }
+.sugg strong { display: block; font-weight: 600; font-size: 14.5px; }
+.sugg .tiny { display: block; }
+.sugg:hover { border-color: var(--accent); background: var(--accent-tint); }
+.sugg > svg { color: var(--muted); }
+.timeline { position: relative; overflow-x: auto; }
+.tl-scale { position: relative; height: 22px; margin-left: 220px; font-size: 12px; color: var(--muted); }
+.tl-scale span { position: absolute; transform: translateX(-2px); white-space: nowrap; }
+.tl-body { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 6px 0; }
+.tl-week { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); margin-left: 220px; pointer-events: none; }
+.tl-body .tl-week { left: 0; }
+.tl-mark { position: absolute; top: -26px; bottom: 0; width: 2px; margin-left: 220px; display: flex; justify-content: center; z-index: 1; pointer-events: none; }
+.tl-mark svg { position: absolute; top: 0; background: var(--surface); border-radius: 99px; padding: 2px; width: 20px; height: 20px; }
+.tl-mark.key { background: var(--accent); color: var(--accent-ink); }
+.tl-mark.move { background: var(--ok); color: var(--ok); }
+.tl-row { display: flex; align-items: center; gap: 0; width: 100%; padding: 0; min-height: 48px; border: 0; border-radius: 10px; background: transparent; font-weight: 400; text-align: left; white-space: normal; }
+.tl-row:hover { background: var(--surface-2); }
+.tl-label { width: 220px; flex-shrink: 0; display: flex; flex-direction: column; padding: 4px 12px 4px 4px; }
+.tl-label strong { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-track { position: relative; flex: 1; height: 26px; }
+.tl-bar { position: absolute; top: 3px; height: 20px; border-radius: 6px; min-width: 6px; }
+.tl-bar.reno-idee, .tl-bar.reno-offerte { background: var(--stone); border: 0; }
+.tl-bar.reno-gepland { background: var(--info); }
+.tl-bar.reno-bezig { background: var(--accent); }
+.tl-bar.reno-klaar { background: var(--ok); }
+.tl-bar.late { background: var(--danger); }
+@media (max-width: 640px) {
+  .tl-scale, .tl-week, .tl-mark { margin-left: 0; }
+  .tl-row { flex-direction: column; align-items: stretch; }
+  .tl-label { width: auto; padding: 4px 4px 0; }
+  .tl-track { flex: none; height: 26px; }
+  .tl-mark { top: -26px; }
+}
+.suggestion.next-task { width: 100%; text-align: left; white-space: normal; font-weight: 400; min-height: 64px; cursor: pointer; }
+.suggestion.next-task:hover { background: var(--surface-2); }

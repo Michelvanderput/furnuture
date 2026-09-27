@@ -61,6 +61,7 @@ export const patchRoom = (id: string, patch: Partial<Room>) => (p: P): P => ({
 /** Removes a room; its items go to "Nog geen kamer", its photos lose their room. */
 export const removeRoom = (id: string) => (p: P): P => ({
   ...p,
+  renovation: p.renovation && { ...p.renovation, tasks: p.renovation.tasks.map((t) => ({ ...t, roomIds: t.roomIds.filter((r) => r !== id) })) },
   rooms: p.rooms.filter((r) => r.id !== id),
   items: p.items.map((i) => (i.roomId === id ? { ...i, roomId: null } : i)),
   listing: p.listing && { ...p.listing, photos: p.listing.photos.map((ph) => (ph.roomId === id ? { ...ph, roomId: undefined } : ph)) },
