@@ -18,6 +18,7 @@ const MODELS = new Map([
   ["fal-ai/object-removal/mask", 0.024],
   ["fal-ai/bria/eraser", 0.04],
   ["fal-ai/sam2/image", 0.002],
+  ["fal-ai/sam-3/image", 0.005],
   ["fal-ai/birefnet/v2", 0.01],
   ["fal-ai/nano-banana-2/edit", 0.12],
   ["openrouter/router/vision", 0.005],
