@@ -1,9 +1,17 @@
 "use client";
 
 import { createContext, useContext } from "react";
+import type { HouseRef } from "@/lib/houses";
 import type { Project } from "@/lib/types";
+import type { SyncState } from "@/lib/useProject";
 
 export interface App {
+  /** The open house (its name, and its id in the database when it is stored online). */
+  house: HouseRef;
+  sync: SyncState;
+  syncError: string;
+  /** Back to the name screen. */
+  leave: () => void;
   project: Project;
   update: (fn: (p: Project) => Project) => void;
   /** Opens an item's details. */

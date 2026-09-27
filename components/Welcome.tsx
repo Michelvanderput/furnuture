@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { fileToDataUrl } from "@/lib/images";
 import type { FundaResult } from "@/lib/types";
-import { ArrowRight, Camera, HouseLine, ListChecks, Sparkle, Wallet, type Icon } from "@phosphor-icons/react";
+import { ArrowLeft, ArrowRight, Camera, Hammer, HouseLine, ListChecks, Wallet, type Icon } from "@phosphor-icons/react";
 import { Armchair, I } from "./icons";
 import { PasteButton } from "./PasteButton";
 
@@ -20,7 +20,21 @@ export async function fetchFunda(url: string, html?: string): Promise<FundaResul
   return data;
 }
 
-export function Welcome({ onImport, onBlank }: { onImport: (url: string, data: FundaResult) => void; onBlank: (name: string, photos: string[]) => void }) {
+/** The house's name is known but it has no house yet: load it from Funda, or start without. */
+export function Welcome({
+  name,
+  onImport,
+  onBlank,
+  onBack,
+  children,
+}: {
+  name: string;
+  onImport: (url: string, data: FundaResult) => void | Promise<void>;
+  onBlank: (photos: string[]) => void | Promise<void>;
+  onBack?: () => void;
+  /** Other ways to start (a house from the bookmarklet, what is already on this device). */
+  children?: React.ReactNode;
+}) {
   const [url, setUrl] = useState("");
   const [html, setHtml] = useState("");
   const [busy, setBusy] = useState(false);
@@ -30,7 +44,7 @@ export function Welcome({ onImport, onBlank }: { onImport: (url: string, data: F
     setBusy(true);
     setError("");
     try {
-      onImport(url, await fetchFunda(url, withHtml ? html : undefined));
+      await onImport(url, await fetchFunda(url, withHtml ? html : undefined));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -39,23 +53,18 @@ export function Welcome({ onImport, onBlank }: { onImport: (url: string, data: F
   }
 
   return (
-    <div className="welcome">
-      <main className="panel">
-        <div className="brand">
-          <span className="logo">
-            <I icon={Armchair} size={20} weight="bold" />
-          </span>
-          <span>
-            furn<em>u</em>ture
-          </span>
-        </div>
+    <WelcomeLayout>
+        {onBack && (
+          <button className="back ghost" onClick={onBack} style={{ alignSelf: "flex-start", paddingLeft: 0 }}>
+            <I icon={ArrowLeft} /> Andere naam
+          </button>
+        )}
         <div className="stack" style={{ gap: 16 }}>
           <h1>
-            Van sleutel tot <em>thuis</em>.
+            Welkom, <em>{name}</em>.
           </h1>
           <p className="intro">
-            Plak de Funda-link van je nieuwe huis. Wij maken de kamers aan; jij verzamelt per kamer wat je gaat kopen, met prijzen, budget en een
-            overzicht per winkel.
+            Deze woning is nieuw. Plak de Funda-link: wij maken de kamers aan, jij verzamelt per kamer wat je gaat kopen en wat er verbouwd moet worden.
           </p>
         </div>
         <form
@@ -76,19 +85,7 @@ export function Welcome({ onImport, onBlank }: { onImport: (url: string, data: F
             {error}
           </p>
         )}
-        <div className="features">
-          {FEATURES.map((f) => (
-            <div className="feature" key={f.title}>
-              <span className="icon-badge">
-                <I icon={f.icon} size={20} />
-              </span>
-              <span>
-                <strong>{f.title}</strong>
-                {f.text}
-              </span>
-            </div>
-          ))}
-        </div>
+        {children}
         <details open={!!error}>
           <summary>Lukt het niet, of geen Funda-link?</summary>
           <div className="stack">
@@ -109,8 +106,44 @@ export function Welcome({ onImport, onBlank }: { onImport: (url: string, data: F
             <BlankStart onBlank={onBlank} />
           </div>
         </details>
+    </WelcomeLayout>
+  );
+}
+
+/** The welcome screens' frame: brand and content on the left, an interior photo on the right. */
+export function WelcomeLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="welcome">
+      <main className="panel">
+        <div className="brand">
+          <span className="logo">
+            <I icon={Armchair} size={20} weight="bold" />
+          </span>
+          <span>
+            furn<em>u</em>ture
+          </span>
+        </div>
+        {children}
       </main>
       <div className="art" style={{ backgroundImage: `url(${ART})` }} aria-hidden />
+    </div>
+  );
+}
+
+export function Features() {
+  return (
+    <div className="features">
+      {FEATURES.map((f) => (
+        <div className="feature" key={f.title}>
+          <span className="icon-badge">
+            <I icon={f.icon} size={20} />
+          </span>
+          <span>
+            <strong>{f.title}</strong>
+            {f.text}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -119,42 +152,47 @@ export function Welcome({ onImport, onBlank }: { onImport: (url: string, data: F
 const ART = "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?auto=format&fit=crop&w=1400&q=75";
 
 const FEATURES: { icon: Icon; title: string; text: string }[] = [
-  { icon: HouseLine, title: "Kamers uit Funda", text: "Foto's, m² en indeling van je nieuwe huis." },
+  { icon: HouseLine, title: "Kamers uit Funda", text: "Foto's, m² en indeling; AI herkent de kamers." },
   { icon: ListChecks, title: "Lijst per kamer", text: "Plak een link uit elke webshop: foto, prijs en maten komen vanzelf." },
-  { icon: Wallet, title: "Budget in beeld", text: "Totaal per kamer, per winkel en wat al besteld is." },
-  { icon: Sparkle, title: "Slimme hulp", text: "AI herkent je kamers en tipt wat je nog mist." },
+  { icon: Hammer, title: "Verbouwing gepland", text: "Klussen, offertes en een planning tot de verhuisdag." },
+  { icon: Wallet, title: "Budget in beeld", text: "Inrichting en verbouwing samen, per kamer en per winkel." },
 ];
 
-function BlankStart({ onBlank }: { onBlank: (name: string, photos: string[]) => void }) {
-  const [name, setName] = useState("");
+function BlankStart({ onBlank }: { onBlank: (photos: string[]) => void | Promise<void> }) {
   const [busy, setBusy] = useState(false);
+  const go = async (photos: string[]) => {
+    setBusy(true);
+    try {
+      await onBlank(photos);
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <div className="stack tight">
       <p className="small">
-        <strong>Zonder Funda:</strong> geef je huis een naam (foto&apos;s toevoegen mag, hoeft niet).
+        <strong>Zonder Funda:</strong> begin leeg en voeg zelf kamers toe (foto&apos;s erbij mag, hoeft niet).
       </p>
-      <div className="row">
-        <input placeholder="Bijv. Ons nieuwe huis" value={name} onChange={(e) => setName(e.target.value)} />
+      <div className="row wrap-row">
+        <button className="primary" disabled={busy} onClick={() => go([])}>
+          {busy ? <span className="spinner" /> : "Leeg beginnen"}
+        </button>
         <label className="btn">
-          {busy ? <span className="spinner" /> : <I icon={Camera} label="Foto's kiezen" />}
+          <I icon={Camera} /> Met foto&apos;s
           <input
             type="file"
             accept="image/*"
             multiple
             hidden
+            disabled={busy}
             onChange={async (e) => {
               const files = [...(e.target.files ?? [])];
               if (!files.length) return;
               setBusy(true);
-              const photos = await Promise.all(files.map((f) => fileToDataUrl(f)));
-              setBusy(false);
-              onBlank(name || "Ons nieuwe huis", photos);
+              go(await Promise.all(files.map((f) => fileToDataUrl(f))));
             }}
           />
         </label>
-        <button className="primary" onClick={() => onBlank(name || "Ons nieuwe huis", [])}>
-          Begin
-        </button>
       </div>
     </div>
   );

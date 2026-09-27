@@ -1,7 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChartDonut, GearSix, Hammer, House, Plus, ShoppingBag, SquaresFour, type Icon } from "@phosphor-icons/react";
+import {
+  ChartDonut,
+  CloudArrowUp,
+  CloudCheck,
+  CloudSlash,
+  DeviceMobile,
+  GearSix,
+  Hammer,
+  House,
+  Plus,
+  ShoppingBag,
+  SquaresFour,
+  Warning,
+  type Icon,
+} from "@phosphor-icons/react";
 import { AddSheet } from "@/components/AddSheet";
 import { AppContext, type App } from "@/components/app";
 import { Dashboard } from "@/components/Dashboard";
@@ -15,40 +29,78 @@ import { SettingsSheet } from "@/components/SettingsSheet";
 import { ShopView } from "@/components/ShopView";
 import { TaskSheet } from "@/components/TaskSheet";
 import { ToastHost, useToast } from "@/components/ui";
+import { HouseGate } from "@/components/HouseGate";
 import { Welcome } from "@/components/Welcome";
 import { extractFundaPhotos } from "@/lib/extract";
 import { falEnabled } from "@/lib/fal";
-import { assignPhotos, defaultRooms, newId } from "@/lib/rooms";
+import { clearImportHash, currentHouse, houseKey, importFromHash, leaveHouse, rememberHouse, withHouse, type HouseRef } from "@/lib/houses";
 import { href, useRoute, type Route } from "@/lib/route";
 import { extractLinks } from "@/lib/shopping";
 import { addTasks } from "@/lib/tasks";
-import type { FundaResult, Listing, Project, RoomType } from "@/lib/types";
-import { useProject } from "@/lib/useProject";
+import { useProject, type SyncState } from "@/lib/useProject";
+
+const SYNC_TEXT: Record<SyncState, string> = {
+  local: "Bewaard op dit apparaat",
+  loading: "Laden…",
+  saved: "Online opgeslagen",
+  saving: "Opslaan…",
+  offline: "Offline: wordt opgeslagen zodra er verbinding is",
+  error: "Opslaan mislukt, tik om opnieuw te proberen",
+};
+const SYNC_ICON: Record<SyncState, Icon> = {
+  local: DeviceMobile,
+  loading: CloudArrowUp,
+  saved: CloudCheck,
+  saving: CloudArrowUp,
+  offline: CloudSlash,
+  error: Warning,
+};
 
 export default function Page() {
   return (
     <ToastHost>
-      <Home />
+      <Root />
     </ToastHost>
   );
 }
 
-/** A house from Funda (or photos) as the project's listing, with a first set of rooms. */
-function withHouse(p: Project, url: string, data: FundaResult): Project {
-  const listing: Listing = {
-    url,
-    title: data.title || "Ons nieuwe huis",
-    photos: data.photos.map((u) => ({ id: newId(), url: u, room: (data.rooms?.[u] ?? "overig") as RoomType })),
-    facts: data.facts,
-    description: data.description,
-  };
-  const rooms = defaultRooms(listing);
-  // Items of an earlier house stay on the list, without a room.
-  return { ...p, listing: { ...listing, photos: assignPhotos(listing.photos, rooms) }, rooms, items: p.items.map((i) => ({ ...i, roomId: null })) };
+/** Which house is open: the last one on this device, one from a shared link (?woning=), or ask. */
+function Root() {
+  const [house, setHouse] = useState<HouseRef | null | undefined>(undefined);
+  const [ask, setAsk] = useState<string>();
+
+  useEffect(() => {
+    const q = new URLSearchParams(location.search);
+    const shared = q.get("woning");
+    const current = currentHouse();
+    if (shared) {
+      q.delete("woning");
+      history.replaceState(null, "", location.pathname + (q.size ? `?${q}` : "") + location.hash);
+      if (current?.key !== houseKey(shared)) {
+        setAsk(shared);
+        return setHouse(null);
+      }
+    }
+    setHouse(current);
+  }, []);
+
+  if (house === undefined) return <div className="splash">Laden…</div>;
+  if (!house) return <HouseGate initialName={ask} onOpen={(ref) => setHouse(rememberHouse(ref))} />;
+  return (
+    <Home
+      key={house.key}
+      house={house}
+      onLeave={() => {
+        leaveHouse();
+        setAsk(undefined);
+        setHouse(null);
+      }}
+    />
+  );
 }
 
-function Home() {
-  const { project, update, loaded } = useProject();
+function Home({ house, onLeave }: { house: HouseRef; onLeave: () => void }) {
+  const { project, update, loaded, loadError, sync, syncError, syncNow } = useProject(house);
   const route = useRoute();
   const toast = useToast();
   const [fal, setFal] = useState(false);
@@ -62,19 +114,19 @@ function Home() {
   // A house sent by the bookmarklet arrives as #import={u,t,p}.
   useEffect(() => {
     if (!loaded || !location.hash.startsWith("#import=")) return;
-    try {
-      const data = JSON.parse(decodeURIComponent(location.hash.slice(8))) as { u: string; t: string; p: string[] };
-      const photos = extractFundaPhotos(data.p.join(" "));
-      if (photos.length && (!project.listing || confirm("Deze woning laden? Je kamers worden opnieuw ingedeeld; je producten blijven bewaard."))) {
-        const title = data.t.replace(/\s*[|\-[]\s*funda.*$/i, "").replace(/^[^:]{0,30}:\s*/, "").trim();
-        update((p) => withHouse(p, data.u, { title, photos }));
-      }
-    } catch {
-      toast("Importeren vanaf Funda mislukt.");
-    }
-    history.replaceState(null, "", location.pathname + "#/");
+    const found = importFromHash(extractFundaPhotos);
+    if (!found) toast("Importeren vanaf Funda mislukt.");
+    else if (!project.listing || confirm(`Deze woning in "${house.name}" laden? Je kamers worden opnieuw ingedeeld; je producten blijven bewaard.`))
+      update((p) => withHouse(p, found.url, found.data));
+    clearImportHash();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);
+
+  // The house's title in the list of houses on the name screen.
+  const title = project.listing?.title;
+  useEffect(() => {
+    if (loaded && title && title !== house.title) rememberHouse({ ...house, title });
+  }, [loaded, title, house]);
 
   // A link shared to the app (Android share sheet: /?url=… or ?text=…) opens "add".
   useEffect(() => {
@@ -105,18 +157,36 @@ function Home() {
   const openItem = useCallback((id: string) => setItem(id), []);
   const openTask = useCallback((id: string) => setTask(id), []);
   const openAdd = useCallback((opts?: { roomId?: string | null; alternativeOf?: string; links?: string[] }) => setAdd(opts ?? {}), []);
-  const app: App = useMemo(() => ({ project, update, openItem, openAdd, openTask, toast, fal }), [project, update, openItem, openAdd, openTask, toast, fal]);
+  const app: App = useMemo(
+    () => ({ house, sync, syncError, leave: onLeave, project, update, openItem, openAdd, openTask, toast, fal }),
+    [house, sync, syncError, onLeave, project, update, openItem, openAdd, openTask, toast, fal],
+  );
 
-  if (!loaded) return <div className="splash">Laden…</div>;
+  if (!loaded) return <div className="splash">{house.name} laden…</div>;
+  if (loadError) {
+    return (
+      <div className="splash">
+        <div className="stack">
+          <I icon={CloudSlash} size={36} />
+          <h2>{house.name} is niet te laden</h2>
+          <p className="muted">Er is geen verbinding met de online opslag en deze woning staat nog niet op dit apparaat.</p>
+          <div className="row wrap-row" style={{ justifyContent: "center" }}>
+            <button className="primary" onClick={() => location.reload()}>
+              Opnieuw proberen
+            </button>
+            <button onClick={onLeave}>Andere woning</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (!project.listing && !project.rooms.length) {
     return (
       <Welcome
+        name={house.name}
         onImport={(url, data) => update((p) => withHouse(p, url, data))}
-        onBlank={(name, photos) =>
-          update((p) =>
-            withHouse(p, "", { title: name, photos }),
-          )
-        }
+        onBlank={(photos) => update((p) => withHouse(p, "", { title: house.name, photos }))}
+        onBack={onLeave}
       />
     );
   }
@@ -151,7 +221,13 @@ function Home() {
             ))}
           </nav>
           <div className="actions">
-            <button className="ghost icon" onClick={() => setSettings(true)} aria-label="Instellingen" title="Budget, stijl, AI en back-up">
+            <button className="ghost house-btn" onClick={() => (sync === "offline" || sync === "error" ? syncNow() : setSettings(true))} title={SYNC_TEXT[sync] + (syncError ? `: ${syncError}` : "")} aria-label={`${house.name}. ${SYNC_TEXT[sync]}`}>
+              <span className={`sync ${sync}`}>
+                <I icon={SYNC_ICON[sync]} size={20} weight={sync === "saved" ? "fill" : "regular"} />
+              </span>
+              <span className="name">{house.name}</span>
+            </button>
+            <button className="ghost icon" onClick={() => setSettings(true)} aria-label="Instellingen" title="Woning, budget, stijl, AI en back-up">
               <I icon={GearSix} size={22} />
             </button>
           </div>

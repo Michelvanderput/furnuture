@@ -1,5 +1,6 @@
 import { guessCategory } from "./categories";
 import { assignPhotos, defaultRooms, newId } from "./rooms";
+import { KINDS, RENO_STATUS } from "./renovation";
 import type { Category, Dims, Item, ItemStatus, Listing, Project, Renovation, Room, RoomType } from "./types";
 
 type Raw = Record<string, unknown>;
@@ -85,6 +86,15 @@ function migrateRenovation(raw: unknown): Renovation | undefined {
     keyDate: r.keyDate,
     moveDate: r.moveDate,
     budget: r.budget,
-    tasks: (Array.isArray(r.tasks) ? r.tasks : []).map((t) => ({ ...t, roomIds: t.roomIds ?? [], quotes: t.quotes ?? [], note: t.note ?? "", beforeMove: t.beforeMove ?? true })),
+    tasks: (Array.isArray(r.tasks) ? r.tasks : []).map((t) => ({
+      ...t,
+      // An unknown kind (a backup or database edited by hand) would have no icon or phase.
+      kind: t.kind in KINDS ? t.kind : "overig",
+      status: RENO_STATUS.some((s) => s.id === t.status) ? t.status : "idee",
+      roomIds: t.roomIds ?? [],
+      quotes: t.quotes ?? [],
+      note: t.note ?? "",
+      beforeMove: t.beforeMove ?? true,
+    })),
   };
 }

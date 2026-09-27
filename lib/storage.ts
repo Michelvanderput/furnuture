@@ -58,18 +58,25 @@ const req = <T>(r: IDBRequest<T>) =>
 type Parts = { listing: unknown; rooms: unknown; items: unknown; renovation: unknown; settings: string };
 const partsOf = (p: Project): Parts => ({ listing: p.listing, rooms: p.rooms, items: p.items, renovation: p.renovation, settings: JSON.stringify({ budget: p.budget, style: p.style }) });
 
-/** What was last written, per part: the next save compares against this. */
-let saved: Parts | null = null;
+/** What was last written, per house and part: the next save compares against this. */
+const savedByHouse = new Map<string, Parts | null>();
 
-/** The saved project (older formats are converted; `current` = already in this format). */
-export async function loadProject(): Promise<{ project: Project; current: boolean } | null> {
+/**
+ * Each house has its own records ("h:<name>:items"…); "" is the single project of
+ * earlier versions of the app, from before houses had names.
+ */
+const prefix = (house: string) => (house ? `h:${house}:` : "");
+
+/** The saved project of a house (older formats are converted; `current` = already in this format). */
+export async function loadProject(house = ""): Promise<{ project: Project; current: boolean } | null> {
+  const k = prefix(house);
   try {
     const d = await openDb();
     const s = d.transaction(STORE).objectStore(STORE);
-    const format = await req(s.get(VERSION_KEY));
+    const format = await req(s.get(k + VERSION_KEY));
     const t = d.transaction(STORE).objectStore(STORE);
     if (format === FORMAT) {
-      const [listing, rooms, items, renovation, settings] = await Promise.all(["listing", "rooms", "items", "renovation", "settings"].map((k) => req(t.get(k))));
+      const [listing, rooms, items, renovation, settings] = await Promise.all(["listing", "rooms", "items", "renovation", "settings"].map((x) => req(t.get(k + x))));
       let st: { budget?: number; style?: string } = {};
       try {
         st = typeof settings === "string" ? JSON.parse(settings) : {};
@@ -78,6 +85,7 @@ export async function loadProject(): Promise<{ project: Project; current: boolea
       }
       return { project: migrate({ listing, rooms, items, renovation, budget: st.budget, style: st.style }), current: true };
     }
+    if (house) return null;
     if (format === 2) {
       // Version 2: listing, products, plans and one design per photo. Designs and plans are gone.
       const [listing, products] = await Promise.all([req(t.get("listing")), req(t.get("products"))]);
@@ -91,33 +99,34 @@ export async function loadProject(): Promise<{ project: Project; current: boolea
 }
 
 /** Marks a loaded project as saved, so the first save after loading writes only what changed. */
-export function markSaved(project: Project): void {
-  saved = partsOf(project);
+export function markSaved(project: Project, house = ""): void {
+  savedByHouse.set(house, partsOf(project));
 }
 
-export async function saveProject(project: Project): Promise<void> {
-  const prev = saved;
+export async function saveProject(project: Project, house = ""): Promise<void> {
+  const k = prefix(house);
+  const prev = savedByHouse.get(house) ?? null;
   const next = partsOf(project);
   const writes = (Object.keys(next) as (keyof Parts)[]).filter((k) => !prev || prev[k] !== next[k]);
   if (!writes.length && prev) return;
-  saved = next;
+  savedByHouse.set(house, next);
   try {
     const d = await openDb();
     await new Promise<void>((resolve, reject) => {
       const tx = d.transaction(STORE, "readwrite");
       const store = tx.objectStore(STORE);
       if (!prev) {
-        // First save of this session: a full write, which also clears data of older formats.
-        store.clear();
-        store.put(FORMAT, VERSION_KEY);
+        // First save of this session: a full write (for the unnamed project, also clearing older formats).
+        if (!house) for (const old of ["project", "products", "plans"]) store.delete(old);
+        store.put(FORMAT, k + VERSION_KEY);
       }
-      for (const k of prev ? writes : (Object.keys(next) as (keyof Parts)[])) store.put(next[k], k);
+      for (const part of prev ? writes : (Object.keys(next) as (keyof Parts)[])) store.put(next[part], k + part);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error);
     });
   } catch {
     // Private mode, blocked storage or disk full: write everything again next time.
-    saved = null;
+    savedByHouse.set(house, null);
   }
 }
