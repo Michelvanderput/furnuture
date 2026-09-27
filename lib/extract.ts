@@ -1,6 +1,6 @@
 import { guessCategory, guessRoom } from "./categories";
 import { dimsFromJsonLd, dimsFromLabels, dimsFromNamedMeasures, dimsFromTitle, mergeDims, pageText } from "./dimensions";
-import type { FundaResult, ProductInfo, RoomType } from "./types";
+import type { FundaResult, HouseFacts, ProductInfo, RoomType } from "./types";
 
 /** Minimal HTML helpers: we only need meta tags, JSON-LD and URLs, so no DOM parser. */
 
@@ -166,7 +166,40 @@ export function parseFundaApi(data: unknown): FundaResult {
 
   const address = (d.AddressDetails ?? {}) as Json;
   const title = [address.Title, address.SubTitle].filter((x) => typeof x === "string" && x).join(", ");
-  return { title, photos, rooms };
+  const description = (d.ListingDescription as Json | undefined)?.Description;
+  return { title, photos, rooms, facts: fundaFacts(d), description: typeof description === "string" ? description.slice(0, 6000) : undefined };
+}
+
+/** The facts buyers look at (asking price, m², bedrooms…), from the app API's quick view and "kenmerken". */
+export function fundaFacts(d: Json): HouseFacts {
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+  const fast = (d.FastView ?? {}) as Json;
+  const price = (d.Price ?? {}) as Json;
+  const address = (d.AddressDetails ?? {}) as Json;
+  // Kenmerken are nested sections of { Id, Label, Value, KenmerkenList }.
+  const byId = new Map<string, string>();
+  const walk = (list: unknown) => {
+    for (const k of (Array.isArray(list) ? list : []) as Json[]) {
+      if (typeof k.Id === "string" && typeof k.Value === "string") byId.set(k.Id, k.Value);
+      walk(k.KenmerkenList);
+    }
+  };
+  for (const section of (Array.isArray(d.KenmerkSections) ? d.KenmerkSections : []) as Json[]) walk(section.KenmerkenList);
+  const facts: HouseFacts = {
+    price: str(price.SellingPrice),
+    livingArea: str(fast.LivingArea),
+    plotArea: str(fast.PlotArea),
+    bedrooms: str(fast.NumberOfBedrooms),
+    energyLabel: str(fast.EnergyLabel),
+    rooms: str(byId.get("indeling-totalrooms")),
+    bathrooms: str(byId.get("indeling-totalbathroom")),
+    stories: str(byId.get("indeling-totalstories")),
+    buildYear: str(byId.get("bouw-bouwjaar")),
+    kind: str(byId.get("bouw-soortobject")),
+    city: str(address.City),
+    neighborhood: str(address.NeighborhoodName),
+  };
+  return Object.fromEntries(Object.entries(facts).filter(([, v]) => v)) as HouseFacts;
 }
 
 export function isFundaUrl(u: string): boolean {

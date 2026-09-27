@@ -13,15 +13,15 @@ export const maxDuration = 30;
  * GET ?status=<url>&response=<url> -> { status, position?, result?, error? }
  */
 
-/** Only these models, so the key cannot be used for anything else; with their rough price (USD). */
-const MODELS = new Map([
-  ["fal-ai/object-removal/mask", 0.024],
-  ["fal-ai/bria/eraser", 0.04],
-  ["fal-ai/sam-3/image", 0.005],
-  ["fal-ai/birefnet/v2", 0.01],
-  ["fal-ai/nano-banana-2/edit", 0.12],
-  ["openrouter/router/vision", 0.005],
-]);
+/** Only this model (a vision-language model via fal's OpenRouter endpoint), so the key cannot be used for anything else. */
+const MODEL = "openrouter/router/vision";
+/** …and only these language models behind it (a request cannot pick an expensive one). */
+const LLMS = new Set(["google/gemini-2.5-flash"]);
+/** Rough price per question (USD, on the high side); searching the web costs extra. */
+const COST = 0.01;
+const WEB_COST = 0.03;
+const MAX_IMAGES = 40;
+const MAX_TOKENS = 3000;
 
 /**
  * Spending brakes on the server, on top of the app's own daily limit: at most
@@ -45,7 +45,7 @@ function overBudget(cost: number): string | null {
 /** fal's queue (FAL_QUEUE_URL only for tests with a stand-in server). */
 const QUEUE = process.env.FAL_QUEUE_URL?.trim() || "https://queue.fal.run/";
 const escaped = QUEUE.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-const MAX_BODY = 4_000_000; // Vercel accepts 4.5 MB; photos are sent as ~0.5 MB JPEGs
+const MAX_BODY = 4_000_000; // Vercel accepts 4.5 MB; a screenshot is sent as a ~0.3 MB JPEG
 
 const key = () => process.env.FAL_KEY?.trim();
 
@@ -92,14 +92,18 @@ export async function POST(req: Request) {
   } catch {
     return fail("Ongeldig verzoek");
   }
-  if (!job.model || !MODELS.has(job.model) || !job.input || typeof job.input !== "object") return fail("Onbekend model");
-  const cost = MODELS.get(job.model)!;
+  const input = job.input;
+  if (job.model !== MODEL || !input || typeof input !== "object" || !LLMS.has(String(input.model))) return fail("Onbekend model");
+  const images = input.image_urls;
+  if (images !== undefined && (!Array.isArray(images) || images.length > MAX_IMAGES)) return fail("Te veel afbeeldingen");
+  input.max_tokens = Math.min(MAX_TOKENS, Number(input.max_tokens) || 1000);
+  const cost = COST + (input.enable_web_search ? WEB_COST : 0);
   const over = overBudget(cost);
   if (over) return fail(over, 429);
-  const res = await fetch(`${QUEUE}${job.model}`, {
+  const res = await fetch(`${QUEUE}${MODEL}`, {
     method: "POST",
     headers: { Authorization: `Key ${key()}`, "Content-Type": "application/json" },
-    body: JSON.stringify(job.input),
+    body: JSON.stringify(input),
   });
   const body = (await res.json().catch(() => ({}))) as { status_url?: string; response_url?: string; detail?: unknown };
   if (!res.ok || !body.status_url) {

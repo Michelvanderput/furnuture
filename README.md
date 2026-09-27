@@ -1,216 +1,43 @@
 # furnuture
 
-Richt je nieuwe huis in terwijl je op de sleutel wacht.
+Inkoopplanner voor je nieuwe huis. Plak de Funda-link en furnuture maakt de kamers aan; per kamer verzamel je wat je gaat kopen, met prijzen, budget en een overzicht per winkel.
 
-1. **Woning** – plak de Funda-link. De app haalt alle foto's op en zet ze per ruimte. Sorteren kan met gratis AI (CLIP, draait in je eigen browser) of door foto's te slepen.
-2. **Producten** – plak links van webshops. De app haalt titel, productfoto('s) en prijs op en zet het product in een categorie (banken, vloeren, verf, verlichting…). Je markeert favorieten, wijst producten af en ziet het totaalbedrag van je favorieten.
-3. **Visualiseren** – gum bestaande meubels weg, leg een vloer (ingebouwde vloersoorten of een vloer uit een webshoplink) in perspectief, verf muren en zet meubels in de kamer. Meubels kun je met vier losse hoeken schuin of de diepte in zetten.
+Live: https://furnuture-nine.vercel.app
 
-Alles wordt lokaal in je browser bewaard (IndexedDB). Er is geen account en geen database nodig.
+## Wat het doet
 
-```bash
+- **Woning uit Funda**: foto's, vraagprijs, m², slaapkamers, energielabel, bouwjaar en omschrijving. Een eerste indeling (woonkamer, keuken, het aantal slaapkamers, badkamer, tuin…) volgt uit de Funda-gegevens. Lukt ophalen niet: bookmarklet, paginabron plakken, of zonder Funda beginnen.
+- **Lijst per kamer**: plak een link uit (bijna) elke webshop; titel, foto, prijs, maten en soort komen vanzelf. Meerdere links tegelijk, of plak een link ergens op de pagina. Ook "nog te vinden"-items met een richtprijs.
+- **Status** per item: 💡 idee → 💚 gekozen → 📦 besteld → ✅ in huis. Aantal, must-have, notitie, maten.
+- **Opties vergelijken**: zet alternatieven naast elkaar (prijsverschil, maten) en kies er één; alleen de gekozen versie telt mee.
+- **Budget**: totaalbudget, slim verdeeld over de kamers, per kamer een voortgangsbalk (besteld / gepland / geschat).
+- **Winkelen**: per winkel (alles bij IKEA in één keer bestellen), per status, en cijfers per kamer en per soort. Prijzen checken (prijsdalingen worden getoond), delen als tekst (WhatsApp), Excel (CSV), printen.
+- Back-up en terugzetten (ander apparaat, partner). Alles wordt lokaal bewaard (IndexedDB). Werkt als app op het beginscherm; op Android kun je een link naar de app delen.
+
+## ✨ AI (fal.ai, optioneel)
+
+Met een fal.ai-sleutel komen er slimme knoppen bij. Het model is Gemini 2.5 Flash via fal (`openrouter/router/vision`): snel en goedkoop.
+
+| Functie | Wat | Kosten |
+|---|---|---|
+| Kamers herkennen | leest plattegrond, omschrijving en foto's: kamers, m², verdieping, welke foto bij welke kamer | ± 1–2 cent |
+| Wat mis ik nog? | tips per kamer met richtprijs, rekening houdend met maat, budget, stijl en je lijst | < 1 cent |
+| Screenshot lezen | product uit een screenshot (als een webshop ophalen blokkeert) | < 1 cent |
+| Alternatieven zoeken | zoekt op internet naar vergelijkbare producten bij Nederlandse winkels | ± 1–3 cent |
+| Stijlcheck | passen de gekozen producten bij elkaar? Score, kleurenpalet en tips | < 1 cent |
+
+**Kosten in de hand:** elk antwoord wordt bewaard (dezelfde vraag opnieuw is gratis), de werkelijke kosten worden bijgehouden, daglimiet in de app (standaard € 2, ⚙︎ Instellingen) en op de server (`FAL_DAILY_LIMIT_USD`, standaard $3, max. 20 vragen per minuut). De server staat alleen dit ene model toe, met een maximum aan foto's en tekst per vraag. Tegoed op of sleutel fout: de app stopt met AI voor die sessie.
+
+**Instellen:** fal.ai → Billing (tegoed, auto top-up uit) → Keys → nieuwe sleutel. Vercel → project → Settings → Environment Variables: `FAL_KEY` (Production en Preview), aanrader `AI_ACCESS_CODE` (vul die code in de app in bij ⚙︎). Daarna Redeploy.
+
+## Ontwikkelen
+
+```
 npm install
-npm run dev        # http://localhost:3000
-npm test           # parsers en categorie-herkenning
-npm run typecheck
+npm run dev
+npm test
 ```
 
-## Hoe het werkt
+Next.js (App Router). API-routes: `/api/funda` (Funda-app-API en website), `/api/product` (webshoppagina's: JSON-LD, meta, maten), `/api/image` (afbeeldingsproxy), `/api/fal` (AI, sleutel blijft op de server).
 
-| Onderdeel | Techniek | AI? |
-|---|---|---|
-| Funda-foto's ophalen | 1) De API van de Funda-app (`listing-detail-page.funda.io`, id uit de URL), 2) de website, 3) een bookmarklet die in je eigen browser draait | Nee |
-| Foto's per ruimte | CLIP zero-shot (`Xenova/clip-vit-base-patch32`) via transformers.js in de browser, of handmatig slepen | Optioneel, gratis |
-| Productlinks lezen | JSON-LD `Product`, Open Graph en `product:price`-metatags (bijna elke webshop heeft deze) | Nee |
-| Categorie bepalen | Trefwoorden in titel, breadcrumbs en URL (NL + EN) | Nee |
-| Achtergrond weghalen | Snel: flood fill vanaf de rand die stopt bij randen in de foto (instelbare gevoeligheid). Nauwkeurig: RMBG-1.4 in de browser | Optioneel, gratis |
-| Meubels weggummen | Content-aware fill (PatchMatch): kopieert passende stukjes textuur uit de rest van de foto, met een aparte doorrekening voor de vloer in perspectief | Nee |
-| Meubel in perspectief | Vier losse hoeken, homografie als CSS `matrix3d` | Nee |
-| Vloer leggen | Ingebouwde vloersoorten (canvas, naadloos) of de productfoto van een vloerlink, in perspectief op de vier aangeklikte hoeken | Nee |
-| Muur verven | Zelf getekend vlak met kleur, `mix-blend-mode: multiply` behoudt de schaduwen | Nee |
-
-`/api/image` is een beeldproxy. Die is nodig omdat canvas en AI anders de pixels van externe afbeeldingen niet mogen lezen. De server-routes weigeren links naar interne netwerken (SSRF-bescherming).
-
-### Bekende beperking: Funda blokkeert scrapers
-
-De website van Funda heeft botbescherming, en die blokkeert servers zoals die van Vercel meestal. De app probeert daarom eerst de (niet-officiële) API van de Funda-app, zoals [pyfunda](https://github.com/0xMH/pyfunda) die gebruikt. Werkt dat ook niet, dan is er de knop **"📸 Foto's van Funda halen"**. Dat is een bookmarklet: je sleept hem naar je bladwijzerbalk en klikt erop op een Funda-woning. Hij draait in je eigen browser, dus de botbescherming speelt geen rol, en stuurt de foto's naar de app. Plakken van de paginabron of zelf uploaden kan ook nog.
-
-Let op: de voorwaarden van Funda staan geautomatiseerd ophalen niet toe. Voor persoonlijk gebruik is de bookmarklet de netste route; voor een publieke app is dit een juridisch aandachtspunt.
-
-## AI in de visualizer
-
-### ✨ fal.ai: de beste AI, betaald per keer (aanrader)
-
-Met een sleutel van [fal.ai](https://fal.ai) doet de app het zware werk met de beste modellen van dit moment. Zonder sleutel werkt alles zoals hieronder (gratis, maar minder mooi). Mislukt een fal-taak, dan valt de app vanzelf terug op de gratis manier.
-
-| Taak | Model | Kosten (ongeveer) |
-|---|---|---|
-| Weggummen | `fal-ai/object-removal` (terugval: Bria Eraser) | 1–4 cent per keer |
-| Selecteren (tik op een meubel) | SAM 3 | < 1 cent |
-| Meubel uitknippen | BiRefNet v2 (2048 px) | ± 1 cent |
-| 📍 Beste plekken voor een meubel | Gemini 2.5 Flash (vision) | < 1 cent |
-| ✨ Vloer & muren echt | Nano Banana 2 (2K) | ± 11 cent |
-| ✨ Fotorealistisch | Nano Banana 2 (2K) | ± 11 cent |
-
-- **📍 Beste plekken (AI)**: selecteer een meubel dat op de vloer staat. De AI bekijkt de kamer en wijst genummerde plekken aan met een reden ("tegenover de tv"). Tik op een plek en het meubel gaat erheen, op ware grootte en in perspectief.
-- **✨ Fotorealistisch**: maakt van je ontwerp een echte foto. Het meubel krijgt schaduw, licht en reflecties van de kamer, en de productfoto's gaan mee zodat het hetzelfde meubel blijft. Niets wordt verplaatst. Met 👁 Vergelijk (vasthouden) zie je je eigen ontwerp.
-- **✨ Vloer & muren echt**: de nieuwe vloer en muren worden echt materiaal met het licht van de kamer (lichter bij het raam, schaduw onder meubels, reflecties). Alleen de nieuwe vlakken worden uit het AI-resultaat overgenomen; de rest van de foto blijft precies zoals hij was. Met ✏️/✨ wissel je gratis tussen getekend en echt. Verander je de vloer, dan zie je weer de getekende versie tot je opnieuw op de knop drukt.
-- **Ware grootte zonder meten**: de maat wordt geschat uit het perspectief (camera op ± 1,5 m hoogte, ± 15 %), gemarkeerd met "≈". Meten met 📏 maakt het precies.
-
-**Instellen:**
-1. Maak een account op fal.ai, zet er tegoed op (bijvoorbeeld $10) en maak een API-sleutel (Settings → API Keys).
-2. Zet in Vercel (Project → Settings → Environment Variables) `FAL_KEY` = je sleutel.
-3. Aanrader: zet ook `AI_ACCESS_CODE` = een eigen code. Anders kan iedereen die de site vindt jouw tegoed gebruiken. Vul de code in de app in via ⋯ Project → fal.ai.
-4. Redeploy. In ⋯ Project staat daarna "✨ fal.ai actief".
-
-De sleutel blijft op de server (`app/api/fal`), die alleen de bovenstaande modellen toestaat.
-
-**Geen onnodige kosten:**
-- Niets betaalds gebeurt vanzelf, behalve weggummen (je kiest zelf Weghalen) en het uitknippen van een sfeerfoto zonder effen achtergrond (1× per foto).
-- Elk resultaat wordt bewaard: hetzelfde opnieuw (herladen, ongedaan maken, nog eens op de knop) kost niets. Na herladen kost één nieuw weggegumd voorwerp één opdracht, niet alle eerdere opnieuw.
-- Dure opdrachten (± 11 cent) worden eerst gevraagd, met wat je vandaag al gebruikt hebt.
-- Daglimiet in de app: standaard € 2 (⋯ Project). Daarboven wordt de gratis manier gebruikt.
-- Daglimiet op de server: `FAL_DAILY_LIMIT_USD` (standaard $3), en maximaal 20 opdrachten per minuut.
-- Dubbel tikken stuurt één opdracht. Is het tegoed op of de sleutel fout, dan stopt de app met fal voor die sessie in plaats van het steeds opnieuw te proberen. Mislukt fal bij een voorwerp, dan wordt dat niet vanzelf opnieuw geprobeerd.
-- De harde grens is je tegoed bij fal: zet automatisch opwaarderen (auto top-up) uit.
-
-### ☁️ Gratis AI-server
-
-Een iPad-tabblad heeft weinig geheugen; AI-modellen in Safari kunnen het laten vastlopen.
-Met een eigen, gratis **Hugging Face Space** (map [`ai-server`](ai-server/README.md), CPU basic,
-16 GB) draait alle AI daar: de iPad stuurt alleen een foto en krijgt een masker of beeld terug.
-Bovendien sterkere modellen (SegFormer-B5, SAM ViT-B, LaMa). Opzetten in ± 5 minuten, zie
-[`ai-server/README.md`](ai-server/README.md); daarna de link plakken in **⋯ Project → ☁️ AI-server**
-(of voor alle apparaten `NEXT_PUBLIC_AI_SERVER` in Vercel). Een slapende Space wordt vanzelf
-wakker gemaakt; is hij onbereikbaar, dan valt de app terug op de AI in de browser.
-
-
-Alles hieronder draait gratis in de browser van de gebruiker (geen server, geen API-sleutel). Modellen worden één keer gedownload en daarna door de browser bewaard.
-
-| Functie | Model | Download | Licentie |
-|---|---|---|---|
-| Meubels, muren en vloer herkennen | SegFormer-B2 (ADE20K) via transformers.js; op iPad/iPhone SegFormer-B0 | ± 30 MB (B0: ± 4 MB) | NVIDIA SegFormer-licentie (onderzoek/niet-commercieel) |
-| Meubels weggummen | LaMa op een computer (beste kwaliteit), MI-GAN op iPad/telefoon of in de lichte modus, via onnxruntime-web | ± 200 MB / ± 27 MB | Apache-2.0 / MIT |
-| Achtergrond van productfoto weghalen | RMBG-1.4 via transformers.js (niet op iPad: te zwaar) | ± 45 MB | Niet-commercieel |
-| Foto's per ruimte sorteren | CLIP ViT-B/32 via transformers.js | ± 90 MB | MIT |
-
-**Geheugen (iPad/Safari):** elk AI-model draait in een eigen Web Worker die na de taak wordt afgesloten. WebAssembly-geheugen wordt anders nooit teruggegeven, en Safari op iPad sluit een tabblad dat te veel geheugen gebruikt. De modellen krijgen alleen een verkleinde foto (512 px), het resultaat wordt op 480 px verwerkt, en op iPad/iPhone worden de lichtste modellen gebruikt.
-
-**Geheugen in de app zelf:**
-
-- Uitgeknipte productfoto's, vloertexturen en de gegumde foto zijn blob-URL's (bytes buiten de JavaScript-heap) in plaats van data-URL-strings van meerdere MB. Wat geen enkele foto of plattegrond meer gebruikt (een oude gevoeligheid, een verwijderde laag), wordt vrijgegeven.
-- De gevoeligheid-schuif start pas een nieuwe uitsnede als je even stopt met schuiven.
-- Maskers voor het aantikken blijven op hun eigen formaat (± 480 px) in een begrensde cache; ze werden eerder op fotoformaat gedecodeerd en nooit opgeruimd.
-- Gummen verwerkt alleen de nieuwe laag (de vorige uitkomst wordt hergebruikt), op maximaal 2048 px, en de snelle gum rekent alleen rond het gat.
-- Herkenningen van kamers worden voor de laatste 6 foto's bewaard.
-
-**WebGPU:** op computers met WebGPU draaien de transformers.js-modellen op de videokaart: veel sneller, en de gewichten staan niet in het WebAssembly-geheugen. Lukt dat niet, dan doet de app dezelfde taak op de processor en onthoudt hij dat voor dit apparaat. In lichte modus en op iPad/iPhone blijft alles op de processor.
-
-**Sterkere modellen, met terugval:** kamers sorteren gebruikt CLIP ViT-B/16 (was B/32, even groot), tik-om-te-selecteren SlimSAM-50 (was 77), en kamerherkenning op een videokaart met half-precision SegFormer-B5 op 640 px (was B2). Kan een model niet laden, dan valt de app terug op het vorige model.
-
-Zo werkt het:
-
-1. **✨ Herken meubels, muren & vloer**: elke pixel krijgt een klasse (bank, stoel, muur, vloer…). Meubels en muren worden losse objecten die je aanklikt.
-2. **Weghalen met AI**: LaMa (computer) of MI-GAN (iPad) vult het object op met wat erachter hoort. Het masker wordt ruim genomen (≈ 0,8 % van de breedte rondom, plus 2 % naar onderen voor de contactschaduw), zodat er geen rand of schaduw van het oude meubel blijft staan. Omdat het werkt op een uitsnede rond het object, blijft de kwaliteit hoog. Mislukt LaMa, dan probeert hij MI-GAN. Lukt de AI niet (download geblokkeerd, te weinig geheugen), dan valt hij terug op de snelle gum.
-3. **Nieuwe vloer / verven**: uit het vloer- of muurmasker wordt automatisch een perspectiefvlak berekend. Voor de vloer: de zijranden (lijnen), de achterrand (RANSAC, robuust tegen meubels ervoor) en de verdwijnpunten/horizon — ook als de zijmuren niet in beeld zijn. Muren die om een hoek gaan worden opgesplitst in losse vlakken, elk met een eigen perspectief. Het textuurvlak loopt door tot buiten de hoekpunten, zodat planken tot in de hoeken en onder de rand lopen; met ⤾ Richting 90° draai je de planken. Randen die door meubels verborgen zijn, tellen niet mee. De textuur loopt mee met de diepte; de oranje hoekjes stellen het vlak bij. Een nieuwe vloer of muur bedekt ook de plek waar weggegumde meubels stonden.
-4. **Meubels op de vloer**: staat er een vloer in de foto, dan wordt een nieuw meubel erop gezet. Schuif je het naar achteren, dan wordt het vanzelf kleiner; met "Draaien op de vloer" zet je het schuin, bijvoorbeeld in een hoek.
-
-### Echter zonder betaalde AI
-
-Zonder fal-sleutel blijft de app volledig gratis. Om meubels toch natuurlijk te laten ogen:
-
-- **Contactschaduw**: een zachte schaduw onder het meubel, op een herkende vloer in perspectief en mee met het draaien.
-- **Licht en warmte**: productfoto's zijn fel en neutraal (studiolicht). Bij het plaatsen wordt het meubel gedimd en opgewarmd op basis van de gemiddelde helderheid en kleur van de kamerfoto; bij te stellen met de schuiven Licht en Warmte.
-
-Wat gratis in de browser niet kan: een productfoto blijft een foto van één kant, dus schuin zetten laat nooit de zijkant zien. Dat vraagt generatieve beeld-AI. Die kan gratis draaien op een eigen pc met een flinke videokaart (bijvoorbeeld ComfyUI met FLUX of Stable Diffusion), maar niet in de browser.
-
-## Plattegrond: één model voor het hele huis
-
-De plattegrond is het centrale model. Meubels staan op de plattegrond op ware grootte, en elke gekoppelde foto laat ze in zijn eigen perspectief zien.
-
-1. **Plattegrond kiezen** (tab 🗺️ Plattegrond): een foto die bij Woning op "Plattegrond" staat. Meerdere verdiepingen kunnen.
-2. **Schaal**: tik een bekende maat aan (bijvoorbeeld "5,00 m" bij de woonkamer). Is een gekoppelde foto al gemeten, dan volgt de schaal daaruit, en omgekeerd krijgt een gekoppelde foto automatisch een meetlat.
-3. **Kamers**: tik in een kamer. Plattegronden zijn lijntekeningen, dus een vulling over de lichte pixels stopt bij de muren (geen AI nodig). Loopt de vulling over (een open doorgang), dan tik je de hoeken aan. Hoekpunten zijn te verslepen.
-4. **Foto koppelen** (Inrichten → 🗺️ Koppelen): de app zoekt de vloer in de foto en markeert de twee verre hoeken met **L** en **R**. Tik waar die op de plattegrond liggen (kamerhoeken snappen). Daaruit volgt de volledige camera:
-   - de homografie plattegrond → foto via de vier vloerhoeken, met de diepte uit de echte vloerverhouding (`linkFromPoints`);
-   - de brandpuntsafstand uit de homografie (Zhang: `r1 ⟂ r2`, `|r1| = |r2|`), daarna `R` en `t`;
-   - de camera en het kijkveld worden op de plattegrond getekend. Klopt het niet, dan versleep je de punten.
-   Getest met een nagebootste camera: de positie van de fotograaf klopt tot op enkele centimeters en 3D-punten tot op ± 1,5 pixel.
-5. **Meubels plaatsen**: op de plattegrond (B × D × H in cm, draaien, dupliceren) of in een gekoppelde foto. In elke gekoppelde foto wordt de voorkant van het meubel op de juiste plek, hoogte en hoek geprojecteerd, met de voetafdruk als schaduw en de verste meubels eerst. Zie je het meubel van achteren, dan wordt de voorkant gespiegeld getoond. Slepen in een foto verplaatst het meubel op de plattegrond.
-6. **Wat er nu staat**: herkende meubels in een gekoppelde foto (waar ze de vloer raken) verschijnen als grijze contouren op de plattegrond.
-
-Grenzen: een productfoto laat één kant zien, dus de zijkant van een meubel wordt niet getekend. Welke foto bij welke kamer hoort en vanuit welke hoek hij genomen is, kost één handeling per foto (L en R aantikken). Volledig automatisch kan dat niet betrouwbaar met gratis AI in de browser.
-
-## Afmetingen: meten en ware grootte
-
-- **Productmaten** (breedte × diepte × hoogte) worden uit de webshoppagina gehaald: JSON-LD (`width`/`depth`/`height`), specificaties ("Breedte: 220 cm") of de titel ("220x95x80 cm", "160 x 200"). Aan te passen op de productkaart.
-- **📏 Meten**: tik twee punten op de vloer en vul één keer in hoe lang dat is (bijvoorbeeld de kamerbreedte uit de Funda-plattegrond, of een deur van 83 cm). Daarna toont elke meetlijn direct zijn lengte, ook in de diepte.
-  - Hoe: de vloer is een rechthoek in perspectief. De brandpuntsafstand van de camera wordt geschat uit de twee verdwijnpunten van de vloerranden (of een gangbare groothoek van 75° als die niet zichtbaar zijn). Daarmee is de echte verhouding van de vloer bekend (`K⁻¹H = λ[sx·r1, sy·r2, t]`), en één bekende lijn geeft de schaal. Getest met een nagebootste camera.
-  - Er is geen herkende vloer? Dan tik je de 4 hoeken van een stuk vloer aan; dat vlak blijft onzichtbaar en dient alleen om te meten.
-- **Ware grootte**: op een gemeten vloer krijgt een meubel met bekende breedte automatisch zijn echte maat, ook als je het naar achteren schuift of draait.
-- **Past het?**: bij een geselecteerd meubel zie je de voetafdruk (breedte × diepte) op de vloer.
-- **Vloeren op echte maat**: planken en tegels van de ingebouwde vloersoorten krijgen op een gemeten vloer hun werkelijke formaat (planken van 20 cm, tegels van 60 × 60 cm…).
-- Meetlijnen staan ook op de foto die je opslaat of deelt.
-
-## Selecteren en stabiliteit
-
-- **Tik op een meubel**: SlimSAM (een lichte "Segment Anything", ± 15 MB) omlijnt precies wat je aantikt. Is de kamer herkend, dan krijgt SAM extra tikpunten verspreid over het herkende meubel en wordt het resultaat samengevoegd met de herkenning, gaten gevuld en losse vlekjes weggehaald — zo wordt de hele bank geselecteerd en niet één kussen. Met ➕/➖ tik je stukken erbij of eraf; met de 🖌️/🧽 kwast (instelbare grootte) veeg je randen precies bij. De foto wordt één keer geanalyseerd, daarna is elke tik snel. Het werkproces sluit zichzelf na 90 seconden zonder gebruik.
-- **Betere herkenning**: overal SegFormer-B2; kussens en plaids worden bij de bank of het bed gevoegd, stukken van één meubel samengevoegd en gaten gedicht. Kleine spullen die duidelijk ergens op staan (een vaas, een fles, een dienblad op een tafel of kast) gaan ook mee: weg je de tafel, dan verdwijnt de vaas niet zwevend achter — die was namelijk het bekende, onrealistische resultaat zonder deze koppeling. Ook herkent de app nu oven, magnetron, vaatwasser, openhaard en bar als meubel-achtige objecten.
-- **Crash-vangnet**: op iPad/iPhone staat de **lichte AI-modus** standaard aan (kleinste modellen, nooit WebGPU). Loopt een tabblad toch vast op een AI-taak, dan meldt de app dat bij de volgende start en zet hij de lichte modus aan. Gebeurt het ook dan nog, dan gaat alleen díe AI-stap uit op dat apparaat en gebruikt de app de variant zonder AI (gummen met content-aware fill, selecteren met de herkenning en de kwast) — zo kan hij nooit in een lus blijven crashen. In het Project-menu: "AI op dit apparaat opnieuw proberen".
-
-### Weggummen zonder AI: wat het wel en niet goed kan
-
-Geen AI beschikbaar (download geblokkeerd, te weinig geheugen, of "Snel weghalen" gekozen)?
-Dan vult content-aware fill het gat met stukjes die het elders in de foto vindt — geen
-vage waas, maar (bijvoorbeeld) echt doorlopende plankenvloer. Getest tegen een gefotografeerde
-kamer (niet alleen gemaakte testbeelden):
-
-- **Met een vloer aangegeven** (getekend, of via "✨ Herken meubels, muren & vloer"): de
-  vloer wordt in bovenaanzicht rechtgetrokken vóór het invullen, zodat planken en tegels
-  ook in perspectief kloppend doorlopen. Dit geeft duidelijk het beste resultaat.
-- **Zonder vloer, op een rommelige plek** (bijvoorbeeld een meubel dat deels op een vloerkleed
-  en deels op de vloer staat): zonder enig houvast over wat waar hoort, kan de invulling
-  vervagen tot een vlakke, weinig overtuigende vlek — een bekende, inherente grens van deze
-  aanpak zonder AI op een drukke, echte foto. AI-gum (MI-GAN) is hier sterker; geef anders
-  eerst de vloer aan of herken de kamer voordat je gumt.
-- **Scherpte**: het gat wordt op ± 1000 px ingevuld (de vloer van bovenaf op 900 px); de
-  fijnste stap kopieert goede stukjes vrijwel ongemengd, wat de waas wegneemt. Is de kamer
-  herkend, dan wordt nooit uit meubels gekopieerd (eerder kwamen er tafelpoten in een
-  vloerkleed terecht).
-- **Waarom geen generatieve AI (Stable Diffusion) voor grote meubels?** Getest op een echte
-  woonkamer: in een bank-vormig gat tekent het model een nieuwe bank, ook met "geen meubels"
-  als instructie; op lage sterkte verzint het niets, maar wint het ook bijna niets. Dat is
-  1–3 minuten wachten op een gratis server niet waard. Voor een grote bank geldt: overdek
-  de plek met de nieuwe vloer en een nieuw meubel, dan zie je de invulling nauwelijks.
-
-## Gebruiksgemak en snelheid
-
-- **Ongedaan maken / opnieuw** (↶ ↷, ⌘/Ctrl+Z, ⌘/Ctrl+Shift+Z) per foto; slepen en schuifjes tellen als één stap.
-- **Sneltoetsen**: Delete verwijdert, ⌘/Ctrl+D dupliceert, pijltjes verschuiven (Shift = grotere stap), Esc annuleert, Enter maakt een vlak af.
-- **📷 Opslaan / delen**: het ontwerp als foto, op iPad/iPhone via het deelmenu (Foto's, AirDrop, WhatsApp). Perspectief, maskers, schaduwen en licht worden in een canvas nagetekend, identiek aan het scherm.
-- **Productfoto's**: de server kiest de beste foto (productfoto uit JSON-LD, geen logo's of iconen) en vraagt bij bekende shop-CDN's (Shopify, IKEA, `?width=`) de grote versie op. De app bewaart per product een kleine, bijgesneden miniatuur (witte randen eraf) in het project: de lijst laadt meteen, ook als de shop de link later verandert. Laadt een foto niet, dan wordt automatisch de volgende genomen.
-- **Verfkleuren en vloersoorten** direct in de zijbalk, zonder eerst een link te plakken.
-- **Budget per ruimte** en een **boodschappenlijst** (kopiëren of als Excel/CSV), filter op favorieten, prijs zelf invullen als een shop die niet meegeeft, dubbele links worden herkend.
-- **Plakknoppen** voor links (handig op iPad), **back-up** downloaden/terugzetten via het Project-menu, installeerbaar als app (**Zet op beginscherm**).
-- **Snelheid**: tijdens slepen wordt alleen de visualizer bijgewerkt (één keer per schermverversing) en pas bij loslaten opgeslagen; foto's komen direct van Funda/de shop (de server is alleen reserve) en in overzichten in kleinere maten; beelden via de server worden door Vercel's CDN bewaard; vloertexturen worden gemaakt als de browser niets te doen heeft; de tabbladen Producten en Inrichten laden pas als je ze opent; opslaan gebeurt ook direct als je de app verlaat, en de app vraagt de browser om de gegevens te bewaren.
-
-## Inrichten met meubels van internet
-
-- **Link plakken in Inrichten**: plak een productlink rechtsboven; het product wordt opgehaald, bij Producten gezet (met de ruimte van de foto) en meteen in de kamer gezet. Een vloer, verf of behang wordt als vlak toegepast. Een link die er al is, wordt hergebruikt.
-- **In dit ontwerp**: welke producten in deze foto staan, hoe vaak, met prijs, een link naar de winkel en het totaal. Verf en vloeren tellen één keer. Met "Alles favoriet" komen ze op je boodschappenlijst.
-- **Zoeken en per ruimte**: bij meer dan 6 meubels een zoekveld; producten voor deze ruimte eerst, of alleen die.
-- **Eigen productfoto**: blokkeert een webshop het ophalen, of is de foto een sfeerfoto, kies dan een eigen foto of screenshot op de productkaart (📷).
-- **Automatisch AI-uitknippen**: vindt de snelle uitsnede geen effen achtergrond, dan knipt de AI het meubel uit (niet op iPad/iPhone).
-
-## Opslaan en AI zonder crashes
-
-- **Opslaan per onderdeel**: woning, producten, plattegronden en het ontwerp van elke foto zijn losse records. Alleen wat veranderde wordt geschreven, als de browser even niets te doen heeft (en direct bij het verlaten van de app). Oude opslag wordt bij de eerste keer omgezet.
-- **AI-uitkomsten worden bewaard**: uitsnedes, gegumde foto's en kamerherkenningen staan in een eigen cache (maximaal 300 stuks / 250 MB, de oudste gaan eerst). Een foto die je opnieuw opent, toont zijn herkende objecten en gegumde versie direct, zonder AI.
-- **Eén AI-taak tegelijk**: taken wachten op elkaar in plaats van tegelijk modellen te laden. Opeenvolgende taken van dezelfde soort (drie uitsnedes) delen één geladen model; bij een andere soort, of kort na de laatste, wordt de worker gesloten zodat het geheugen echt vrijkomt. Op iPad wordt ook de selecteer-AI gesloten voordat een ander model start.
-
-## Mogelijke volgende stappen
-
-- [ ] Visualisatie exporteren als afbeelding en een project delen met je partner
-- [ ] Browserextensie of deel-knop op de telefoon ("Delen → furnuture") om producten toe te voegen
-- [ ] Maten van de kamer uit de Funda-plattegrond halen als meetlat
-- [ ] Budget per ruimte en afmetingen van producten tegenover de plattegrond
+Let op: de voorwaarden van Funda staan geautomatiseerd ophalen niet toe. Voor persoonlijk gebruik is de bookmarklet de netste route.

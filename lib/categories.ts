@@ -1,36 +1,18 @@
 import type { Category, RoomType } from "./types";
 
-/**
- * `clip`: descriptions for the photo-sorting AI (CLIP). Several per room: a room
- * wins when any of its descriptions fits best, which is much more reliable than a
- * single description (a dining corner is a living room too, a bedroom may be in
- * the attic). Floor plans are recognised without AI (see ai.ts).
- */
-export const ROOMS: { id: RoomType; label: string; clip: string[] }[] = [
-  {
-    id: "woonkamer",
-    label: "Woonkamer",
-    clip: ["a living room with a sofa", "a dining room with a dining table and chairs", "an open-plan living and dining room", "a living room with a fireplace"],
-  },
-  { id: "keuken", label: "Keuken", clip: ["a kitchen", "a kitchen counter with a sink and a stove", "an open kitchen with cabinets"] },
-  { id: "slaapkamer", label: "Slaapkamer", clip: ["a bedroom with a bed", "a bedroom", "a small bedroom with a bed under a window"] },
-  { id: "badkamer", label: "Badkamer", clip: ["a bathroom with a shower or bathtub", "a bathroom with a sink and a mirror"] },
-  { id: "toilet", label: "Toilet", clip: ["a small toilet room", "a toilet with a small hand basin"] },
-  {
-    id: "hal",
-    label: "Hal & trap",
-    clip: ["a hallway with a staircase", "an entrance hall with a front door", "a narrow corridor with doors", "an indoor landing at the top of the stairs"],
-  },
-  { id: "werkkamer", label: "Werkkamer", clip: ["a home office with a desk", "a study room with a desk and a chair", "a small room with a desk under the window"] },
-  { id: "zolder", label: "Zolder", clip: ["an attic room with a sloped roof", "an attic with a sloping wooden ceiling"] },
-  { id: "tuin", label: "Tuin & balkon", clip: ["a back garden with a fence", "a garden with plants and a patio", "a backyard with grass and the back of the house", "a balcony", "a roof terrace"] },
-  {
-    id: "buitenkant",
-    label: "Buitenkant",
-    clip: ["the front facade of a house", "a street with houses", "the outside of a building", "a public playground or park near houses"],
-  },
-  { id: "plattegrond", label: "Plattegrond", clip: ["an architectural floor plan drawing"] },
-  { id: "overig", label: "Overig", clip: [] },
+export const ROOMS: { id: RoomType; label: string }[] = [
+  { id: "woonkamer", label: "Woonkamer" },
+  { id: "keuken", label: "Keuken" },
+  { id: "slaapkamer", label: "Slaapkamer" },
+  { id: "badkamer", label: "Badkamer" },
+  { id: "toilet", label: "Toilet" },
+  { id: "hal", label: "Hal & trap" },
+  { id: "werkkamer", label: "Werkkamer" },
+  { id: "zolder", label: "Zolder" },
+  { id: "tuin", label: "Tuin & balkon" },
+  { id: "buitenkant", label: "Buitenkant" },
+  { id: "plattegrond", label: "Plattegrond" },
+  { id: "overig", label: "Overig" },
 ];
 
 export const CATEGORIES: { id: Category; label: string; group: "meubels" | "afwerking" | "accessoires" }[] = [
@@ -52,6 +34,26 @@ export const CATEGORIES: { id: Category; label: string; group: "meubels" | "afwe
   { id: "planten", label: "Planten", group: "accessoires" },
   { id: "overig", label: "Overig", group: "accessoires" },
 ];
+
+export const CATEGORY_EMOJI: Record<Category, string> = {
+  banken: "🛋️",
+  stoelen: "🪑",
+  tafels: "🍽️",
+  kasten: "🗄️",
+  bedden: "🛏️",
+  keuken: "🍳",
+  vloeren: "🪵",
+  verf: "🎨",
+  behang: "🧻",
+  tegels: "🔲",
+  sanitair: "🚿",
+  raamdecoratie: "🪟",
+  verlichting: "💡",
+  vloerkleden: "🧶",
+  decoratie: "🖼️",
+  planten: "🪴",
+  overig: "📦",
+};
 
 export const roomLabel = (id: RoomType) => ROOMS.find((r) => r.id === id)?.label ?? id;
 export const categoryLabel = (id: Category) => CATEGORIES.find((c) => c.id === id)?.label ?? id;

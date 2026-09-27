@@ -1,11 +1,12 @@
 import { fingerprint } from "./aiCache";
-import { loadImage, proxied } from "./images";
 
 /**
- * fal.ai (paid per use, via app/api/fal): the best available models for erasing,
- * selecting, cutting out and making a design photo-realistic. Nothing heavy runs on
- * the iPad. Everything here falls back to the free, built-in way when fal is not set
- * up (no FAL_KEY in Vercel) or a job fails.
+ * fal.ai (paid per use, via app/api/fal): a fast vision-language model (Gemini
+ * Flash through fal's OpenRouter endpoint) that reads Funda photos, floor plans,
+ * product screenshots and your list, and answers in JSON. A question costs a
+ * fraction of a cent to a few cents; answers are cached (see ai.ts), so the same
+ * question is never paid for twice. Without FAL_KEY the app works fully, without
+ * the ✨ buttons.
  */
 export type Progress = (message: string) => void;
 
@@ -50,26 +51,21 @@ export class FalError extends Error {}
 // are asked first, and a wrong key or empty credit stops fal for the session
 // (instead of every click trying again). Results are cached by the callers.
 
-/** Rough price per job (USD), a little on the high side. */
-export const MODEL_COST: Record<string, number> = {
-  "fal-ai/object-removal/mask": 0.024,
-  "fal-ai/bria/eraser": 0.04,
-  "fal-ai/sam-3/image": 0.005,
-  "fal-ai/birefnet/v2": 0.01,
-  "openrouter/router/vision": 0.005,
-  "fal-ai/nano-banana-2/edit": 0.12,
-};
-/** Rough cost per job (USD), shown next to the buttons. */
+/** The one model the app uses (see app/api/fal), and its rough price per question (USD, on the high side). */
+export const VISION = "openrouter/router/vision";
+export const MODEL_COST: Record<string, number> = { [VISION]: 0.01 };
+/** Searching the web costs extra. */
+export const WEB_SEARCH_COST = 0.03;
+/** Rough cost per AI feature (USD), shown next to the buttons. */
 export const FAL_COST = {
-  erase: MODEL_COST["fal-ai/object-removal/mask"],
-  select: MODEL_COST["fal-ai/sam-3/image"],
-  cutout: MODEL_COST["fal-ai/birefnet/v2"],
-  suggest: MODEL_COST["openrouter/router/vision"],
-  render: MODEL_COST["fal-ai/nano-banana-2/edit"],
-  surfaces: MODEL_COST["fal-ai/nano-banana-2/edit"],
+  rooms: 0.02,
+  advice: 0.01,
+  screenshot: 0.005,
+  alternatives: 0.03,
+  style: 0.01,
 } as const;
 const EUR = 0.92;
-export const euroCents = (usd: number) => (usd < 0.005 ? "< 1 cent" : `± ${Math.max(1, Math.round(usd * EUR * 100))} cent`);
+export const euroCents = (usd: number) => (usd < 0.01 ? "< 1 cent" : `± ${Math.max(1, Math.round(usd * EUR * 100))} cent`);
 export const euros = (usd: number) => `€ ${(usd * EUR).toFixed(2).replace(".", ",")}`;
 
 const SPEND_KEY = "furnuture:fal-spend";
@@ -89,7 +85,7 @@ export function spentToday(): number {
 }
 function addSpend(usd: number) {
   try {
-    localStorage.setItem(SPEND_KEY, JSON.stringify({ day: today(), usd: spentToday() + usd }));
+    localStorage.setItem(SPEND_KEY, JSON.stringify({ day: today(), usd: Math.max(0, spentToday() + usd) }));
   } catch {
     // storage blocked: the server's own limit still applies
   }
@@ -141,7 +137,7 @@ export async function falRun<T>(model: string, input: Record<string, unknown>, o
   const id = `${model}:${fingerprint(body)}`;
   const running = inFlight.get(id);
   if (running) return running as Promise<T>;
-  const cost = MODEL_COST[model] ?? 0.05;
+  const cost = (MODEL_COST[model] ?? 0.05) + (input.enable_web_search ? WEB_SEARCH_COST : 0);
   if ((spentToday() + cost) * EUR > dailyLimitEur()) {
     throw new FalError(`Daglimiet van € ${dailyLimitEur().toFixed(2).replace(".", ",")} bereikt (instelbaar via ⋯ Project). De gratis manier wordt gebruikt.`);
   }
@@ -163,7 +159,7 @@ async function runQueued<T>(body: string, cost: number, onProgress: Progress | u
     if (res.status === 401 || res.status === 503 || /\b(401|402|403)\b|balance|credit|exhausted|locked|limit/i.test(msg)) stop(friendlyStop(msg));
     throw new FalError(stopped ?? msg);
   }
-  addSpend(cost); // submitted = billed (roughly); counted before the result is in
+  addSpend(cost); // counted when submitted (corrected with the real price when the answer comes)
   const start = Date.now();
   for (;;) {
     await new Promise((r) => setTimeout(r, Date.now() - start < 6000 ? 900 : 1800));
@@ -171,7 +167,12 @@ async function runQueued<T>(body: string, cost: number, onProgress: Progress | u
     const s = await fetch(`/api/fal?${q}`, { headers: headers(), cache: "no-store" });
     const st = (await s.json().catch(() => ({}))) as { status?: string; position?: number; result?: T; error?: string };
     if (!s.ok || st.status === "ERROR") throw new FalError(st.error ?? `fal: ${s.status}`);
-    if (st.status === "COMPLETED") return st.result as T;
+    if (st.status === "COMPLETED") {
+      // The real price, when the model reports it: the estimate counted at submit is corrected.
+      const real = (st.result as { usage?: { cost?: number } } | undefined)?.usage?.cost;
+      if (typeof real === "number" && real >= 0) addSpend(real - cost);
+      return st.result as T;
+    }
     const secs = Math.round((Date.now() - start) / 1000);
     onProgress?.(st.status === "IN_QUEUE" && st.position ? `${label}: in de wachtrij (${st.position})…` : `${label}: bezig… ${secs} s`);
     if (Date.now() - start > timeoutMs) throw new FalError("fal duurde te lang");
@@ -183,52 +184,4 @@ function friendlyStop(msg: string): string {
   if (/Toegangscode/i.test(msg)) return "fal.ai: toegangscode klopt niet (⋯ Project).";
   if (/limit/i.test(msg)) return `fal.ai: limiet bereikt (${msg.slice(0, 80)}).`;
   return `fal.ai: sleutel geweigerd (${msg.slice(0, 80)}). Controleer FAL_KEY in Vercel.`;
-}
-
-// ---------------------------------------------------------------------------
-// Images to and from fal
-
-/** A canvas (or image) as a JPEG data URL of at most maxSide px: fal accepts data URIs. */
-export function toDataUrl(src: CanvasImageSource & { width: number; height: number }, maxSide = 2048, type = "image/jpeg", quality = 0.9): string {
-  const w = "naturalWidth" in src ? (src as HTMLImageElement).naturalWidth : src.width;
-  const h = "naturalHeight" in src ? (src as HTMLImageElement).naturalHeight : src.height;
-  const f = Math.min(1, maxSide / Math.max(w, h));
-  const c = document.createElement("canvas");
-  c.width = Math.round(w * f);
-  c.height = Math.round(h * f);
-  const ctx = c.getContext("2d")!;
-  if (type === "image/jpeg") (ctx.fillStyle = "#fff"), ctx.fillRect(0, 0, c.width, c.height);
-  ctx.drawImage(src, 0, 0, c.width, c.height);
-  const url = c.toDataURL(type, quality);
-  c.width = c.height = 0;
-  return url;
-}
-
-/** A binary mask (1 = set) of w×h as a black/white PNG data URL: white is "remove". */
-export function maskDataUrl(mask: Uint8Array, w: number, h: number): string {
-  const c = document.createElement("canvas");
-  c.width = w;
-  c.height = h;
-  const ctx = c.getContext("2d")!;
-  const img = ctx.createImageData(w, h);
-  for (let i = 0; i < w * h; i++) {
-    const v = mask[i] ? 255 : 0;
-    img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v;
-    img.data[i * 4 + 3] = 255;
-  }
-  ctx.putImageData(img, 0, 0);
-  const url = c.toDataURL("image/png");
-  c.width = c.height = 0;
-  return url;
-}
-
-/** A result image from fal (on its CDN), readable as pixels (through our proxy). */
-export const loadResult = (url: string) => loadImage(url.startsWith("data:") ? url : proxied(url));
-
-/** fal answers with { image } or { images: [...] }: the first image's URL. */
-export function firstImage(out: unknown): string {
-  const o = out as { image?: { url?: string }; images?: { url?: string }[] };
-  const url = o.image?.url ?? o.images?.[0]?.url;
-  if (!url) throw new FalError("fal gaf geen afbeelding terug");
-  return url;
 }

@@ -1,29 +1,70 @@
-import type { Product, ProductInfo, RoomType } from "./types";
-import { newId } from "./useProject";
+import { newId } from "./rooms";
+import type { Item, ProductInfo } from "./types";
 
 /** Same product page, ignoring tracking parameters and a trailing slash. */
 export const sameLink = (a: string, b: string) =>
   a.replace(/[?#].*$/, "").replace(/\/$/, "") === b.replace(/[?#].*$/, "").replace(/\/$/, "");
 
-/**
- * Reads a webshop link into a product. When the shop blocks us, the link is
- * kept anyway (with `error`), so the user can add a photo by hand.
- */
-export async function fetchProduct(url: string, room?: RoomType): Promise<{ product: Product; error?: string }> {
+export async function readProduct(url: string): Promise<ProductInfo> {
+  const res = await fetch("/api/product", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  const data = (await res.json().catch(() => ({}))) as ProductInfo & { error?: string };
+  if (!res.ok) throw new Error(data.error ?? "Ophalen mislukt");
+  return data;
+}
+
+const host = (url: string) => {
   try {
-    const res = await fetch("/api/product", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ url }),
-    });
-    const data = (await res.json()) as ProductInfo & { error?: string };
-    if (!res.ok) throw new Error(data.error ?? "mislukt");
-    return { product: { ...data, id: newId(), status: "optie", note: "", room } };
-  } catch (e) {
-    const host = new URL(url).hostname.replace(/^www\./, "");
-    return {
-      product: { id: newId(), url, title: host, image: "", images: [], shop: host, category: "overig", status: "optie", note: "", room },
-      error: `${host}: ${e instanceof Error ? e.message : e}`,
-    };
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
   }
+};
+
+/**
+ * A webshop link as an item (title, photo, price, size, category). When the shop
+ * blocks us the link is kept anyway (with `error`): fill it in by hand or from a screenshot.
+ */
+export async function itemFromLink(url: string, roomId: string | null): Promise<{ item: Item; error?: string }> {
+  const base: Item = { id: newId(), roomId, title: host(url), url, images: [], qty: 1, category: "overig", status: "idee", note: "", addedAt: Date.now(), source: "link" };
+  try {
+    const p = await readProduct(url);
+    return {
+      item: {
+        ...base,
+        url: p.url || url,
+        title: p.title || base.title,
+        image: p.image || undefined,
+        images: p.images ?? [],
+        shop: p.shop,
+        price: p.priceValue,
+        category: p.category,
+        dims: p.dims,
+        color: p.color,
+        priceHistory: p.priceValue ? [{ at: new Date().toISOString().slice(0, 10), value: p.priceValue }] : undefined,
+      },
+    };
+  } catch (e) {
+    return { item: { ...base, shop: host(url) }, error: `${host(url)}: ${e instanceof Error ? e.message : e}` };
+  }
+}
+
+/** The shop's current price; the item with it (and the old one in its history), or null when unchanged or unknown. */
+export async function refreshPrice(item: Item): Promise<Item | null> {
+  if (!item.url) return null;
+  const p = await readProduct(item.url);
+  if (!p.priceValue || p.priceValue === item.price) return null;
+  const history = [...(item.priceHistory ?? (item.price ? [{ at: "", value: item.price }] : [])), { at: new Date().toISOString().slice(0, 10), value: p.priceValue }];
+  return { ...item, price: p.priceValue, priceHistory: history.slice(-10) };
+}
+
+/** Price change since the first price seen (negative = cheaper now). */
+export function priceChange(item: Item): number | null {
+  const h = item.priceHistory;
+  if (!h || h.length < 2 || item.price === undefined) return null;
+  const diff = item.price - h[0].value;
+  return Math.abs(diff) >= 0.5 ? diff : null;
 }

@@ -1,24 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { migrateProject } from "./migrate";
+import { migrate } from "./migrate";
 import { loadProject, markSaved, requestPersistence, saveProject } from "./storage";
 import type { Project } from "./types";
 
-const EMPTY: Project = { listing: null, products: [], scenes: {} };
+export { newId } from "./rooms";
 
-export const newId = () => Math.random().toString(36).slice(2, 10);
+export const EMPTY: Project = { listing: null, rooms: [], items: [] };
 
-/** Quiet time before saving: a burst of changes (typing, sliders) becomes one write. */
-const SAVE_DELAY = 800;
-
-type Idle = (cb: () => void, opts?: { timeout: number }) => number;
-/** Runs when the browser has nothing else to do (Safari has no requestIdleCallback). */
-const whenIdle = (cb: () => void) => {
-  const ric = (globalThis as unknown as { requestIdleCallback?: Idle }).requestIdleCallback;
-  if (ric) ric(cb, { timeout: 1500 });
-  else setTimeout(cb, 0);
-};
+/** Quiet time before saving: a burst of changes (typing) becomes one write. */
+const SAVE_DELAY = 600;
 
 export function useProject() {
   const [project, setProject] = useState<Project>(EMPTY);
@@ -31,10 +23,10 @@ export function useProject() {
   useEffect(() => {
     loadProject().then((stored) => {
       if (stored) {
-        const p = migrateProject({ ...EMPTY, ...stored.project });
-        // Parts that come straight from storage need no write; old-format data is rewritten in parts.
-        if (!stored.legacy) markSaved(p);
-        setProject(p);
+        // Data in this format needs no write; converted data is written in full on the first save.
+        if (stored.current) markSaved(stored.project);
+        setProject(stored.project);
+        if (!stored.current) dirty.current = true;
       }
       setLoaded(true);
       requestPersistence();
@@ -48,12 +40,11 @@ export function useProject() {
     saveProject(latest.current);
   }, []);
 
-  // Save once changes settle, when the browser is idle. Only changed parts are written (storage.ts).
   useEffect(() => {
     if (!loaded) return;
     dirty.current = true;
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => whenIdle(flush), SAVE_DELAY);
+    saveTimer.current = setTimeout(flush, SAVE_DELAY);
   }, [project, loaded, flush]);
 
   // …and right away when the page is hidden: iPad Safari may discard background tabs.
@@ -68,7 +59,7 @@ export function useProject() {
   }, [flush]);
 
   const update = useCallback((fn: (p: Project) => Project) => setProject(fn), []);
-  const replace = useCallback((p: Project) => setProject(migrateProject({ ...EMPTY, ...p })), []);
+  const replace = useCallback((p: unknown) => setProject(migrate(p)), []);
 
   return { project, update, replace, loaded };
 }

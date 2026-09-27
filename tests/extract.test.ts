@@ -171,3 +171,34 @@ describe("product titles", () => {
     expect(withoutShopName("GLOSTAD 3-zitsbank - Knisa donkergrijs", "Ikea")).toBe("GLOSTAD 3-zitsbank - Knisa donkergrijs");
   });
 });
+
+describe("Funda facts", () => {
+  it("reads price, areas, rooms and build year from the app API", async () => {
+    const { parseFundaApi } = await import("@/lib/extract");
+    const r = parseFundaApi({
+      Price: { SellingPrice: "€ 349.000 k.k." },
+      FastView: { LivingArea: "92 m²", PlotArea: "167 m²", NumberOfBedrooms: "4", EnergyLabel: "C" },
+      AddressDetails: { Title: "Karbindersdreef 49", SubTitle: "6216 PE Maastricht", City: "Maastricht", NeighborhoodName: "Belfort" },
+      ListingDescription: { Description: "Ruime woning." },
+      KenmerkSections: [
+        { KenmerkenList: [{ Id: "bouw-bouwjaar", Label: "Bouwjaar", Value: "1965", KenmerkenList: [] }] },
+        { KenmerkenList: [{ Id: "indeling-totalrooms", Value: "5 kamers (4 slaapkamers)" }, { Label: "x", KenmerkenList: [{ Id: "indeling-totalstories", Value: "3 woonlagen" }] }] },
+      ],
+      Media: { Photos: { MediaBaseUrl: "https://cloud.funda.nl/valentina_media/{id}.jpg", Items: [{ Id: "1/2/3" }] } },
+    });
+    expect(r.title).toBe("Karbindersdreef 49, 6216 PE Maastricht");
+    expect(r.description).toBe("Ruime woning.");
+    expect(r.facts).toEqual({
+      price: "€ 349.000 k.k.",
+      livingArea: "92 m²",
+      plotArea: "167 m²",
+      bedrooms: "4",
+      energyLabel: "C",
+      rooms: "5 kamers (4 slaapkamers)",
+      stories: "3 woonlagen",
+      buildYear: "1965",
+      city: "Maastricht",
+      neighborhood: "Belfort",
+    });
+  });
+});

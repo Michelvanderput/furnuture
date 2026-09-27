@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { accessCode, dailyLimitEur, euros, falEnabled, falInfo, falStopped, setAccessCode, setDailyLimitEur, spentToday } from "@/lib/fal";
 
-/** Project menu: is fal.ai (the paid, best AI) set up, what did it cost today, the daily limit and the access code. */
+/** Settings: is fal.ai (the paid AI) set up, what did it cost today, the daily limit and the access code. */
 export function FalSetting() {
   const [info, setInfo] = useState<{ enabled: boolean; needsCode: boolean } | null>(null);
   const [ready, setReady] = useState(false);
@@ -42,8 +42,8 @@ export function FalSetting() {
       {info.enabled && (
         <>
           <span className="muted">
-            Vandaag gebruikt: <strong>{euros(spent)}</strong> (schatting, dit apparaat). Weggummen ± 2 cent, vloer & muren of fotorealistisch ± 11 cent
-            (wordt eerst gevraagd). Hetzelfde opnieuw is gratis.
+            Vandaag gebruikt: <strong>{euros(spent)}</strong> (dit apparaat). Een vraag aan de AI kost minder dan 1 tot ± 3 cent; dezelfde vraag
+            opnieuw is gratis.
           </span>
           <label className="row">
             Daglimiet €
@@ -77,7 +77,8 @@ export function FalSetting() {
       )}
       {!info.enabled && (
         <span className="muted">
-          De beste AI (betaald per gebruik): maak een sleutel op fal.ai en zet die in Vercel als <code>FAL_KEY</code>.
+          Slimme hulp (kamers herkennen, tips per kamer, screenshots lezen, alternatieven zoeken) werkt met fal.ai: zet een sleutel in Vercel als{" "}
+          <code>FAL_KEY</code>.
         </span>
       )}
     </div>

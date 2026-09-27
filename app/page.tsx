@@ -1,212 +1,168 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import dynamic from "next/dynamic";
-import { ListingPanel } from "@/components/ListingPanel";
-import { backupBlob, backupFileName, readBackup } from "@/lib/backup";
-import { shareOrDownload } from "@/lib/exportImage";
-import { useProject } from "@/lib/useProject";
-import { anyDeviceAiOff, isLightMode, resetDeviceAi, setLightMode, takeCrashReport } from "@/lib/worker";
-import { AiServerSetting } from "@/components/AiServerSetting";
-import { FalSetting } from "@/components/FalSetting";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AddSheet } from "@/components/AddSheet";
+import { AppContext, type App } from "@/components/app";
+import { Dashboard } from "@/components/Dashboard";
+import { HouseView } from "@/components/HouseView";
+import { ItemSheet } from "@/components/ItemSheet";
+import { RoomsView } from "@/components/RoomsView";
+import { RoomView } from "@/components/RoomView";
+import { SettingsSheet } from "@/components/SettingsSheet";
+import { ShopView } from "@/components/ShopView";
+import { ToastHost, useToast } from "@/components/ui";
+import { Welcome } from "@/components/Welcome";
+import { extractFundaPhotos } from "@/lib/extract";
 import { falEnabled } from "@/lib/fal";
-import { plansOf } from "@/lib/plans";
-import { cloudUrl } from "@/lib/cloud";
+import { assignPhotos, defaultRooms, newId } from "@/lib/rooms";
+import { href, useRoute, type Route } from "@/lib/route";
+import { extractLinks } from "@/lib/shopping";
+import type { FundaResult, Listing, Project, RoomType } from "@/lib/types";
+import { useProject } from "@/lib/useProject";
 
-// Loaded when the tab is first opened: a faster first start, especially on an iPad.
-const ProductsPanel = dynamic(() => import("@/components/ProductsPanel").then((m) => m.ProductsPanel), {
-  loading: () => <p className="empty">Laden…</p>,
-});
-const Visualizer = dynamic(() => import("@/components/Visualizer").then((m) => m.Visualizer), {
-  loading: () => <p className="empty">Laden…</p>,
-});
-
-const FloorPlanPanel = dynamic(() => import("@/components/FloorPlanPanel").then((m) => m.FloorPlanPanel), {
-  loading: () => <p className="empty">Laden…</p>,
-});
-
-type Tab = "woning" | "producten" | "plattegrond" | "visualiseren";
-const TABS: Tab[] = ["woning", "producten", "plattegrond", "visualiseren"];
-
-/** Per-device convenience only (which tab/photo was open); never required. */
-function remember(key: string, value: string | null) {
-  try {
-    if (value === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, value);
-  } catch {
-    // private mode / blocked storage
-  }
-}
-function recall(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
+export default function Page() {
+  return (
+    <ToastHost>
+      <Home />
+    </ToastHost>
+  );
 }
 
-export default function Home() {
-  const { project, update, replace, loaded } = useProject();
-  const [tab, setTab] = useState<Tab>("woning");
-  const [photoId, setPhotoId] = useState<string | null>(null);
-  const [menuMessage, setMenuMessage] = useState("");
-  const [crashed, setCrashed] = useState<{ label: string; switchedOff: boolean } | null>(null);
-  const [light, setLight] = useState(false);
-  const [aiOff, setAiOff] = useState(false);
-  const [cloud, setCloud] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
+/** A house from Funda (or photos) as the project's listing, with a first set of rooms. */
+function withHouse(p: Project, url: string, data: FundaResult): Project {
+  const listing: Listing = {
+    url,
+    title: data.title || "Ons nieuwe huis",
+    photos: data.photos.map((u) => ({ id: newId(), url: u, room: (data.rooms?.[u] ?? "overig") as RoomType })),
+    facts: data.facts,
+    description: data.description,
+  };
+  const rooms = defaultRooms(listing);
+  // Items of an earlier house stay on the list, without a room.
+  return { ...p, listing: { ...listing, photos: assignPhotos(listing.photos, rooms) }, rooms, items: p.items.map((i) => ({ ...i, roomId: null })) };
+}
 
-  // Did an AI job take the tab down last time (iPad out of memory)? Then use the light models.
+function Home() {
+  const { project, update, loaded } = useProject();
+  const route = useRoute();
+  const toast = useToast();
+  const [fal, setFal] = useState(false);
+  const [item, setItem] = useState<string | null>(null);
+  const [add, setAdd] = useState<{ roomId?: string | null; alternativeOf?: string; links?: string[] } | null>(null);
+  const [settings, setSettings] = useState(false);
+
+  useEffect(() => void falEnabled().then(setFal), []);
+
+  // A house sent by the bookmarklet arrives as #import={u,t,p}.
   useEffect(() => {
-    setCrashed(takeCrashReport());
-    void falEnabled(); // known before the first AI job (see lib/fal.ts)
-    setLight(isLightMode());
-    setAiOff(anyDeviceAiOff());
-    setCloud(!!cloudUrl());
-  }, []);
+    if (!loaded || !location.hash.startsWith("#import=")) return;
+    try {
+      const data = JSON.parse(decodeURIComponent(location.hash.slice(8))) as { u: string; t: string; p: string[] };
+      const photos = extractFundaPhotos(data.p.join(" "));
+      if (photos.length && (!project.listing || confirm("Deze woning laden? Je kamers worden opnieuw ingedeeld; je producten blijven bewaard."))) {
+        const title = data.t.replace(/\s*[|\-[]\s*funda.*$/i, "").replace(/^[^:]{0,30}:\s*/, "").trim();
+        update((p) => withHouse(p, data.u, { title, photos }));
+      }
+    } catch {
+      toast("Importeren vanaf Funda mislukt.");
+    }
+    history.replaceState(null, "", location.pathname + "#/");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
 
-  // Safari reloads background tabs; come back where you were.
+  // A link shared to the app (Android share sheet: /?url=… or ?text=…) opens "add".
   useEffect(() => {
-    const t = recall("furnuture:tab") as Tab | null;
-    // A house sent by the bookmarklet is read in the Woning tab (see ListingPanel).
-    if (window.location.hash.startsWith("#import=")) setTab("woning");
-    else if (t && TABS.includes(t)) setTab(t);
-    setPhotoId(recall("furnuture:photo"));
-  }, []);
-  useEffect(() => remember("furnuture:tab", tab), [tab]);
-  useEffect(() => remember("furnuture:photo", photoId), [photoId]);
+    if (!loaded) return;
+    const q = new URLSearchParams(location.search);
+    const links = extractLinks(`${q.get("url") ?? ""} ${q.get("text") ?? ""}`);
+    if (!links.length) return;
+    history.replaceState(null, "", location.pathname + location.hash);
+    setAdd({ roomId: null, links });
+  }, [loaded]);
 
-  const tabs: { id: Tab; label: string; count?: number }[] = [
-    { id: "woning", label: "🏠 Woning", count: project.listing?.photos.length },
-    { id: "producten", label: "🛋️ Producten", count: project.products.length },
-    { id: "plattegrond", label: "🗺️ Plattegrond", count: plansOf(project).reduce((n, p) => n + p.items.length, 0) },
-    { id: "visualiseren", label: "🪄 Inrichten" },
+  // Paste a shop link anywhere (not in a text field): it is added to the room you are looking at.
+  const roomId = route.view === "kamer" ? route.id : undefined;
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (add || item) return;
+      const links = extractLinks(e.clipboardData?.getData("text") ?? "");
+      if (!links.length) return;
+      e.preventDefault();
+      setAdd({ roomId: roomId ?? null, links });
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [roomId, add, item]);
+
+  const openItem = useCallback((id: string) => setItem(id), []);
+  const openAdd = useCallback((opts?: { roomId?: string | null; alternativeOf?: string; links?: string[] }) => setAdd(opts ?? {}), []);
+  const app: App = useMemo(() => ({ project, update, openItem, openAdd, toast, fal }), [project, update, openItem, openAdd, toast, fal]);
+
+  if (!loaded) return <div className="splash">Laden…</div>;
+  if (!project.listing && !project.rooms.length) {
+    return (
+      <Welcome
+        onImport={(url, data) => update((p) => withHouse(p, url, data))}
+        onBlank={(name, photos) =>
+          update((p) =>
+            withHouse(p, "", { title: name, photos }),
+          )
+        }
+      />
+    );
+  }
+
+  const current = route.view === "kamer" && !project.rooms.some((r) => r.id === route.id) ? ({ view: "kamers" } as Route) : route;
+  const tabs: { route: Route; label: string; ico: string; on: boolean }[] = [
+    { route: { view: "overzicht" }, label: "Overzicht", ico: "◎", on: current.view === "overzicht" },
+    { route: { view: "kamers" }, label: "Kamers", ico: "▦", on: current.view === "kamers" || current.view === "kamer" },
+    { route: { view: "winkelen" }, label: "Winkelen", ico: "🛍", on: current.view === "winkelen" },
+    { route: { view: "woning" }, label: "Woning", ico: "⌂", on: current.view === "woning" },
   ];
 
-  async function restore(file: File | undefined) {
-    if (!file) return;
-    try {
-      const p = await readBackup(file);
-      if (!confirm("Back-up terugzetten? Wat je nu hebt, wordt vervangen.")) return;
-      replace(p);
-      setMenuMessage("Back-up teruggezet.");
-    } catch (e) {
-      setMenuMessage(e instanceof Error ? e.message : "Terugzetten mislukt.");
-    }
-  }
-
   return (
-    <main>
-      <header className="app-head">
-        <div className="brand-row">
-          <div>
-            <h1>
-              furn<span>u</span>ture
-            </h1>
-            <p className="muted">Richt je nieuwe huis in terwijl je op de sleutel wacht.</p>
-          </div>
-          <details className="menu">
-            <summary aria-label="Project-menu">⋯ Project</summary>
-            <div className="menu-body">
-              <button onClick={() => shareOrDownload(backupBlob(project), backupFileName(project))}>⬇ Back-up opslaan</button>
-              <button onClick={() => fileRef.current?.click()}>⬆ Back-up terugzetten</button>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="application/json,.json"
-                hidden
-                onChange={(e) => (restore(e.target.files?.[0]), (e.target.value = ""))}
-              />
-              <label className="row small" title="Kleinere AI-modellen: minder precies, maar zuiniger met geheugen (voor oudere iPads)">
-                <input
-                  type="checkbox"
-                  checked={light}
-                  onChange={(e) => {
-                    setLightMode(e.target.checked);
-                    setLight(e.target.checked);
-                  }}
-                />
-                Lichte AI-modus
-              </label>
-              {aiOff && (
-                <button
-                  onClick={() => {
-                    resetDeviceAi();
-                    setAiOff(false);
-                    setMenuMessage("AI op dit apparaat staat weer aan.");
-                  }}
-                  title="AI die de app liet vastlopen staat uit; hiermee probeer je het opnieuw"
-                >
-                  🔁 AI op dit apparaat opnieuw proberen
-                </button>
-              )}
-              <FalSetting />
-              <AiServerSetting onChange={(on) => setCloud(on)} />
-              <p className="muted small">
-                Alles wordt alleen op dit apparaat bewaard. Met een back-up zet je het over naar een ander apparaat of deel je het met je
-                partner.
-              </p>
-              {menuMessage && <p className="small">{menuMessage}</p>}
-            </div>
-          </details>
-        </div>
-        <nav className="tabs" role="tablist">
-          {tabs.map((t) => (
-            <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? "active" : ""} onClick={() => setTab(t.id)}>
-              {t.label}
-              {t.count ? <span className="count">{t.count}</span> : null}
+    <AppContext.Provider value={app}>
+      <header className="topbar">
+        <div className="wrap">
+          <a className="brand" href="#/">
+            <span className="logo">⌂</span>
+            <span>
+              furn<b>u</b>ture
+            </span>
+          </a>
+          <nav className="tabs" aria-label="Hoofdmenu">
+            {tabs.map((t) => (
+              <a key={t.label} href={href(t.route)} className={t.on ? "on" : ""} aria-current={t.on ? "page" : undefined}>
+                <span className="ico" aria-hidden>
+                  {t.ico}
+                </span>
+                {t.label}
+              </a>
+            ))}
+          </nav>
+          <div className="actions">
+            <button className="ghost icon" onClick={() => setSettings(true)} aria-label="Instellingen" title="Budget, stijl, AI en back-up">
+              ⚙︎
             </button>
-          ))}
-        </nav>
-      </header>
-
-      {crashed && (
-        <div className="banner" role="status">
-          <span>
-            De app is de vorige keer gestopt tijdens {crashed.label} — het apparaat had te weinig geheugen. Je werk is bewaard.{" "}
-            {crashed.switchedOff ? (
-              <>
-                Die AI-stap staat nu <strong>uit op dit apparaat</strong>, zodat het niet opnieuw gebeurt; de app gebruikt de variant zonder
-                AI.
-              </>
-            ) : (
-              <>
-                De <strong>lichte AI-modus</strong> staat nu aan (kleinere modellen).
-              </>
-            )}{" "}
-            {!cloud && <>Wil je de volle AI zonder risico? Zet in het Project-menu een gratis AI-server aan: dan rekent de iPad niets zwaars meer.</>}
-          </span>
-          <button className="ghost" onClick={() => setCrashed(null)} aria-label="Sluiten">
-            ✕
-          </button>
+          </div>
         </div>
-      )}
-
-      {!loaded ? (
-        <p className="empty">Laden…</p>
-      ) : tab === "woning" ? (
-        <ListingPanel
-          project={project}
-          update={update}
-          onDecorate={(id) => {
-            setPhotoId(id);
-            setTab("visualiseren");
-          }}
-        />
-      ) : tab === "producten" ? (
-        <ProductsPanel project={project} update={update} />
-      ) : tab === "plattegrond" ? (
-        <FloorPlanPanel
-          project={project}
-          update={update}
-          onOpenPhoto={(id) => {
-            setPhotoId(id);
-            setTab("visualiseren");
-          }}
-        />
-      ) : (
-        <Visualizer project={project} update={update} photoId={photoId} setPhotoId={setPhotoId} />
-      )}
-    </main>
+      </header>
+      <main className="wrap">
+        {current.view === "overzicht" && <Dashboard />}
+        {current.view === "kamers" && <RoomsView />}
+        {current.view === "kamer" && <RoomView key={current.id} roomId={current.id} />}
+        {current.view === "winkelen" && <ShopView />}
+        {current.view === "woning" && <HouseView />}
+      </main>
+      <button className="fab" aria-label="Toevoegen" onClick={() => setAdd({ roomId: roomId ?? null })}>
+        <span className="plus">＋</span>
+        <span className="label">Toevoegen</span>
+      </button>
+      {add && <AddSheet {...add} onClose={() => setAdd(null)} />}
+      {item && project.items.some((i) => i.id === item) && <ItemSheet id={item} onClose={() => setItem(null)} />}
+      {settings && <SettingsSheet onClose={() => setSettings(false)} />}
+    </AppContext.Provider>
   );
 }

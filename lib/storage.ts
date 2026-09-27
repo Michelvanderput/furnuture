@@ -1,23 +1,20 @@
-import type { Project, Scene } from "./types";
+import { migrate } from "./migrate";
+import type { Project } from "./types";
 
 /**
- * The project lives in IndexedDB (not localStorage) because uploaded photos are
- * stored as data URLs and quickly exceed localStorage's ~5 MB limit.
+ * The project lives in IndexedDB (not localStorage): uploaded photos are data URLs
+ * and quickly exceed localStorage's ~5 MB. It is stored in parts (listing, rooms,
+ * items, settings) and only the parts that changed are written; updates are
+ * immutable, so "changed" is a cheap reference check.
  *
- * It is stored in parts (listing, products, plans, one record per photo's
- * design) and only the parts that changed are written. Updates are immutable,
- * so "changed" is a cheap reference check. Moving a sofa rewrites only that
- * photo's design instead of copying the whole project, uploaded photos included,
- * every half second.
- *
- * A second store, "cache", keeps AI results (see aiCache.ts).
+ * A second store, "cache", keeps AI answers (see aiCache.ts), so the same question
+ * is never paid for twice.
  */
 const DB = "furnuture";
 const STORE = "kv";
 export const CACHE_STORE = "cache";
-const LEGACY_KEY = "project";
 const VERSION_KEY = "format";
-const FORMAT = 2;
+const FORMAT = 3;
 
 let db: Promise<IDBDatabase> | null = null;
 
@@ -42,10 +39,7 @@ export function openDb(): Promise<IDBDatabase> {
   return db;
 }
 
-/**
- * Ask the browser to keep our data. Without this Safari may delete a site's
- * storage after 7 days without a visit (not when the app is on the home screen).
- */
+/** Ask the browser to keep our data (Safari may otherwise clear it after 7 days without a visit). */
 export function requestPersistence(): void {
   try {
     navigator.storage?.persist?.().catch(() => undefined);
@@ -60,58 +54,52 @@ const req = <T>(r: IDBRequest<T>) =>
     r.onerror = () => reject(r.error);
   });
 
+/** Budget and style are tiny and change together: one record, compared by value. */
+type Parts = { listing: unknown; rooms: unknown; items: unknown; settings: string };
+const partsOf = (p: Project): Parts => ({ listing: p.listing, rooms: p.rooms, items: p.items, settings: JSON.stringify({ budget: p.budget, style: p.style }) });
+
 /** What was last written, per part: the next save compares against this. */
-type Parts = { listing: unknown; products: unknown; plans: unknown; scenes: Record<string, Scene> };
 let saved: Parts | null = null;
 
-const sceneKey = (id: string) => `scene:${id}`;
-
-/** The saved project; `legacy` when it is still in the old single-record format. */
-export async function loadProject(): Promise<{ project: Project; legacy: boolean } | null> {
+/** The saved project (older formats are converted; `current` = already in this format). */
+export async function loadProject(): Promise<{ project: Project; current: boolean } | null> {
   try {
     const d = await openDb();
-    const store = d.transaction(STORE).objectStore(STORE);
-    const [format, keys] = await Promise.all([req(store.get(VERSION_KEY)), req(store.getAllKeys())]);
-    if (format !== FORMAT) {
-      const legacy = (await req(d.transaction(STORE).objectStore(STORE).get(LEGACY_KEY))) as Project | undefined;
-      return legacy ? { project: legacy, legacy: true } : null; // written in parts on the first save
-    }
     const s = d.transaction(STORE).objectStore(STORE);
-    const sceneKeys = (keys as string[]).filter((k) => typeof k === "string" && k.startsWith("scene:"));
-    const [listing, products, plans, ...scenes] = await Promise.all([
-      req(s.get("listing")),
-      req(s.get("products")),
-      req(s.get("plans")),
-      ...sceneKeys.map((k) => req(s.get(k))),
-    ]);
-    const project: Project = {
-      listing: (listing as Project["listing"]) ?? null,
-      products: (products as Project["products"]) ?? [],
-      plans: plans as Project["plans"],
-      scenes: Object.fromEntries((scenes as Scene[]).filter(Boolean).map((sc) => [sc.photoId, sc])),
-    };
-    return { project, legacy: false };
+    const format = await req(s.get(VERSION_KEY));
+    const t = d.transaction(STORE).objectStore(STORE);
+    if (format === FORMAT) {
+      const [listing, rooms, items, settings] = await Promise.all(["listing", "rooms", "items", "settings"].map((k) => req(t.get(k))));
+      let st: { budget?: number; style?: string } = {};
+      try {
+        st = typeof settings === "string" ? JSON.parse(settings) : {};
+      } catch {
+        // keep defaults
+      }
+      return { project: migrate({ listing, rooms, items, budget: st.budget, style: st.style }), current: true };
+    }
+    if (format === 2) {
+      // Version 2: listing, products, plans and one design per photo. Designs and plans are gone.
+      const [listing, products] = await Promise.all([req(t.get("listing")), req(t.get("products"))]);
+      return listing || products ? { project: migrate({ listing, products }), current: false } : null;
+    }
+    const legacy = await req(t.get("project"));
+    return legacy ? { project: migrate(legacy), current: false } : null;
   } catch {
     return null;
   }
 }
 
-/** Marks a loaded project as saved, so the first save after loading writes nothing. */
+/** Marks a loaded project as saved, so the first save after loading writes only what changed. */
 export function markSaved(project: Project): void {
-  saved = { listing: project.listing, products: project.products, plans: project.plans, scenes: { ...project.scenes } };
+  saved = partsOf(project);
 }
 
 export async function saveProject(project: Project): Promise<void> {
   const prev = saved;
-  const next: Parts = { listing: project.listing, products: project.products, plans: project.plans, scenes: { ...project.scenes } };
-  const writes: [string, unknown][] = [];
-  const deletes: string[] = [];
-  if (!prev || prev.listing !== next.listing) writes.push(["listing", next.listing]);
-  if (!prev || prev.products !== next.products) writes.push(["products", next.products]);
-  if (!prev || prev.plans !== next.plans) writes.push(["plans", next.plans]);
-  for (const [id, scene] of Object.entries(next.scenes)) if (!prev || prev.scenes[id] !== scene) writes.push([sceneKey(id), scene]);
-  if (prev) for (const id of Object.keys(prev.scenes)) if (!(id in next.scenes)) deletes.push(sceneKey(id));
-  if (!writes.length && !deletes.length) return;
+  const next = partsOf(project);
+  const writes = (Object.keys(next) as (keyof Parts)[]).filter((k) => !prev || prev[k] !== next[k]);
+  if (!writes.length && prev) return;
   saved = next;
   try {
     const d = await openDb();
@@ -119,12 +107,11 @@ export async function saveProject(project: Project): Promise<void> {
       const tx = d.transaction(STORE, "readwrite");
       const store = tx.objectStore(STORE);
       if (!prev) {
-        // First save of this session: a full write, which also moves old single-record data over.
+        // First save of this session: a full write, which also clears data of older formats.
         store.clear();
         store.put(FORMAT, VERSION_KEY);
       }
-      for (const [k, v] of writes) store.put(v, k);
-      for (const k of deletes) store.delete(k);
+      for (const k of prev ? writes : (Object.keys(next) as (keyof Parts)[])) store.put(next[k], k);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error);

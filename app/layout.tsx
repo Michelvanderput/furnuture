@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "furnuture – richt je nieuwe huis in",
-  description: "Plak je Funda-link, verzamel meubels, vloeren en verf, en zie ze in je nieuwe kamers.",
+  title: "furnuture – inkoopplanner voor je nieuwe huis",
+  description: "Plak je Funda-link en plan per kamer wat je gaat kopen: prijzen, budget en een overzicht per winkel.",
   appleWebApp: { capable: true, title: "furnuture", statusBarStyle: "default" },
 };
 
@@ -12,8 +12,8 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: "cover",
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f7f5f2" },
-    { media: "(prefers-color-scheme: dark)", color: "#171513" },
+    { media: "(prefers-color-scheme: light)", color: "#f4f3ee" },
+    { media: "(prefers-color-scheme: dark)", color: "#0e1311" },
   ],
 };
 
