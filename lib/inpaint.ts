@@ -117,6 +117,9 @@ export function eraseLayerId(l: EraseLayer): string {
  */
 let last: { photoUrl: string; keys: string[]; blob: Blob } | null = null;
 
+/** Erase layers fal failed on in this session: done the built-in way, not sent (and paid) again. */
+const falFailed = new Set<string>();
+
 /** Fills `mask` (1 = fill) in the canvas from its surroundings, working only on the area around it. */
 function simpleFill(ctx: CanvasRenderingContext2D, mask: Uint8Array, w: number, h: number) {
   let x0 = w, y0 = h, x1 = -1, y1 = -1;
@@ -162,14 +165,27 @@ export async function renderErased(
   const ordered = [...layers].reverse(); // oldest first
   const keys = ordered.map(eraseLayerId);
   const useFal = await falEnabled();
-  const cacheKey = `erased5:${fingerprint(photoUrl)}:${useFal ? "fal:" : ""}${regions ? "r" : ""}${keys.join(".")}`;
+  // Paid (fal) results must never be redone for nothing, so the key only holds what changes the result:
+  // the room regions only matter to layers filled here, not to layers fal erases.
+  const byFal = (l: EraseLayer) => useFal && l.method === "ai" && !falFailed.has(eraseLayerId(l));
+  const keyOf = (n: number) =>
+    `erased6:${fingerprint(photoUrl)}:${regions && ordered.slice(0, n).some((l) => !byFal(l)) ? "r" : ""}${keys.slice(0, n).join(".")}`;
+  const cacheKey = keyOf(keys.length);
   if (last && last.photoUrl === photoUrl && last.keys.join(".") === keys.join(".")) return { url: URL.createObjectURL(last.blob), aiFailed: false };
-  const stored = await getCached<Blob>(cacheKey);
+  // Results from before (free, erased here) are kept: never redone with fal at a cost.
+  const legacy = async () =>
+    (await getCached<Blob>(`erased5:${fingerprint(photoUrl)}:r${keys.join(".")}`)) ?? (await getCached<Blob>(`erased5:${fingerprint(photoUrl)}:${keys.join(".")}`));
+  const stored = (await getCached<Blob>(cacheKey)) ?? (await legacy());
   if (stored instanceof Blob) {
     last = { photoUrl, keys, blob: stored };
     return { url: URL.createObjectURL(stored), aiFailed: false };
   }
-  const reuse = last && last.photoUrl === photoUrl && last.keys.length <= keys.length && last.keys.every((k, i) => k === keys[i]) ? last : null;
+  let reuse = last && last.photoUrl === photoUrl && last.keys.length <= keys.length && last.keys.every((k, i) => k === keys[i]) ? last : null;
+  // After a reload: start from the longest earlier result on disk, so one new erase costs one fal job, not all again.
+  for (let n = keys.length - 1; !reuse && n > 0; n--) {
+    const hit = await getCached<Blob>(keyOf(n));
+    if (hit instanceof Blob) reuse = { photoUrl, keys: keys.slice(0, n), blob: hit };
+  }
 
   const img = await loadImage(proxied(photoUrl));
   const f = Math.min(1, MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
@@ -197,12 +213,14 @@ export async function renderErased(
     let holeSize = 0;
     for (let i = 0; i < mask.length; i++) holeSize += mask[i];
     // With fal (paid, see lib/fal.ts): its object-removal model does every AI erase, big or small.
-    if (layer.method === "ai" && useFal) {
+    if (byFal(layer)) {
       try {
         await falErase(canvas, mask, onProgress);
         continue;
       } catch (e) {
+        // Not tried again by itself (that could cost again): the built-in way does this layer.
         console.warn("fal erase failed, using the built-in way", e);
+        falFailed.add(eraseLayerId(layer));
         aiFailed = true;
       }
     }
@@ -229,6 +247,6 @@ export async function renderErased(
   canvas.width = canvas.height = 0; // free the backing store right away (Safari keeps it otherwise)
   last = { photoUrl, keys, blob };
   // Remembered for next time, unless the AI could not run (then it is tried again later).
-  if (!aiFailed) putCached(cacheKey, blob);
+  if (!aiFailed) putCached(keyOf(keys.length), blob);
   return { url: URL.createObjectURL(blob), aiFailed };
 }

@@ -1,5 +1,6 @@
 import { falRun, firstImage, loadResult, maskDataUrl, toDataUrl, type Progress } from "./fal";
 import { loadImage, proxied } from "./images";
+import { dilate } from "./masks";
 
 /**
  * Erases the masked area (1 = remove) of the canvas with fal's object-removal model,
@@ -236,4 +237,76 @@ export async function falRender(design: Blob, productPhotos: string[], onProgres
   const res = await fetch(proxied(firstImage(out)));
   if (!res.ok) throw new Error("Resultaat ophalen mislukt");
   return res.blob();
+}
+
+/**
+ * New floors and walls made real (Nano Banana 2 on fal). The app draws them flat, like a
+ * sticker in perspective; the model turns that into real material with the room's light:
+ * brighter by the windows, darker in corners, contact shadows of furniture, reflections.
+ * Only the new surfaces are taken from the result (`area`, 1 = new surface), so the rest
+ * of the photo stays exactly as it was. Returns the room photo as a JPEG Blob.
+ */
+export async function falSurfaces(
+  plain: Blob,
+  drawn: Blob,
+  area: Uint8Array,
+  materials: { refs: string[]; colours: string[]; floor: boolean; wall: boolean },
+  onProgress?: Progress,
+): Promise<Blob> {
+  const img = await createImageBitmap(drawn);
+  const room = toDataUrl(img as unknown as HTMLCanvasElement, 2048, "image/jpeg", 0.92);
+  img.close();
+  const what = materials.floor && materials.wall ? "floor and walls" : materials.floor ? "floor" : "walls";
+  const refs = materials.refs.slice(0, 4);
+  const prompt =
+    `Image 1 is a real photo of a room whose ${what} were digitally covered with a new material, drawn flat on top: ` +
+    "it may look like a sticker, without depth or light variation." +
+    (refs.length ? ` Images 2 to ${refs.length + 1} show the new materials (product photos).` : "") +
+    (materials.colours.length ? ` The new wall paint colour is ${materials.colours.join(" and ")}.` : "") +
+    ` Make the new ${what} look completely real, as if really installed and then photographed with the same camera:` +
+    " real material structure (wood grain and plank seams, tile joints, matte paint), exactly the same colour, pattern, plank direction and plank or tile size as drawn, in the same perspective;" +
+    " the room's own light: brighter near the windows, darker in corners and under furniture, soft contact shadows of the furniture, subtle window reflections on a smooth floor;" +
+    " clean straight edges along skirting boards, door frames and wall corners." +
+    " Keep everything else exactly the same: furniture, windows, doors, ceiling, lamps, plants, decoration, camera angle and framing. Do not add, remove or move anything.";
+  const out = await falRun(
+    "fal-ai/nano-banana-2/edit",
+    { prompt, image_urls: [room, ...refs], resolution: "2K", aspect_ratio: "auto", output_format: "jpeg", num_images: 1 },
+    onProgress,
+    "Vloer en muren echt maken",
+    240_000,
+  );
+  const result = await loadResult(firstImage(out));
+  const base = await createImageBitmap(plain);
+  const canvas = document.createElement("canvas");
+  canvas.width = base.width;
+  canvas.height = base.height;
+  canvas.getContext("2d")!.drawImage(base, 0, 0);
+  base.close();
+  blendMasked(canvas, result, area, 3);
+  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Opslaan mislukt"))), "image/jpeg", 0.93));
+  canvas.width = canvas.height = 0;
+  return blob;
+}
+
+/** Where two pictures of the same size differ (1 = changed), grown a little: the area a new floor or wall covers. */
+export async function changedArea(a: Blob, b: Blob, w: number, h: number): Promise<Uint8Array> {
+  const px = async (blob: Blob) => {
+    const bm = await createImageBitmap(blob);
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext("2d", { willReadFrequently: true })!;
+    ctx.drawImage(bm, 0, 0, w, h);
+    bm.close();
+    const d = ctx.getImageData(0, 0, w, h).data;
+    c.width = c.height = 0;
+    return d;
+  };
+  const [da, db] = await Promise.all([px(a), px(b)]);
+  const mask = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const j = i * 4;
+    if (Math.abs(da[j] - db[j]) + Math.abs(da[j + 1] - db[j + 1]) + Math.abs(da[j + 2] - db[j + 2]) > 18) mask[i] = 1;
+  }
+  return dilate(mask, w, h, 2);
 }

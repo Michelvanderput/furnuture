@@ -13,15 +13,35 @@ export const maxDuration = 30;
  * GET ?status=<url>&response=<url> -> { status, position?, result?, error? }
  */
 
-/** Only these models, so the key cannot be used for anything else. */
-const MODELS = new Set([
-  "fal-ai/object-removal/mask",
-  "fal-ai/bria/eraser",
-  "fal-ai/sam2/image",
-  "fal-ai/birefnet/v2",
-  "fal-ai/nano-banana-2/edit",
-  "openrouter/router/vision",
+/** Only these models, so the key cannot be used for anything else; with their rough price (USD). */
+const MODELS = new Map([
+  ["fal-ai/object-removal/mask", 0.024],
+  ["fal-ai/bria/eraser", 0.04],
+  ["fal-ai/sam2/image", 0.002],
+  ["fal-ai/birefnet/v2", 0.01],
+  ["fal-ai/nano-banana-2/edit", 0.12],
+  ["openrouter/router/vision", 0.005],
 ]);
+
+/**
+ * Spending brakes on the server, on top of the app's own daily limit: at most
+ * FAL_DAILY_LIMIT_USD (default $3) a day and 20 jobs a minute. Kept in memory, so per
+ * server instance (a hobby app mostly has one); the hard limit is fal's prepaid
+ * credit with automatic top-up off.
+ */
+const DAILY_USD = Number(process.env.FAL_DAILY_LIMIT_USD) > 0 ? Number(process.env.FAL_DAILY_LIMIT_USD) : 3;
+const PER_MINUTE = 20;
+let spend = { day: "", usd: 0 };
+let recent: number[] = [];
+function overBudget(cost: number): string | null {
+  const day = new Date().toISOString().slice(0, 10);
+  if (spend.day !== day) spend = { day, usd: 0 };
+  const now = Date.now();
+  recent = recent.filter((t) => now - t < 60_000);
+  if (recent.length >= PER_MINUTE) return "Te veel AI-opdrachten in korte tijd (limit). Probeer het over een minuut opnieuw.";
+  if (spend.usd + cost > DAILY_USD) return `Daglimiet van de server bereikt ($${DAILY_USD}, FAL_DAILY_LIMIT_USD in Vercel).`;
+  return null;
+}
 /** fal's queue (FAL_QUEUE_URL only for tests with a stand-in server). */
 const QUEUE = process.env.FAL_QUEUE_URL?.trim() || "https://queue.fal.run/";
 const escaped = QUEUE.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
@@ -73,6 +93,9 @@ export async function POST(req: Request) {
     return fail("Ongeldig verzoek");
   }
   if (!job.model || !MODELS.has(job.model) || !job.input || typeof job.input !== "object") return fail("Onbekend model");
+  const cost = MODELS.get(job.model)!;
+  const over = overBudget(cost);
+  if (over) return fail(over, 429);
   const res = await fetch(`${QUEUE}${job.model}`, {
     method: "POST",
     headers: { Authorization: `Key ${key()}`, "Content-Type": "application/json" },
@@ -84,5 +107,7 @@ export async function POST(req: Request) {
     // 401/403: wrong key; 402/403 with "balance": no credit left.
     return fail(`fal ${res.status}: ${detail}`, 502);
   }
+  spend.usd += cost;
+  recent.push(Date.now());
   return NextResponse.json({ statusUrl: body.status_url, responseUrl: body.response_url });
 }

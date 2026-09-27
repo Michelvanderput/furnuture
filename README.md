@@ -49,10 +49,12 @@ Met een sleutel van [fal.ai](https://fal.ai) doet de app het zware werk met de b
 | Selecteren (tik op een meubel) | SAM 2 | gratis / < 1 cent |
 | Meubel uitknippen | BiRefNet v2 (2048 px) | ± 1 cent |
 | 📍 Beste plekken voor een meubel | Gemini 2.5 Flash (vision) | < 1 cent |
+| ✨ Vloer & muren echt | Nano Banana 2 (2K) | ± 11 cent |
 | ✨ Fotorealistisch | Nano Banana 2 (2K) | ± 11 cent |
 
 - **📍 Beste plekken (AI)**: selecteer een meubel dat op de vloer staat. De AI bekijkt de kamer en wijst genummerde plekken aan met een reden ("tegenover de tv"). Tik op een plek en het meubel gaat erheen, op ware grootte en in perspectief.
 - **✨ Fotorealistisch**: maakt van je ontwerp een echte foto. Het meubel krijgt schaduw, licht en reflecties van de kamer, en de productfoto's gaan mee zodat het hetzelfde meubel blijft. Niets wordt verplaatst. Met 👁 Vergelijk (vasthouden) zie je je eigen ontwerp.
+- **✨ Vloer & muren echt**: de nieuwe vloer en muren worden echt materiaal met het licht van de kamer (lichter bij het raam, schaduw onder meubels, reflecties). Alleen de nieuwe vlakken worden uit het AI-resultaat overgenomen; de rest van de foto blijft precies zoals hij was. Met ✏️/✨ wissel je gratis tussen getekend en echt. Verander je de vloer, dan zie je weer de getekende versie tot je opnieuw op de knop drukt.
 - **Ware grootte zonder meten**: de maat wordt geschat uit het perspectief (camera op ± 1,5 m hoogte, ± 15 %), gemarkeerd met "≈". Meten met 📏 maakt het precies.
 
 **Instellen:**
@@ -62,6 +64,15 @@ Met een sleutel van [fal.ai](https://fal.ai) doet de app het zware werk met de b
 4. Redeploy. In ⋯ Project staat daarna "✨ fal.ai actief".
 
 De sleutel blijft op de server (`app/api/fal`), die alleen de bovenstaande modellen toestaat.
+
+**Geen onnodige kosten:**
+- Niets betaalds gebeurt vanzelf, behalve weggummen (je kiest zelf Weghalen) en het uitknippen van een sfeerfoto zonder effen achtergrond (1× per foto).
+- Elk resultaat wordt bewaard: hetzelfde opnieuw (herladen, ongedaan maken, nog eens op de knop) kost niets. Na herladen kost één nieuw weggegumd voorwerp één opdracht, niet alle eerdere opnieuw.
+- Dure opdrachten (± 11 cent) worden eerst gevraagd, met wat je vandaag al gebruikt hebt.
+- Daglimiet in de app: standaard € 2 (⋯ Project). Daarboven wordt de gratis manier gebruikt.
+- Daglimiet op de server: `FAL_DAILY_LIMIT_USD` (standaard $3), en maximaal 20 opdrachten per minuut.
+- Dubbel tikken stuurt één opdracht. Is het tegoed op of de sleutel fout, dan stopt de app met fal voor die sessie in plaats van het steeds opnieuw te proberen. Mislukt fal bij een voorwerp, dan wordt dat niet vanzelf opnieuw geprobeerd.
+- De harde grens is je tegoed bij fal: zet automatisch opwaarderen (auto top-up) uit.
 
 ### ☁️ Gratis AI-server
 

@@ -10,8 +10,8 @@ import { eraseLayerId, renderErased } from "@/lib/inpaint";
 import { regionMap, type RegionMap } from "@/lib/regions";
 import { fingerprint, fingerprintOf, getCached, putCached } from "@/lib/aiCache";
 import { categoryLabel } from "@/lib/categories";
-import { euroCents, FAL_COST, falEnabled } from "@/lib/fal";
-import { falRender, falSuggestSpots, type Spot } from "@/lib/falTasks";
+import { confirmCost, euroCents, FAL_COST, falEnabled } from "@/lib/fal";
+import { changedArea, falRender, falSuggestSpots, falSurfaces, type Spot } from "@/lib/falTasks";
 import {
   floorMetric,
   isFloor,
@@ -399,6 +399,27 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     const rank = (l: Layer) => (l.kind !== "surface" ? 2 : l.role === "wall" ? 0 : 1);
     return [...allLayers].sort((a, b) => rank(a) - rank(b));
   }, [allLayers]);
+
+  // ✨ Floors and walls made real by AI (fal, paid): the photo with them baked in, for exactly
+  // this set of surfaces. Only made on request; the same surfaces again come from the cache.
+  const surfaceLayers = useMemo(() => drawn.filter((l): l is SurfaceLayer => l.kind === "surface" && l.fill.type !== "none"), [drawn]);
+  const surfaceKey = useMemo(
+    () => (photo && surfaceLayers.length ? `surf1:${fingerprint(photo.url)}:${eraseKey}:${fingerprint(JSON.stringify(surfaceLayers))}` : ""),
+    [photo, surfaceLayers, eraseKey],
+  );
+  const [realSurfaces, setRealSurfaces] = useState<{ key: string; url: string } | null>(null);
+  const [showDrawnSurfaces, setShowDrawnSurfaces] = useState(false);
+  const [makingReal, setMakingReal] = useState(false);
+  useEffect(() => {
+    if (!surfaceKey || realSurfaces?.key === surfaceKey) return;
+    let cancelled = false;
+    getCached<Blob>(surfaceKey).then((b) => {
+      if (!cancelled && b instanceof Blob) setRealSurfaces((r) => (r && URL.revokeObjectURL(r.url), { key: surfaceKey, url: URL.createObjectURL(b) }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [surfaceKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Room light and shadow for textured floors and walls (see lib/shading.ts). Recomputed
   // shortly after the surface or the erased photo changes, not on every drag frame.
@@ -1185,6 +1206,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
   }
 
   const hasErased = showLayers && erased && erased.key === eraseKey && !!eraseKey;
+  const surfacesReal = showLayers && !showDrawnSurfaces && !!surfaceKey && realSurfaces?.key === surfaceKey;
   const scale = size && displayWidth ? displayWidth / size.w : 0;
   const handleR = handleRadius();
 
@@ -1236,8 +1258,8 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     return renderDesign({
       width: size!.w,
       height: size!.h,
-      background: hasErased ? erased!.url : proxied(photo!.url),
-      layers: drawn.filter((l) => l.id !== opts.without && !(opts.forAi && l.kind === "measure")),
+      background: surfacesReal ? realSurfaces!.url : hasErased ? erased!.url : proxied(photo!.url),
+      layers: drawn.filter((l) => l.id !== opts.without && !(opts.forAi && l.kind === "measure") && !(surfacesReal && l.kind === "surface")),
       productSrc: (l) => {
         const p = productById.get(l.productId);
         return cutoutSrc(l) ?? (p?.image ? proxied(p.image) : null);
@@ -1274,8 +1296,11 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
       const designUrl = URL.createObjectURL(design);
       const refs = [...new Set(drawn.flatMap((l) => (l.kind === "product" ? [productById.get(l.productId)?.image ?? ""] : [])))]
         .filter((u) => /^https?:/.test(u) || (u.startsWith("data:") && u.length < 700_000));
-      const key = `render1:${fingerprint(photo.url)}:${fingerprint(JSON.stringify(drawn))}`;
+      // The key is what goes to the AI: a measuring line or a selection does not make it new.
+      const sent = drawn.filter((l) => l.kind !== "measure" && !(surfacesReal && l.kind === "surface"));
+      const key = `render2:${fingerprint(photo.url)}:${surfacesReal ? surfaceKey : eraseKey}:${fingerprint(JSON.stringify(sent))}`;
       const hit = await getCached<Blob>(key);
+      if (!(hit instanceof Blob) && !confirmCost("Fotorealistisch maken", FAL_COST.render)) return;
       const blob = hit instanceof Blob ? hit : await falRender(design, refs, setStatus);
       if (!(hit instanceof Blob)) putCached(key, blob);
       setRender((r) => (r && (URL.revokeObjectURL(r.url), URL.revokeObjectURL(r.design)), { url: URL.createObjectURL(blob), blob, design: designUrl }));
@@ -1284,6 +1309,50 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     } finally {
       setStatus("");
       setRendering(false);
+    }
+  }
+
+  /** ✨ New floors and walls made real (fal, see falSurfaces). The same surfaces twice is free (cached). */
+  async function makeSurfacesReal() {
+    if (!size || !photo || makingReal || !surfaceKey) return;
+    const key = surfaceKey;
+    const hit = await getCached<Blob>(key);
+    if (!(hit instanceof Blob) && !confirmCost("Vloer en muren echt maken", FAL_COST.surfaces)) return;
+    setMakingReal(true);
+    setNotice("");
+    setSpots(null);
+    try {
+      let blob = hit instanceof Blob ? hit : null;
+      if (!blob) {
+        const common = {
+          width: size.w,
+          height: size.h,
+          background: hasErased ? erased!.url : proxied(photo.url),
+          productSrc: () => null,
+          textureSrc,
+          eraseMasks: eraseMaskUrls,
+          shading: (l: SurfaceLayer) => shading[l.id],
+          lightSide,
+          measureText,
+        };
+        const plain = await renderDesign({ ...common, layers: [] });
+        const withSurfaces = await renderDesign({ ...common, layers: surfaceLayers });
+        const area = await changedArea(plain, withSurfaces, size.w, size.h);
+        const refs = [...new Set(surfaceLayers.flatMap((l) => (l.fill.type === "texture" ? [productById.get(l.fill.productId)?.image ?? ""] : [])))].filter((u) =>
+          /^https?:/.test(u),
+        );
+        const colours = [...new Set(surfaceLayers.flatMap((l) => (l.fill.type === "color" ? [l.fill.color] : [])))];
+        const floor = surfaceLayers.some((l) => l.role === "floor" || (l.role === undefined && l.fill.type !== "color"));
+        blob = await falSurfaces(plain, withSurfaces, area, { refs, colours, floor, wall: surfaceLayers.some((l) => l.role === "wall" || l.fill.type === "color") }, setStatus);
+        putCached(key, blob);
+      }
+      setShowDrawnSurfaces(false);
+      setRealSurfaces((r) => (r && URL.revokeObjectURL(r.url), { key, url: URL.createObjectURL(blob!) }));
+    } catch (e) {
+      setNotice(`Vloer en muren echt maken mislukt: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setStatus("");
+      setMakingReal(false);
     }
   }
 
@@ -1296,7 +1365,14 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
     if (!size || !layer || !product || !plane) return;
     setNotice("");
     try {
-      const list = await falSuggestSpots(await designBlob({ forAi: true, without: layerId }), size, { title: product.title, category: categoryLabel(product.category), dims: product.dims }, setStatus);
+      // Same room and same product: the same answer, from the cache (asking again costs again).
+      const others = drawn.filter((l) => l.id !== layerId && l.kind !== "measure" && !(surfacesReal && l.kind === "surface"));
+      const key = `spots1:${fingerprint(photo!.url)}:${product.id}:${surfacesReal ? surfaceKey : eraseKey}:${fingerprint(JSON.stringify(others))}`;
+      const hit = await getCached<Spot[]>(key);
+      const list = Array.isArray(hit)
+        ? hit
+        : await falSuggestSpots(await designBlob({ forAi: true, without: layerId }), size, { title: product.title, category: categoryLabel(product.category), dims: product.dims }, setStatus);
+      if (!Array.isArray(hit) && list.length) putCached(key, list);
       // Only points on this floor (its plane, extended like the texture) are usable.
       const area = extendedPlane(plane, "floor")?.quad ?? plane;
       const ok = list.filter((s) => pointInPolygon(s.at, area));
@@ -1393,6 +1469,24 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
               <button onClick={exportDesign} disabled={exporting || !size} title="Bewaar of deel dit ontwerp als foto">
                 {exporting ? "Bezig…" : "📷 Opslaan / delen"}
               </button>
+              {fal && surfaceLayers.length > 0 && (realSurfaces?.key === surfaceKey ? (
+                <button
+                  onClick={() => setShowDrawnSurfaces((v) => !v)}
+                  aria-pressed={!showDrawnSurfaces}
+                  title="Wissel tussen de echte (AI) en de getekende vloer en muren (gratis)"
+                >
+                  {showDrawnSurfaces ? "✨ Echte vloer/muren" : "✏️ Getekende vloer/muren"}
+                </button>
+              ) : (
+                <button
+                  className="primary"
+                  onClick={makeSurfacesReal}
+                  disabled={makingReal || !size}
+                  title={`Maak de nieuwe vloer en muren echt: materiaal, licht, schaduw en reflecties van de kamer (fal.ai, ${euroCents(FAL_COST.surfaces)}; dezelfde vloer opnieuw is gratis)`}
+                >
+                  {makingReal ? "Bezig…" : "✨ Vloer & muren echt"}
+                </button>
+              ))}
               {fal && layers.length > 0 && (
                 <button
                   className="primary"
@@ -1578,7 +1672,10 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
         {size ? (
           <div ref={stageRef} className="stage" style={{ aspectRatio: `${size.w} / ${size.h}` }}>
             <div className="canvas" style={{ width: size.w, height: size.h, transform: `scale(${scale})` }}>
-              {hasErased ? (
+              {surfacesReal ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img className="layer" src={realSurfaces!.url} alt="" style={{ width: size.w, height: size.h }} />
+              ) : hasErased ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img className="layer" src={erased!.url} alt="" style={{ width: size.w, height: size.h }} />
               ) : (
@@ -1587,7 +1684,7 @@ export function Visualizer({ project, update, photoId, setPhotoId }: Props) {
               {showLayers &&
                 drawn.map((l) => {
                   if (l.kind === "erase" || l.kind === "measure") return null;
-                  if (l.kind === "surface" && l.fill.type === "none") return null;
+                  if (l.kind === "surface" && (l.fill.type === "none" || surfacesReal)) return null;
                   if (l.kind === "surface") {
                     const tex = textureSrc(l);
                     const plane = planeOf(l);
