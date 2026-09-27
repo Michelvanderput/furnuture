@@ -249,7 +249,10 @@ export const daysBetween = (a: string, b: string) => Math.round((parse(b).getTim
  * - everything else runs side by side (paint a bedroom while the bathroom is being done).
  */
 export function autoPlan(tasks: Task[], keyDate: string): Task[] {
-  const todo = tasks.filter((t) => t.status !== "klaar").sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind));
+  // Cleaning comes last, after everything else.
+  const rank = (t: Task) => (t.kind === "schoonmaak" ? 99 : KIND_ORDER.indexOf(t.kind));
+  const todo = tasks.filter((t) => t.status !== "klaar").sort((a, b) => rank(a) - rank(b));
+  let lastEnd: string | undefined;
   const busyUntil = new Map<string, string>(); // lane -> last day taken
   let roughEnd: string | undefined; // end of house-wide demolition and pipes
   const out = new Map<string, Task>();
@@ -260,12 +263,16 @@ export function autoPlan(tasks: Task[], keyDate: string): Task[] {
       ...(t.roomIds.length ? [] : [`vak:${t.kind}`]),
       ...(t.who === "zelf" ? ["zelf"] : [`vak:${t.kind}`]),
     ];
-    const after = [...lanes.map((l) => busyUntil.get(l)), phase > 2 ? roughEnd : undefined].filter((d): d is string => !!d).sort().at(-1);
+    const after = [...lanes.map((l) => busyUntil.get(l)), phase > 2 ? roughEnd : undefined, t.kind === "schoonmaak" ? lastEnd : undefined]
+      .filter((d): d is string => !!d)
+      .sort()
+      .at(-1);
     const start = after ? nextWorkday(after) : addWorkdays(keyDate, 1);
     const planned = { ...t, start, days: t.days ?? KINDS[t.kind].days };
     const end = taskEnd(planned)!;
     lanes.forEach((l) => busyUntil.set(l, end));
     if (phase <= 2 && !t.roomIds.length && (!roughEnd || end > roughEnd)) roughEnd = end;
+    if (!lastEnd || end > lastEnd) lastEnd = end;
     out.set(t.id, planned);
   }
   return tasks.map((t) => out.get(t.id) ?? t);

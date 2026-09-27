@@ -197,7 +197,7 @@ export function TaskSheet({ id, onClose }: { id: string; onClose: () => void }) 
                       </span>
                       <div className="grow stack tight">
                         <strong>{q.company}</strong>
-                        <span className="tiny muted">{[q.note, q.contact].filter(Boolean).join(" · ") || "—"}</span>
+                        {(q.note || q.contact) && <span className="tiny muted">{[q.note, q.contact].filter(Boolean).join(" · ")}</span>}
                       </div>
                       <div className="price">
                         <span className="amount">{euro(q.amount, q.amount % 1 !== 0)}</span>

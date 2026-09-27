@@ -55,6 +55,7 @@ describe("planning", () => {
       task({ id: "wiring", kind: "elektra", days: 1 }),
       task({ id: "bath", kind: "badkamer", roomIds: ["b"], days: 5 }),
       task({ id: "paint2", kind: "schilderen", roomIds: ["s"], days: 1, who: "zelf" }),
+      task({ id: "clean", kind: "schoonmaak", days: 1 }),
     ];
     const plan = autoPlan(tasks, "2026-10-01"); // Thursday
     const by = Object.fromEntries(plan.map((t) => [t.id, t]));
@@ -66,6 +67,7 @@ describe("planning", () => {
     expect(by.paint2.start).toBe("2026-10-07"); // yourself: after your other paint job
     expect(by.floor.start).toBe("2026-10-07"); // after the paint in the same room
     expect(taskEnd(by.floor)).toBe("2026-10-08");
-    expect(lateTasks({ moveDate: "2026-10-07", tasks: plan }).map((t) => t.id).sort()).toEqual(["bath", "floor"]);
+    expect(by.clean.start).toBe("2026-10-09"); // cleaning after everything else
+    expect(lateTasks({ moveDate: "2026-10-07", tasks: plan }).map((t) => t.id).sort()).toEqual(["bath", "clean", "floor"]);
   });
 });
