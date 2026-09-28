@@ -30,6 +30,7 @@ import { ShopView } from "@/components/ShopView";
 import { TaskSheet } from "@/components/TaskSheet";
 import { ToastHost, useToast } from "@/components/ui";
 import { HouseGate } from "@/components/HouseGate";
+import { NotificationBell } from "@/components/Notifications";
 import { Welcome } from "@/components/Welcome";
 import { extractFundaPhotos } from "@/lib/extract";
 import { falEnabled } from "@/lib/fal";
@@ -37,6 +38,7 @@ import { clearImportHash, currentHouse, houseKey, importFromHash, leaveHouse, re
 import { href, useRoute, type Route } from "@/lib/route";
 import { extractLinks } from "@/lib/shopping";
 import { addTasks } from "@/lib/tasks";
+import { registerWorker } from "@/lib/push";
 import { useProject, type SyncState } from "@/lib/useProject";
 
 const SYNC_TEXT: Record<SyncState, string> = {
@@ -68,11 +70,32 @@ export default function Page() {
 function Root() {
   const [house, setHouse] = useState<HouseRef | null | undefined>(undefined);
   const [ask, setAsk] = useState<string>();
+  // What a tapped notification opens: "item:<id>", "task:<id>" or a view.
+  const [open, setOpen] = useState<string>();
+
+  // Notifications need the service worker; a tap while the app is open arrives as a message.
+  useEffect(() => {
+    registerWorker();
+    const onMessage = (e: MessageEvent) => {
+      if (e.data?.type !== "open") return;
+      const url = new URL(e.data.url, location.origin);
+      const name = url.searchParams.get("woning");
+      if (name && houseKey(name) !== currentHouse()?.key) location.href = url.href;
+      else setOpen(url.searchParams.get("open") ?? undefined);
+    };
+    navigator.serviceWorker?.addEventListener("message", onMessage);
+    return () => navigator.serviceWorker?.removeEventListener("message", onMessage);
+  }, []);
 
   useEffect(() => {
     const q = new URLSearchParams(location.search);
     const shared = q.get("woning");
     const current = currentHouse();
+    if (q.get("open")) {
+      setOpen(q.get("open")!);
+      q.delete("open");
+      history.replaceState(null, "", location.pathname + (q.size ? `?${q}` : "") + location.hash);
+    }
     if (shared) {
       q.delete("woning");
       history.replaceState(null, "", location.pathname + (q.size ? `?${q}` : "") + location.hash);
@@ -90,6 +113,8 @@ function Root() {
     <Home
       key={house.key}
       house={house}
+      open={open}
+      onOpened={() => setOpen(undefined)}
       onLeave={() => {
         leaveHouse();
         setAsk(undefined);
@@ -99,7 +124,7 @@ function Root() {
   );
 }
 
-function Home({ house, onLeave }: { house: HouseRef; onLeave: () => void }) {
+function Home({ house, open, onOpened, onLeave }: { house: HouseRef; open?: string; onOpened: () => void; onLeave: () => void }) {
   const { project, update, loaded, loadError, sync, syncError, syncNow } = useProject(house);
   const route = useRoute();
   const toast = useToast();
@@ -110,6 +135,17 @@ function Home({ house, onLeave }: { house: HouseRef; onLeave: () => void }) {
   const [settings, setSettings] = useState(false);
 
   useEffect(() => void falEnabled().then(setFal), []);
+
+  // Opened from a notification: the product or job it is about (once the house is loaded).
+  useEffect(() => {
+    if (!open || !loaded) return;
+    const [kind, id] = open.split(":");
+    if (kind === "item" && project.items.some((i) => i.id === id)) setItem(id);
+    else if (kind === "task" && project.renovation?.tasks.some((t) => t.id === id)) setTask(id);
+    else if (!id) location.hash = open === "overzicht" ? "#/" : `#/${open}`;
+    else if (sync === "loading" || sync === "saving") return; // still arriving from the database
+    onOpened();
+  }, [open, loaded, project, sync, onOpened]);
 
   // A house sent by the bookmarklet arrives as #import={u,t,p}.
   useEffect(() => {
@@ -221,6 +257,17 @@ function Home({ house, onLeave }: { house: HouseRef; onLeave: () => void }) {
             ))}
           </nav>
           <div className="actions">
+            <NotificationBell
+              onOpen={(url) => {
+                const target = new URL(url, location.origin).searchParams.get("open");
+                if (target) {
+                  const [kind, id] = target.split(":");
+                  if (kind === "item") setItem(id);
+                  else if (kind === "task") setTask(id);
+                  else location.hash = target === "overzicht" ? "#/" : `#/${target}`;
+                }
+              }}
+            />
             <button className="ghost house-btn" onClick={() => (sync === "offline" || sync === "error" ? syncNow() : setSettings(true))} title={SYNC_TEXT[sync] + (syncError ? `: ${syncError}` : "")} aria-label={`${house.name}. ${SYNC_TEXT[sync]}`}>
               <span className={`sync ${sync}`}>
                 <I icon={SYNC_ICON[sync]} size={20} weight={sync === "saved" ? "fill" : "regular"} />

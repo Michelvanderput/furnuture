@@ -12,6 +12,7 @@ import { useApp } from "./app";
 import { I, STATUS_ICON } from "./icons";
 import { Img } from "./Img";
 import { DeliveryFields } from "./Delivery";
+import { AskButton } from "./Notifications";
 import { ProductFinder } from "./ProductFinder";
 import { ItemThumb, Price } from "./ItemRow";
 import { EuroInput, Sheet, Stepper } from "./ui";
@@ -258,6 +259,10 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
       </div>
 
       {!main && <DeliveryFields item={item} />}
+
+      <div>
+        <AskButton open={`item:${item.id}`} about={item.title} />
+      </div>
 
       <div className="stack tight">
         {item.url ? (

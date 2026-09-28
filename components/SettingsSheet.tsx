@@ -7,6 +7,7 @@ import { ArrowsLeftRight, CloudCheck, DeviceMobile, DownloadSimple, House, LinkS
 import { useApp } from "./app";
 import { I } from "./icons";
 import { FalSetting } from "./FalSetting";
+import { NotificationSettings } from "./Notifications";
 import { EuroInput, Sheet } from "./ui";
 
 const STYLES = ["Scandinavisch", "Japandi", "Modern", "Industrieel", "Landelijk", "Bohemian", "Klassiek", "Warm minimalisme"];
@@ -64,6 +65,9 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
           <I icon={ArrowsLeftRight} /> Andere woning
         </button>
       </div>
+
+      <hr className="divider" />
+      <NotificationSettings />
 
       <hr className="divider" />
       <label className="field">

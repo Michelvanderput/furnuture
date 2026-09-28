@@ -1,6 +1,7 @@
 "use client";
 
 import { batches, diff, fromRows, isEmpty, slugify, snapshot, toRows, type Changes, type Row, type Snapshot, type Table } from "./db/rows";
+import { senderHeaders } from "./push";
 import { assignPhotos, defaultRooms, newId } from "./rooms";
 import type { FundaResult, Listing, Project, RoomType } from "./types";
 
@@ -136,7 +137,7 @@ export async function loadRemote(id: string, name: string): Promise<{ project: P
 export async function saveRemote(id: string, changes: Changes): Promise<string | undefined> {
   if (isEmpty(changes)) return undefined;
   let version: string | undefined;
-  for (const b of batches(changes)) version = (await api<{ updatedAt: string }>(`/api/houses/${id}`, { method: "POST", body: JSON.stringify(b) })).updatedAt;
+  for (const b of batches(changes)) version = (await api<{ updatedAt: string }>(`/api/houses/${id}`, { method: "POST", body: JSON.stringify(b), headers: senderHeaders() })).updatedAt;
   return version;
 }
 

@@ -12,6 +12,7 @@ import { addQuote, addTasks, chooseQuote, patchTask, removeQuote, removeTask } f
 import type { RenoKind, Task } from "@/lib/types";
 import { useApp } from "./app";
 import { I, RENO_STATUS_ICON } from "./icons";
+import { AskButton } from "./Notifications";
 import { EuroInput, Sheet, Stepper } from "./ui";
 
 export function TaskSheet({ id, onClose }: { id: string; onClose: () => void }) {
@@ -234,6 +235,12 @@ export function TaskSheet({ id, onClose }: { id: string; onClose: () => void }) 
               <I icon={Plus} /> Offerte
             </button>
           </form>
+        </div>
+      )}
+
+      {task.title && (
+        <div>
+          <AskButton open={`task:${task.id}`} about={task.title} />
         </div>
       )}
 

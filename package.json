@@ -22,6 +22,7 @@
     "@types/node": "^26.6.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/web-push": "^3.6.4",
     "fake-indexeddb": "^6.2.5",
     "typescript": "^5.9.3",
     "vitest": "^5.0.2"
@@ -30,7 +31,8 @@
     "@phosphor-icons/react": "^2.1.10",
     "next": "^15.5.26",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react-dom": "^19.3.0",
+    "web-push": "^3.6.7"
   },
   "private": true
 }

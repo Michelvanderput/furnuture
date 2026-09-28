@@ -667,3 +667,19 @@ details[open] > summary { margin-bottom: var(--space-3); }
   .plan-lane.scale .plan-track span:nth-child(even) { display: none; }
   .countdowns { gap: var(--space-2); }
 }
+
+/* ---------- notifications ---------- */
+.bell { position: relative; }
+.bell .dot {
+  position: absolute; top: 4px; right: 2px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px;
+  background: var(--danger); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; border: 2px solid var(--bg);
+}
+.notice {
+  display: flex; align-items: flex-start; gap: var(--space-3); width: 100%; padding: 12px 14px; min-height: 56px;
+  border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: var(--surface); text-align: left; white-space: normal; font-weight: 400;
+}
+.notice:last-child { border-bottom: 0; }
+.notice.new { background: var(--accent-tint); }
+.notice:hover { background: var(--surface-2); }
+.pre { white-space: pre-line; }
+.ask-form { padding: var(--space-3); border-radius: var(--radius-sm); background: var(--surface-2); }

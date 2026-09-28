@@ -29,6 +29,19 @@ Tabellen: `houses` (één rij per woning, met Funda-gegevens, budget, stijl en v
 2. Vercel → project → Settings → Environment Variables: `SUPABASE_URL` en `SUPABASE_SERVICE_ROLE_KEY` (de Supabase-integratie van Vercel zet deze zelf; `NEXT_PUBLIC_SUPABASE_URL` en `SUPABASE_SECRET_KEY` werken ook). Daarna Redeploy.
 3. Open de app: bestaande gegevens op een apparaat worden bij de eerste naam aangeboden om over te nemen.
 
+## Meldingen (iPhone, iPad, Android, computer)
+
+Met online opslag kan de app meldingen sturen:
+
+- **Vraag om mee te kijken**: bij een product of klus; je partner krijgt "Sanne vraagt of je naar Hoekbank MOLLY wilt kijken" met je bericht, en de melding opent dat product.
+- **Updates van je partner**: iets besteld, gekozen of binnen, een klus begonnen of klaar, een offerte gekozen, de planning verschoven, een nieuwe sleutel- of verhuisdatum. Eén melding per opslag, nooit over je eigen wijzigingen.
+- **Planning van de dag** (8:00, Vercel Cron): wat je moet bestellen (een week, twee dagen en op de laatste dag), wat morgen bezorgd wordt, welke klus morgen begint, en de sleutel en verhuizing die eraan komen.
+- Het belletje in de app toont de laatste meldingen, ook op apparaten zonder meldingen.
+
+Op een iPhone/iPad werken meldingen alleen voor de app op het beginscherm (iOS 16.4+): Safari → Deel → Zet op beginscherm, open de app daar, ⚙︎ → Meldingen aanzetten.
+
+**Instellen:** tabellen uit `supabase/migrations/…_notifications.sql`; in Vercel `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (bijv. `mailto:jij@voorbeeld.nl`) en `CRON_SECRET` (Vercel stuurt die mee naar `/api/cron/daily`, zie `vercel.json`). Sleutels maken: `npx web-push generate-vapid-keys`.
+
 ## ✨ AI (fal.ai, optioneel)
 
 Met een fal.ai-sleutel komen er slimme knoppen bij. Het model is Gemini 2.5 Flash via fal (`openrouter/router/vision`): snel en goedkoop.
