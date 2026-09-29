@@ -6,7 +6,7 @@ import { fileToDataUrl } from "@/lib/images";
 import { newId } from "@/lib/rooms";
 import type { HouseFacts, Photo, RoomType } from "@/lib/types";
 import { useApp } from "./app";
-import { ArrowSquareOut, Plus } from "@phosphor-icons/react";
+import { ArrowSquareOut, Plus, ArrowRight } from "@phosphor-icons/react";
 import { I, RoomIcon } from "./icons";
 import { Img } from "./Img";
 import { Lightbox } from "./ui";
@@ -24,7 +24,7 @@ const FACTS: [keyof HouseFacts, string][] = [
 ];
 
 /** Cover photo, address and key facts. */
-export function HouseHero() {
+export function HouseHero({ link }: { link?: boolean }) {
   const { project } = useApp();
   const l = project.listing;
   const cover = l?.photos.find((p) => p.room === "buitenkant") ?? l?.photos.find((p) => p.room !== "plattegrond");
@@ -44,6 +44,11 @@ export function HouseHero() {
               </span>
             ))}
           </div>
+        )}
+        {link && (
+          <a className="hero-link" href="#/woning">
+            Woning, foto&apos;s en kenmerken <I icon={ArrowRight} size={14} />
+          </a>
         )}
       </div>
     </div>

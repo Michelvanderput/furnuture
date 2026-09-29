@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  CalendarBlank,
   ChartDonut,
   CloudArrowUp,
   CloudCheck,
@@ -9,7 +10,6 @@ import {
   DeviceMobile,
   GearSix,
   Hammer,
-  House,
   Plus,
   ShoppingBag,
   SquaresFour,
@@ -20,6 +20,7 @@ import { AddSheet } from "@/components/AddSheet";
 import { AppContext, type App } from "@/components/app";
 import { Dashboard } from "@/components/Dashboard";
 import { HouseView } from "@/components/HouseView";
+import { PlanningView } from "@/components/PlanningView";
 import { Armchair, I } from "@/components/icons";
 import { ItemSheet } from "@/components/ItemSheet";
 import { newTask, RenovationView } from "@/components/RenovationView";
@@ -253,7 +254,7 @@ function Home({ house, open, onOpened, onLeave }: { house: HouseRef; open?: stri
     { route: { view: "kamers" }, label: "Kamers", icon: SquaresFour, on: current.view === "kamers" || current.view === "kamer" },
     { route: { view: "verbouwing" }, label: "Verbouwing", icon: Hammer, on: current.view === "verbouwing" },
     { route: { view: "winkelen" }, label: "Winkelen", icon: ShoppingBag, on: current.view === "winkelen" },
-    { route: { view: "woning" }, label: "Woning", icon: House, on: current.view === "woning" },
+    { route: { view: "planning" }, label: "Planning", icon: CalendarBlank, on: current.view === "planning" },
   ];
 
   return (
@@ -307,6 +308,7 @@ function Home({ house, open, onOpened, onLeave }: { house: HouseRef; open?: stri
         {current.view === "verbouwing" && <RenovationView />}
         {current.view === "winkelen" && <ShopView />}
         {current.view === "woning" && <HouseView />}
+        {current.view === "planning" && <PlanningView />}
       </main>
       {current.view === "verbouwing" ? (
         <button

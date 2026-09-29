@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { roomLabel } from "@/lib/categories";
 import { moveRoom } from "@/lib/items";
-import { ArrowDown, ArrowsDownUp, ArrowUp, Check, Plus } from "@phosphor-icons/react";
+import { ArrowDown, ArrowsDownUp, ArrowUp, Check, Plus, House } from "@phosphor-icons/react";
 import { FURNISHABLE, newRoom, roomPhotos } from "@/lib/rooms";
 import { go, href } from "@/lib/route";
 import { euro, itemsIn, mainItems, totals } from "@/lib/shopping";
@@ -82,7 +82,10 @@ export function RoomsView() {
             {project.rooms.length} ruimtes · {euro(totals(project.items).planned)} gepland
           </p>
         </div>
-        <div className="row">
+        <div className="row wrap-row">
+          <a className="btn ghost" href="#/woning">
+            <I icon={House} /> Woning
+          </a>
           <button className="ghost" onClick={() => setOrdering((o) => !o)} aria-pressed={ordering}>
             {ordering ? <I icon={Check} /> : <I icon={ArrowsDownUp} />} {ordering ? "Klaar" : "Volgorde"}
           </button>

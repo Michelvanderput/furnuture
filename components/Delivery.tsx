@@ -171,6 +171,9 @@ export function PlanningCard() {
             <p className="tiny muted">Verbouwing en leveringen tot de verhuisdag</p>
           </div>
         </div>
+        <a className="small strong row" style={{ gap: 4, marginLeft: "auto" }} href="#/planning">
+          Hele planning <I icon={ArrowRight} size={14} />
+        </a>
         {hasAnything ? (
           <span className={`chip ${issues ? "danger" : "ok"}`}>
             {issues ? (
@@ -277,7 +280,7 @@ export function PlanningCard() {
   );
 }
 
-function DateBox({ icon, label, date, days, min, onChange }: { icon: typeof Key; label: string; date?: string; days?: number; min?: string; onChange: (d?: string) => void }) {
+export function DateBox({ icon, label, date, days, min, onChange }: { icon: typeof Key; label: string; date?: string; days?: number; min?: string; onChange: (d?: string) => void }) {
   return (
     <label className="countdown">
       <span className="icon-badge small-badge">

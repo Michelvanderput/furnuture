@@ -35,7 +35,7 @@ export function Dashboard() {
 
   return (
     <section className="page">
-      <HouseHero />
+      <HouseHero link />
 
       {/* What to do next comes first; the figures follow once there is something to count. */}
       <NextSteps project={project} />
