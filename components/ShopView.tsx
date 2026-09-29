@@ -6,7 +6,7 @@ import { ArrowsClockwise, DownloadSimple, Package, Printer, ShareNetwork, Shoppi
 import { CATEGORIES } from "@/lib/categories";
 import { patchItem, patchItems } from "@/lib/items";
 import { refreshPrice } from "@/lib/products";
-import { byShop, euro, isBought, itemsIn, lineCost, mainItems, planCsv, planText, STATUS, totals } from "@/lib/shopping";
+import { byShop, euro, isBought, isChosen, itemsIn, lineCost, mainItems, planCsv, planText, STATUS, totals } from "@/lib/shopping";
 import { useApp } from "./app";
 import { CategoryIcon, I, STATUS_ICON } from "./icons";
 import { ItemRow } from "./ItemRow";
@@ -163,7 +163,7 @@ export function ShopView() {
                 <h2 className="row" style={{ gap: 10 }}>
                   <I icon={STATUS_ICON[s.id]} size={22} /> {s.label}
                 </h2>
-                <span className="num strong">{euro(totals(list).planned)}</span>
+                <span className="num strong">{euro(s.id === "idee" ? totals(list).ideas : totals(list).planned)}</span>
               </div>
               <div className="items">
                 {list.map((i) => (
@@ -185,7 +185,7 @@ function Figures() {
     (r) => r.t.count || r.budget,
   );
   const all = totals(project.items);
-  const cats = CATEGORIES.map((c) => ({ ...c, total: mainItems(project.items).filter((i) => i.category === c.id).reduce((n, i) => n + lineCost(i).value, 0) }))
+  const cats = CATEGORIES.map((c) => ({ ...c, total: mainItems(project.items).filter((i) => i.category === c.id && isChosen(i)).reduce((n, i) => n + lineCost(i).value, 0) }))
     .filter((c) => c.total > 0)
     .sort((a, b) => b.total - a.total);
   const max = Math.max(1, ...cats.map((c) => c.total));
@@ -198,7 +198,8 @@ function Figures() {
             <tr>
               <th>Kamer</th>
               <th className="r">Items</th>
-              <th className="r">Gepland</th>
+              <th className="r">Gekozen</th>
+              <th className="r">Ideeën</th>
               <th className="r">Besteld</th>
               <th className="r">Budget</th>
               <th className="r">Verschil</th>
@@ -210,6 +211,7 @@ function Figures() {
                 <td className="strong">{r.name}</td>
                 <td className="r">{r.t.count}</td>
                 <td className="r">{euro(r.t.planned)}</td>
+                <td className="r muted">{r.t.ideas ? euro(r.t.ideas) : "—"}</td>
                 <td className="r">{euro(r.t.spent)}</td>
                 <td className="r">{r.budget ? euro(r.budget) : "—"}</td>
                 <td className="r">
@@ -223,6 +225,7 @@ function Figures() {
               <td>Totaal</td>
               <td className="r">{all.count}</td>
               <td className="r">{euro(all.planned)}</td>
+              <td className="r">{all.ideas ? euro(all.ideas) : "—"}</td>
               <td className="r">{euro(all.spent)}</td>
               <td className="r">{project.budget ? euro(project.budget) : "—"}</td>
               <td className="r">{project.budget ? euro(project.budget - all.planned) : ""}</td>

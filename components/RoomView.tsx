@@ -22,6 +22,12 @@ import { BudgetBar, EuroInput, Lightbox, Sheet } from "./ui";
 
 type Filter = "alles" | "kopen" | "gekocht" | "must";
 
+/** "€ 300", "€ 300 + € 120 idee", "€ 120 idee". */
+const groupTotal = (items: Item[]) => {
+  const t = totals(items);
+  return t.ideas && t.planned ? `${euro(t.planned)} + ${euro(t.ideas)} idee` : t.ideas ? `${euro(t.ideas)} idee` : euro(t.planned);
+};
+
 export function RoomView({ roomId }: { roomId: string }) {
   const { project, openAdd } = useApp();
   const room = project.rooms.find((r) => r.id === roomId)!;
@@ -87,7 +93,7 @@ export function RoomView({ roomId }: { roomId: string }) {
       <div className="card stack">
         <div className="row between wrap-row">
           <div className="stack tight">
-            <span className="eyebrow">Totaal voor deze kamer</span>
+            <span className="eyebrow">Gekozen voor deze kamer</span>
             <span className="row wrap-row" style={{ alignItems: "baseline", gap: 10 }}>
               <span style={{ fontSize: 34, fontWeight: 700, letterSpacing: "-0.02em" }} className="num">
                 {euro(t.planned)}
@@ -110,6 +116,11 @@ export function RoomView({ roomId }: { roomId: string }) {
               </span>
             )}
             {t.estimated > 0 && <span className="chip estimate">± {euro(t.estimated)} geschat</span>}
+            {t.ideas > 0 && (
+              <span className="chip" title="Ideeën tellen pas mee voor het budget als je ze op Gekozen zet">
+                + {euro(t.ideas)} aan ideeën (telt nog niet mee)
+              </span>
+            )}
             {t.unpriced > 0 && <span className="chip">{t.unpriced} zonder prijs</span>}
           </div>
         </div>
@@ -167,7 +178,7 @@ export function RoomView({ roomId }: { roomId: string }) {
                   <span className="eyebrow">
                     <CategoryIcon category={g.key as Category} size={16} /> {g.label}
                   </span>
-                  <span className="small muted num">{euro(totals(g.items).planned)}</span>
+                  <span className="small muted num">{groupTotal(g.items)}</span>
                 </div>
               )}
               <div className="items">

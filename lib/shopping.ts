@@ -31,6 +31,8 @@ export const STATUS: { id: ItemStatus; label: string; emoji: string }[] = [
 export const statusLabel = (s: ItemStatus) => STATUS.find((x) => x.id === s)!;
 export const nextStatus = (s: ItemStatus): ItemStatus => STATUS[(STATUS.findIndex((x) => x.id === s) + 1) % STATUS.length].id;
 export const isBought = (i: Item) => i.status === "besteld" || i.status === "binnen";
+/** Chosen, ordered or in the house: what actually comes off the budget. Ideas do not (yet). */
+export const isChosen = (i: Item) => i.status !== "idee";
 
 /** What one line costs (price × quantity), and whether that is only an estimate. */
 export function lineCost(i: Item): { value: number; estimate: boolean; known: boolean } {
@@ -44,8 +46,11 @@ export const mainItems = (items: Item[]) => items.filter((i) => !i.alternativeOf
 export const alternativesOf = (items: Item[], id: string) => items.filter((i) => i.alternativeOf === id);
 
 export interface Totals {
-  /** Everything planned (known prices plus estimates). */
+  /** What comes off the budget: chosen, ordered or in the house (known prices plus estimates). */
   planned: number;
+  /** Still ideas: not counted in `planned`. */
+  ideas: number;
+  ideaCount: number;
   /** Part of `planned` that is only estimated. */
   estimated: number;
   /** Ordered or in the house. */
@@ -58,12 +63,15 @@ export interface Totals {
 }
 
 export function totals(items: Item[]): Totals {
-  const t: Totals = { planned: 0, estimated: 0, spent: 0, count: 0, bought: 0, unpriced: 0, must: 0 };
+  const t: Totals = { planned: 0, ideas: 0, ideaCount: 0, estimated: 0, spent: 0, count: 0, bought: 0, unpriced: 0, must: 0 };
   for (const i of mainItems(items)) {
     const c = lineCost(i);
     t.count++;
-    t.planned += c.value;
-    if (c.estimate) t.estimated += c.value;
+    if (!isChosen(i)) (t.ideas += c.value), t.ideaCount++;
+    else {
+      t.planned += c.value;
+      if (c.estimate) t.estimated += c.value;
+    }
     if (!c.known) t.unpriced++;
     if (isBought(i)) (t.spent += c.value), t.bought++;
     if (i.must) t.must += c.value;
@@ -123,7 +131,8 @@ export function planText(project: Project, onlyToBuy = false): string {
   for (const g of groups) {
     const list = mainItems(g.items).filter((i) => !onlyToBuy || !isBought(i));
     if (!list.length) continue;
-    lines.push(`— ${g.name} (${euro(totals(list).planned)}) —`);
+    const gt = totals(list);
+    lines.push(`— ${g.name} (${[gt.planned || !gt.ideas ? euro(gt.planned) : "", gt.ideas ? `${euro(gt.ideas)} aan ideeën` : ""].filter(Boolean).join(" + ")}) —`);
     for (const i of list) {
       lines.push(`${i.status === "binnen" ? "✅" : i.status === "besteld" ? "📦" : "☐"} ${i.title}${i.shop ? ` · ${i.shop}` : ""} — ${priceText(i)}`);
       if (i.url) lines.push(`   ${i.url}`);
@@ -131,7 +140,8 @@ export function planText(project: Project, onlyToBuy = false): string {
     lines.push("");
   }
   const t = totals(project.items);
-  lines.push(`Totaal: ${euro(t.planned)}${t.estimated ? ` (waarvan ± ${euro(t.estimated)} geschat)` : ""}`);
+  lines.push(`Gekozen: ${euro(t.planned)}${t.estimated ? ` (waarvan ± ${euro(t.estimated)} geschat)` : ""}`);
+  if (t.ideas) lines.push(`Nog ideeën: ${euro(t.ideas)} (telt nog niet mee)`);
   if (project.budget) lines.push(`Budget: ${euro(project.budget)} · nog over: ${euro(project.budget - t.planned)}`);
   return lines.join("\n");
 }

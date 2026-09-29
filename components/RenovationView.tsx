@@ -137,7 +137,7 @@ export function RenovationView() {
             Budget voor de verbouwing
             <EuroInput value={r.budget} onChange={(budget) => update(patchRenovation({ budget }))} placeholder="bijv. 20000" />
           </label>
-          <BudgetBar totals={{ planned: t.total, estimated: t.estimated, spent: t.done, count: t.count, bought: t.doneCount, unpriced: t.unpriced, must: 0 }} budget={r.budget} />
+          <BudgetBar totals={{ planned: t.total, ideas: 0, ideaCount: 0, estimated: t.estimated, spent: t.done, count: t.count, bought: t.doneCount, unpriced: t.unpriced, must: 0 }} budget={r.budget} />
           <p className="small">
             Totaal nieuw huis: <strong className="num">{euro(t.total + furnishing)}</strong>{" "}
             <span className="muted">

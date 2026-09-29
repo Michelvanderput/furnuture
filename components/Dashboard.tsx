@@ -50,7 +50,10 @@ export function Dashboard() {
             <I icon={Couch} size={16} /> Inrichting
           </span>
           <span className="value">{euro(t.planned)}</span>
-          <span className="sub">{t.estimated ? `waarvan ± ${euro(t.estimated)} geschat` : `${t.count} items`}</span>
+          <span className="sub">
+            gekozen{t.estimated ? ` · ± ${euro(t.estimated)} geschat` : ""}
+            {t.ideas ? ` · + ${euro(t.ideas)} aan ideeën` : ""}
+          </span>
         </div>
         <div className="stat">
           <span className="label">
@@ -116,7 +119,7 @@ export function Dashboard() {
             </span>
             <span>
               <i style={{ background: "var(--stone)" }} />
-              Gekozen of idee
+              Gekozen
             </span>
             <span>
               <i style={{ background: "var(--accent)" }} />
@@ -146,6 +149,7 @@ export function Dashboard() {
                   <BudgetBar totals={rt} budget={r.budget} />
                   <span className="tiny muted">
                     {rt.count ? `${rt.bought} van ${rt.count} gekocht` : "nog leeg"}
+                    {rt.ideas ? ` · + ${euro(rt.ideas)} ideeën` : ""}
                     {r.budget ? ` · budget ${euro(r.budget)}` : ""}
                   </span>
                 </span>

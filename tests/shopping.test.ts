@@ -22,14 +22,15 @@ describe("prices and links", () => {
 describe("totals", () => {
   const items = [
     item({ id: "a", price: 800, status: "besteld", must: true }),
-    item({ id: "b", price: 50, qty: 4 }),
-    item({ id: "c", estimate: 300 }),
+    item({ id: "b", price: 50, qty: 4, status: "gekozen" }),
+    item({ id: "c", estimate: 300, status: "gekozen" }),
+    item({ id: "f", price: 120 }),
     item({ id: "d" }),
     item({ id: "e", price: 999, alternativeOf: "a" }),
   ];
-  it("counts price × quantity, estimates, bought and must-haves; not alternatives", () => {
+  it("counts only chosen items against the budget; ideas apart; not alternatives", () => {
     expect(lineCost(items[1])).toEqual({ value: 200, estimate: false, known: true });
-    expect(totals(items)).toEqual({ planned: 1300, estimated: 300, spent: 800, count: 4, bought: 1, unpriced: 1, must: 800 });
+    expect(totals(items)).toEqual({ planned: 1300, ideas: 120, ideaCount: 2, estimated: 300, spent: 800, count: 5, bought: 1, unpriced: 1, must: 800 });
   });
   it("groups per shop, things to find last", () => {
     const g = byShop([item({ id: "a", shop: "IKEA", price: 10 }), item({ id: "b", estimate: 5 }), item({ id: "c", shop: "JYSK", price: 50 })]);
@@ -48,7 +49,7 @@ describe("totals", () => {
 });
 
 describe("alternatives", () => {
-  const p: Project = { listing: null, rooms: [], items: [item({ id: "a", price: 800 }), item({ id: "b", price: 600, alternativeOf: "a" }), item({ id: "c", price: 700, alternativeOf: "a" })] };
+  const p: Project = { listing: null, rooms: [], items: [item({ id: "a", price: 800, status: "gekozen" }), item({ id: "b", price: 600, status: "gekozen", alternativeOf: "a" }), item({ id: "c", price: 700, alternativeOf: "a" })] };
   it("choosing an alternative makes the old choice an option", () => {
     const next = chooseAlternative("b")(p);
     expect(next.items.find((i) => i.id === "b")!.alternativeOf).toBeUndefined();
@@ -73,7 +74,9 @@ describe("export", () => {
     const text = planText(p);
     expect(text).toContain("— Woonkamer");
     expect(text).toContain("— Nog geen kamer");
-    expect(text).toContain(`Totaal: ${euro(449.95)}`);
+    expect(text).toContain(`Gekozen: ${euro(0)}`);
+    expect(text).toContain(`Nog ideeën: ${euro(449.95)}`);
+    expect(text).toContain(`Nog geen kamer (${euro(400)} aan ideeën)`);
     const csv = planCsv(p);
     expect(csv.split("\n")).toHaveLength(3);
     expect(csv).toContain('"Lamp ""Bol"""');
