@@ -2,6 +2,7 @@
 
 import { BookmarkSimple, Copy } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
+import { bookmarkletUrl } from "@/lib/bookmarklet";
 import { I } from "./icons";
 
 /**
@@ -15,8 +16,7 @@ export function ProductBookmarklet() {
   const [code, setCode] = useState("");
   const [copied, setCopied] = useState(false);
   useEffect(() => {
-    const js = `(()=>{const A=${JSON.stringify(window.location.origin)};const L=[...document.querySelectorAll('script[type="application/ld+json"]')].flatMap(s=>{try{const j=JSON.parse(s.textContent);return [].concat(j).flatMap(x=>x&&x["@graph"]?x["@graph"]:[x])}catch(e){return[]}});const P=L.find(n=>n&&[].concat(n["@type"]).some(t=>/Product/.test(t)))||{};const M=n=>(document.querySelector('meta[property="'+n+'"],meta[name="'+n+'"],meta[itemprop="'+n+'"]')||{}).content;const O=[].concat(P.offers||[]).flatMap(o=>o&&o.offers?[].concat(o.offers):[o])[0]||{};const G=[].concat(P.image||[])[0];const d={u:location.href.split("#")[0],t:P.name||M("og:title")||document.title,p:String(O.price||O.lowPrice||M("product:price:amount")||M("price")||""),i:(typeof G==="string"?G:G&&(G.url||G.contentUrl))||M("og:image")||""};location.href=A+"/#product="+encodeURIComponent(JSON.stringify(d))})()`;
-    const url = `javascript:${encodeURIComponent(js)}`;
+    const url = bookmarkletUrl(window.location.origin);
     setCode(url);
     // React refuses javascript: URLs in JSX, so set it directly.
     ref.current?.setAttribute("href", url);
