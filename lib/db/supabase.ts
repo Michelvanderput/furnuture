@@ -41,7 +41,7 @@ async function rest(path: string, init: RequestInit & { prefer?: string } = {}):
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { message?: string; code?: string };
     // 42P01 / PGRST205: the tables are not there yet (the migration has not run).
-    if (body.code === "42P01" || body.code === "PGRST205" || /does not exist|could not find the table/i.test(body.message ?? "")) {
+    if (body.code === "42P01" || body.code === "PGRST205" || /relation .* does not exist|could not find the table/i.test(body.message ?? "")) {
       throw new DbError("De databasetabellen bestaan nog niet: voer de migratie in supabase/migrations uit.", 503);
     }
     throw new DbError(body.message ?? `Database: ${res.status}`, res.status >= 500 ? 502 : res.status);
@@ -230,23 +230,47 @@ export interface NotificationRow {
   member?: string | null;
   device?: string | null;
   key?: string | null;
+  /** Only for these members (names); none = everyone. */
+  recipients?: string[] | null;
   created_at?: string;
 }
 
 /** Keeps a notification; false when one with the same key was already sent. */
 export async function logNotification(houseId: string, n: NotificationRow): Promise<boolean> {
+  const { recipients, ...rest_ } = n;
+  const row = recipients?.length ? { ...n, house_id: houseId } : { ...rest_, house_id: houseId };
   try {
-    await rest("notifications", { method: "POST", prefer: "return=minimal", body: JSON.stringify({ ...n, house_id: houseId }) });
+    await rest("notifications", { method: "POST", prefer: "return=minimal", body: JSON.stringify(row) });
     return true;
   } catch (e) {
     if (e instanceof DbError && e.status === 409) return false;
+    // The recipients column is newer (migration …_recipients.sql): without it, keep it for everyone.
+    if (e instanceof DbError && e.status === 400 && recipients?.length) return logNotification(houseId, rest_);
     throw e;
   }
 }
 
 export async function recentNotifications(houseId: string, limit = 30): Promise<NotificationRow[]> {
-  const res = await rest(`notifications?house_id=eq.${q(houseId)}&kind=neq.test&select=id,kind,title,body,url,member,created_at&order=created_at.desc&limit=${limit}`);
+  const query = (cols: string) => rest(`notifications?house_id=eq.${q(houseId)}&kind=neq.test&select=${cols}&order=created_at.desc&limit=${limit}`);
+  const res = await query("id,kind,title,body,url,member,recipients,created_at").catch((e) => {
+    // Without the newer recipients column (migration …_recipients.sql): everything is for everyone.
+    if (e instanceof DbError && e.status === 400) return query("id,kind,title,body,url,member,created_at");
+    throw e;
+  });
   return (await res.json()) as NotificationRow[];
+}
+
+/** Who uses this house: names of devices with notifications, and of people who sent something. */
+export async function membersOf(houseId: string): Promise<string[]> {
+  const [subs, sent] = await Promise.all([
+    subscriptionsOf(houseId),
+    rest(`notifications?house_id=eq.${q(houseId)}&member=not.is.null&select=member&order=created_at.desc&limit=200`).then((r) => r.json() as Promise<{ member: string }[]>),
+  ]);
+  const names = [...subs.map((s) => s.member), ...sent.map((n) => n.member)].filter((m): m is string => !!m && !!m.trim());
+  // One entry per name, however it is capitalised.
+  const byKey = new Map<string, string>();
+  for (const n of names) if (!byKey.has(n.trim().toLowerCase())) byKey.set(n.trim().toLowerCase(), n.trim());
+  return [...byKey.values()];
 }
 
 export async function countSince(houseId: string, kind: string, since: Date): Promise<number> {

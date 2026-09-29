@@ -76,15 +76,21 @@ export interface SendOptions {
   key?: string;
   /** Keep it for the list in the app (not for tests). */
   log?: boolean;
+  /** Only these members (names, any capitalisation); none = everyone. */
+  to?: string[];
 }
 
 /** Keeps the notification (the list behind the bell) and sends it to the house's devices that want this kind. */
 export async function sendToHouse(houseId: string, note: Note, o: SendOptions): Promise<{ sent: number; kept: boolean; results: { device: string; ok: boolean; status?: number; error?: string }[] }> {
   const url = noteUrl(o.houseName, note.open);
-  const kept = o.log === false ? true : await logNotification(houseId, { kind: o.kind, title: note.title, body: note.body, url, member: o.member ?? null, device: o.device ?? null, key: o.key ?? null });
+  const kept = o.log === false ? true : await logNotification(houseId, { kind: o.kind, title: note.title, body: note.body, url, member: o.member ?? null, device: o.device ?? null, key: o.key ?? null, recipients: o.to?.length ? o.to : null });
   if (!kept || !pushConfigured()) return { sent: 0, kept, results: [] };
+  const to = new Set((o.to ?? []).map((n) => n.trim().toLowerCase()));
   const subs = (await subscriptionsOf(houseId)).filter(
-    (s) => (o.onlyDevice ? s.id === o.onlyDevice : s.id !== o.exceptDevice) && (o.kind === "test" || ({ ...DEFAULT_PREFS, ...s.prefs } as PushPrefs)[o.kind]),
+    (s) =>
+      (o.onlyDevice ? s.id === o.onlyDevice : s.id !== o.exceptDevice) &&
+      (!to.size || to.has((s.member ?? "").trim().toLowerCase())) &&
+      (o.kind === "test" || ({ ...DEFAULT_PREFS, ...s.prefs } as PushPrefs)[o.kind]),
   );
   const payload: Payload = { title: note.title, body: note.body, url, tag: o.key ?? `${o.kind}-${Date.now()}` };
   const results = await Promise.all(subs.map(async (s) => ({ device: s.id, ...(await sendTo(houseId, s, payload, o.kind === "ask" ? "high" : "normal")) })));

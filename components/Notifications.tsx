@@ -8,6 +8,7 @@ import {
   devicePrefs,
   disablePush,
   enablePush,
+  housemates,
   memberName,
   notices,
   seen,
@@ -216,20 +217,29 @@ export function NotificationSuggestion() {
   );
 }
 
-/** "Vraag om mee te kijken": a notification to the other devices of the house. */
+/** "Vraag om mee te kijken": a notification to everyone else in the house, or to the people you pick. */
 export function AskButton({ open, about }: { open: string; about: string }) {
   const { house, toast } = useApp();
   const [form, setForm] = useState(false);
   const [message, setMessage] = useState("");
+  const [people, setPeople] = useState<string[] | null>(null);
+  const [to, setTo] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   if (!house.id) return null;
   if (!form)
     return (
-      <button className="small soft" onClick={() => setForm(true)}>
+      <button
+        className="small soft"
+        onClick={() => {
+          setForm(true);
+          housemates(house).then(setPeople);
+        }}
+      >
         <I icon={ChatCircleText} /> Vraag om mee te kijken
       </button>
     );
+  const toggle = (name: string) => setTo(to.includes(name) ? to.filter((n) => n !== name) : [...to, name]);
   return (
     <form
       className="stack tight ask-form"
@@ -239,10 +249,12 @@ export function AskButton({ open, about }: { open: string; about: string }) {
         setError("");
         try {
           if (!memberName.get()) throw new Error("Vul eerst je naam in bij Instellingen → Meldingen.");
-          const r = await askToLook(house, open, about, message);
-          toast(r.sent ? "Gevraagd: je partner krijgt een melding" : "Verstuurd: je partner ziet het bij het belletje (op hun telefoon staan meldingen nog niet aan)");
+          const r = await askToLook(house, open, about, message, to);
+          const whom = to.length ? to.join(" en ") : "je huisgenoten";
+          toast(r.sent ? `Gevraagd: ${whom} krijg${to.length === 1 ? "t" : "en"} een melding` : `Verstuurd: ${whom} ziet het bij het belletje (meldingen staan daar nog niet aan)`);
           setForm(false);
           setMessage("");
+          setTo([]);
         } catch (err) {
           setError(err instanceof Error ? err.message : String(err));
         } finally {
@@ -250,13 +262,31 @@ export function AskButton({ open, about }: { open: string; about: string }) {
         }
       }}
     >
+      <div className="field">
+        Naar wie?
+        <div className="row wrap-row" style={{ gap: 6 }}>
+          <button type="button" className={`chip pick${to.length === 0 ? " on" : ""}`} aria-pressed={to.length === 0} onClick={() => setTo([])}>
+            Iedereen
+          </button>
+          {people === null ? (
+            <span className="tiny muted">laden…</span>
+          ) : (
+            people.map((p) => (
+              <button key={p} type="button" className={`chip pick${to.includes(p) ? " on" : ""}`} aria-pressed={to.includes(p)} onClick={() => toggle(p)}>
+                {p}
+              </button>
+            ))
+          )}
+        </div>
+        {people && people.length === 0 && <span className="tiny muted">Nog niemand anders met een naam: je bericht gaat naar iedereen in deze woning.</span>}
+      </div>
       <label className="field">
         Bericht erbij <span className="tiny">(mag leeg)</span>
         <input autoFocus maxLength={200} placeholder="Bijv. deze of de grijze? Vind jij hem mooi?" value={message} onChange={(e) => setMessage(e.target.value)} />
       </label>
       <div className="row wrap-row">
         <button className="primary small" disabled={busy}>
-          {busy ? <span className="spinner" /> : <I icon={PaperPlaneTilt} />} Versturen
+          {busy ? <span className="spinner" /> : <I icon={PaperPlaneTilt} />} {to.length ? `Naar ${to.join(" en ")}` : "Naar iedereen"}
         </button>
         <button type="button" className="small ghost" onClick={() => setForm(false)}>
           Annuleren

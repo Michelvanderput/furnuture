@@ -63,3 +63,29 @@ describe("shop search", () => {
     expect(shopsFor("keuken")[0].search("waterkoker")).toBe("https://www.coolblue.nl/zoeken?query=waterkoker");
   });
 });
+
+describe("floors, paint and tiles", () => {
+  it("work out the amounts from the room's m²", () => {
+    const woon = { id: "w", name: "Woonkamer", type: "woonkamer" as const, area: 30 };
+    const list = entries("woonkamer", woon);
+    const floor = list.find((x) => x.title === "PVC-vloer of laminaat")!;
+    expect(floor.qty).toBe(33); // 30 m² + 10% cutting waste
+    expect(floor.hint).toMatch(/^33 m² vloer/);
+    expect(list.find((x) => x.title.startsWith("Muurverf"))!.qty).toBe(5); // ± 48 m² wall, 10 m² per pot
+    expect(list.find((x) => x.title.startsWith("Plafondverf"))!.qty).toBe(3);
+    expect(list.find((x) => x.title === "Plinten")!.qty).toBe(22);
+    const item = itemFrom(floor, "w", 1, "i");
+    expect(lineCost(item).value).toBe(33 * 30);
+    expect(item.note).toBe("33 × m² (richtprijs per m²)");
+  });
+  it("use a usual size when the room's m² is unknown, and say so", () => {
+    const bath = entries("badkamer", { id: "b", name: "Badkamer", type: "badkamer" as const });
+    const tiles = bath.find((x) => x.title === "Vloertegels")!;
+    expect(tiles.qty).toBe(7); // 6 m² + 10%
+    expect(tiles.hint).toMatch(/^7 m² vloer \(geschat\)/);
+  });
+  it("floors and paint are searched at DIY shops", () => {
+    expect(shopsFor("verf").map((s) => s.name)).toEqual(["Praxis", "GAMMA", "Karwei", "Hornbach", "Action"]);
+    expect(searchTerm("PVC-vloer of laminaat")).toBe("pvc-vloer");
+  });
+});

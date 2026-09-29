@@ -201,8 +201,24 @@ export function clearBadge() {
 }
 
 /** "Kun je hier even naar kijken?" to the other devices of the house. */
-export const askToLook = (house: HouseRef, open: string, about: string, message: string) =>
-  post(`/api/houses/${house.id}/notify`, { kind: "ask", device: deviceId(), member: memberName.get(), open, about, message });
+export const askToLook = (house: HouseRef, open: string, about: string, message: string, to: string[] = []) =>
+  post(`/api/houses/${house.id}/notify`, { kind: "ask", device: deviceId(), member: memberName.get(), open, about, message, to });
+
+/** The other people of the house (by name), to send a question to. */
+export async function housemates(house: HouseRef): Promise<string[]> {
+  if (!house.id) return [];
+  const res = await fetch(`/api/houses/${house.id}/members`, { cache: "no-store" });
+  if (!res.ok) return [];
+  const me = memberName.get().trim().toLowerCase();
+  return ((await res.json()) as { members: string[] }).members.filter((m) => m.trim().toLowerCase() !== me);
+}
+
+/** Is a notification meant for me: for everyone, sent by me, or with my name on it. */
+export function forMe(n: Notice): boolean {
+  if (!n.recipients?.length) return true;
+  const me = memberName.get().trim().toLowerCase();
+  return !me || n.member?.trim().toLowerCase() === me || n.recipients.some((r) => r.trim().toLowerCase() === me);
+}
 
 export interface Notice {
   id: string;
@@ -211,6 +227,7 @@ export interface Notice {
   body: string;
   url: string | null;
   member: string | null;
+  recipients?: string[] | null;
   created_at: string;
 }
 
@@ -218,7 +235,7 @@ export async function notices(house: HouseRef): Promise<Notice[]> {
   if (!house.id) return [];
   const res = await fetch(`/api/houses/${house.id}/notifications`, { cache: "no-store" });
   if (!res.ok) throw new Error(`Fout ${res.status}`);
-  return ((await res.json()) as { notifications: Notice[] }).notifications;
+  return ((await res.json()) as { notifications: Notice[] }).notifications.filter(forMe);
 }
 
 const seenKey = (house: HouseRef) => `furnuture:seen:${house.key}`;

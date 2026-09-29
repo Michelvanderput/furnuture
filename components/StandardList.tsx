@@ -2,7 +2,7 @@
 
 import { ArrowSquareOut, CaretDown, Check, ListChecks, MagnifyingGlass, Plus, Star } from "@phosphor-icons/react";
 import { useState } from "react";
-import { CATALOG, entries, entryCost, groupsFor, hasCatalog, houseEstimate, itemFrom, onList, profileChoices, profileFor, tierPref, TIERS, type Entry, type Profile, type Tier } from "@/lib/catalog";
+import { areaFor, CATALOG, entries, entryCost, groupsFor, hasCatalog, houseEstimate, itemFrom, onList, profileChoices, profileFor, tierPref, TIERS, type Entry, type Profile, type Tier } from "@/lib/catalog";
 import { addItems } from "@/lib/items";
 import { newId } from "@/lib/rooms";
 import { euro } from "@/lib/shopping";
@@ -10,6 +10,13 @@ import { searchTerm, shopsFor } from "@/lib/shops";
 import type { Item, Project, Room } from "@/lib/types";
 import { useApp } from "./app";
 import { CategoryIcon, I } from "./icons";
+
+/** "33 m²", "4 potten", "1 rol". */
+const unitLabel = (x: Entry) => {
+  const u = x.measure!.unit;
+  const n = x.qty ?? 1;
+  return n === 1 ? u : u === "pot" ? "potten" : u === "rol" ? "rollen" : u === "zak" ? "zakken" : u;
+};
 
 /** Budget / Midden / Luxe: the rough prices of the list follow. */
 export function TierPicker({ tier, onChange }: { tier: Tier; onChange: (t: Tier) => void }) {
@@ -37,7 +44,7 @@ export function StandardList({ room }: { room: Room }) {
     tierPref.set(t);
     setTierState(t);
   };
-  const all = entries(profile);
+  const all = entries(profile, room);
   const missing = all.filter((x) => !onList(project.items, room.id, x));
   const missingMust = missing.filter((x) => x.must);
   const choices = profileChoices(room.type);
@@ -96,9 +103,14 @@ export function StandardList({ room }: { room: Room }) {
             </div>
           </div>
 
-          {groupsFor(profile).map((g) => (
+          {groupsFor(profile, room).map((g) => (
             <div key={g.name} className="stack tight">
               <span className="eyebrow">{g.name}</span>
+              {!room.area && g.items.some((x) => x.measure) && (
+                <span className="tiny muted">
+                  Hoeveelheden geschat voor een kamer van ± {areaFor(room, profile)} m². Vul de m² in bij <strong>Bewerken</strong> (bovenaan) voor een precieze berekening.
+                </span>
+              )}
               <div className="std-grid">
                 {g.items.map((x) => {
                   const has = onList(project.items, room.id, x);
@@ -107,7 +119,7 @@ export function StandardList({ room }: { room: Room }) {
                       <span className="std-icon">{has ? <I icon={Check} size={18} weight="bold" /> : <CategoryIcon category={x.category} size={18} />}</span>
                       <span className="grow stack" style={{ gap: 0, minWidth: 0 }}>
                         <span className="std-title">
-                          {x.qty && x.qty > 1 ? `${x.qty}× ` : ""}
+                          {x.measure ? `${x.qty} ${unitLabel(x)} · ` : x.qty && x.qty > 1 ? `${x.qty}× ` : ""}
                           {x.title}
                           {x.must && <I icon={Star} size={12} weight="fill" className="std-star" aria-label="must-have" />}
                         </span>
@@ -135,7 +147,7 @@ export function HouseStarter({ project }: { project: Project }) {
   const [tier, setTierState] = useState<Tier>(tierPref.get);
   const rooms = project.rooms.filter(hasCatalog);
   if (!rooms.length) return null;
-  const pending = rooms.flatMap((r) => entries(profileFor(r, project.rooms)).filter((x) => x.must && !onList(project.items, r.id, x)).map((x) => ({ r, x })));
+  const pending = rooms.flatMap((r) => entries(profileFor(r, project.rooms), r).filter((x) => x.must && !onList(project.items, r.id, x)).map((x) => ({ r, x })));
   const est = houseEstimate(project.rooms, tier);
   const onListCount = project.items.filter((i) => i.suggestion).length;
   // Once the list is well under way, this card has done its job.

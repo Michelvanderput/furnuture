@@ -23,6 +23,17 @@ export interface Entry {
   must?: boolean;
   /** Size or buying tip. */
   hint?: string;
+  /** Bought by the m², litre or roll: the amount follows from the room's size. */
+  measure?: Measure;
+}
+
+/** What is measured: the floor (with cutting waste), the walls, the ceiling or the skirting. */
+export interface Measure {
+  of: "vloer" | "muren" | "plafond" | "omtrek";
+  /** Units per m² (or per metre of skirting): 0.1 = one 2.5-litre pot per 10 m² (two coats). */
+  per: number;
+  /** "m²", "pot", "rol", "m", "zak". */
+  unit: string;
 }
 export interface Group {
   name: string;
@@ -48,6 +59,33 @@ export type Profile =
   | "wasruimte"
   | "tuin"
   | "balkon";
+
+/** Floor, paint and wallpaper for a living space; the amounts follow from the room's m². */
+const FINISH = (extra: Entry[] = []): Group => ({
+  name: "Vloer, verf en behang",
+  items: [
+    e("PVC-vloer of laminaat", "vloeren", [15, 30, 55], { measure: { of: "vloer", per: 1, unit: "m²" }, hint: "Prijs per m², met 10% snijverlies. Leggen door een vakman: ± € 15–25 per m² extra." }),
+    e("Ondervloer", "vloeren", [3, 5, 9], { measure: { of: "vloer", per: 1, unit: "m²" }, hint: "Geluiddempend; check of je VvE een bepaalde waarde (dB) eist." }),
+    e("Plinten", "vloeren", [2.5, 5, 10], { measure: { of: "omtrek", per: 1, unit: "m" } }),
+    e("Muurverf (pot 2,5 l)", "verf", [20, 45, 85], { measure: { of: "muren", per: 0.1, unit: "pot" }, hint: "Twee lagen; ± 10 m² per pot. Mat is rustig, zijdeglans afwasbaar." }),
+    e("Plafondverf (pot 2,5 l)", "verf", [20, 40, 70], { measure: { of: "plafond", per: 0.1, unit: "pot" } }),
+    e("Behang (rol)", "behang", [15, 30, 60], { measure: { of: "muren", per: 0.2, unit: "rol" }, hint: "In plaats van verf, of één accentwand: ± 5 m² per rol." }),
+    e("Schildersspullen (roller, kwasten, tape, afdekfolie)", "verf", [25, 45, 80]),
+    ...extra,
+  ],
+});
+
+/** Tiles for a bathroom, toilet or kitchen floor and walls. */
+const TILES = (walls = true): Group => ({
+  name: "Tegels en afwerking",
+  items: [
+    e("Vloertegels", "tegels", [20, 40, 90], { measure: { of: "vloer", per: 1, unit: "m²" }, hint: "Prijs per m², met 10% snijverlies. Antislip (R10 of hoger) in de badkamer." }),
+    ...(walls ? [e("Wandtegels", "tegels", [20, 40, 90], { measure: { of: "muren", per: 1, unit: "m²" }, hint: "Tot het plafond; minder als je tot halverwege tegelt." })] : []),
+    e("Tegellijm en voegmiddel (zak)", "tegels", [12, 18, 28], { measure: { of: "vloer", per: 0.5, unit: "zak" } }),
+    e("Vochtbestendige plafondverf (pot 2,5 l)", "verf", [25, 45, 75], { measure: { of: "plafond", per: 0.1, unit: "pot" } }),
+    e("Sanitairkit en kitspuit", "sanitair", [10, 20, 35]),
+  ],
+});
 
 const e = (title: string, category: Category, price: [number, number, number], opts: Partial<Omit<Entry, "title" | "category" | "price">> = {}): Entry => ({
   title,
@@ -128,6 +166,7 @@ export const CATALOG: Record<Profile, { label: string; groups: Group[] }> = {
           e("Vaas en accessoires", "decoratie", [15, 40, 120]),
         ],
       },
+      FINISH(),
     ],
   },
 
@@ -203,6 +242,7 @@ export const CATALOG: Record<Profile, { label: string; groups: Group[] }> = {
           e("Kruidenrek of opbergpotten", "keuken", [15, 35, 90]),
         ],
       },
+      { ...FINISH([e("Achterwand of spatwand", "keuken", [60, 200, 600], { hint: "Glas, tegels of een plaat achter het fornuis en het aanrecht." })]), name: "Vloer, verf en wanden" },
     ],
   },
 
@@ -248,6 +288,7 @@ export const CATALOG: Record<Profile, { label: string; groups: Group[] }> = {
           e("Stoel of fauteuil", "stoelen", [60, 200, 600]),
         ],
       },
+      FINISH(),
     ],
   },
 
@@ -280,6 +321,7 @@ export const CATALOG: Record<Profile, { label: string; groups: Group[] }> = {
           e("Vloerkleed", "vloerkleden", [30, 120, 400]),
         ],
       },
+      FINISH(),
     ],
   },
 
@@ -315,6 +357,7 @@ export const CATALOG: Record<Profile, { label: string; groups: Group[] }> = {
           e("Muurstickers of posters", "decoratie", [15, 40, 100]),
         ],
       },
+      FINISH(),
     ],
   },
 
@@ -343,6 +386,7 @@ export const CATALOG: Record<Profile, { label: string; groups: Group[] }> = {
           e("Opbergmanden", "decoratie", [15, 35, 80], { qty: 2 }),
         ],
       },
+      FINISH(),
     ],
   },
 
@@ -361,6 +405,7 @@ export const CATALOG: Record<Profile, { label: string; groups: Group[] }> = {
           e("Gordijnen of rolgordijn", "raamdecoratie", [30, 100, 300], { ...must }),
         ],
       },
+      FINISH(),
     ],
   },
 
@@ -389,6 +434,7 @@ export const CATALOG: Record<Profile, { label: string; groups: Group[] }> = {
           e("Plant", "planten", [15, 40, 100]),
         ],
       },
+      FINISH(),
     ],
   },
 
@@ -423,6 +469,7 @@ export const CATALOG: Record<Profile, { label: string; groups: Group[] }> = {
           e("Badkamerverlichting (spiegellamp)", "verlichting", [25, 80, 250]),
         ],
       },
+      TILES(),
     ],
   },
 
@@ -441,6 +488,7 @@ export const CATALOG: Record<Profile, { label: string; groups: Group[] }> = {
           e("Lamp", "verlichting", [15, 40, 120]),
         ],
       },
+      TILES(),
     ],
   },
 
@@ -467,6 +515,7 @@ export const CATALOG: Record<Profile, { label: string; groups: Group[] }> = {
           e("Traphekje (met kleine kinderen)", "overig", [25, 50, 100]),
         ],
       },
+      FINISH([e("Trap bekleden (traptreden en stootborden)", "vloeren", [250, 700, 1600], { hint: "Rechte trap ± 13 treden; met een draai meer. Vaak met montage." })]),
     ],
   },
 
@@ -483,6 +532,7 @@ export const CATALOG: Record<Profile, { label: string; groups: Group[] }> = {
           e("Plafondlamp", "verlichting", [20, 60, 180], { ...must }),
         ],
       },
+      FINISH(),
     ],
   },
 
@@ -501,6 +551,7 @@ export const CATALOG: Record<Profile, { label: string; groups: Group[] }> = {
           e("Tl- of ledlamp", "verlichting", [15, 35, 80]),
         ],
       },
+      { name: "Vloer en muren", items: [e("Vloerverf of betonverf (pot 2,5 l)", "verf", [30, 60, 100], { measure: { of: "vloer", per: 0.1, unit: "pot" } }), e("Muurverf (pot 2,5 l)", "verf", [20, 40, 70], { measure: { of: "muren", per: 0.1, unit: "pot" } })] },
     ],
   },
 
@@ -520,6 +571,7 @@ export const CATALOG: Record<Profile, { label: string; groups: Group[] }> = {
           e("Emmer, dweil en schoonmaakspullen", "overig", [20, 45, 90], { ...must }),
         ],
       },
+      { name: "Vloer en muren", items: [e("Vloertegels of vloerverf", "tegels", [20, 40, 80], { measure: { of: "vloer", per: 1, unit: "m²" } }), e("Vochtbestendige muurverf (pot 2,5 l)", "verf", [25, 45, 75], { measure: { of: "muren", per: 0.1, unit: "pot" } })] },
     ],
   },
 
@@ -623,12 +675,38 @@ export function profileChoices(type: RoomType): Profile[] {
 }
 
 /** The groups for a room: a living room also gets the dining corner (most Dutch living rooms have one). */
-export function groupsFor(profile: Profile): Group[] {
+export function groupsFor(profile: Profile, room?: Room): Group[] {
   const groups = CATALOG[profile].groups;
-  return profile === "woonkamer" ? [...groups, ...CATALOG.eetkamer.groups.map((g) => ({ ...g, name: "Eethoek" }))] : groups;
+  const all = profile === "woonkamer" ? [...groups, ...CATALOG.eetkamer.groups.map((g) => ({ ...g, name: "Eethoek" }))] : groups;
+  const area = areaFor(room, profile);
+  return all.map((g) => ({ ...g, items: g.items.map((x) => sized(x, area, !!room?.area)) }));
 }
 
-export const entries = (profile: Profile) => groupsFor(profile).flatMap((g) => g.items);
+/** A usual size when the room's m² is not known. */
+const TYPICAL_AREA: Record<Profile, number> = {
+  woonkamer: 30, eetkamer: 15, keuken: 12, hoofdslaapkamer: 14, slaapkamer: 10, kinderkamer: 9, babykamer: 8, logeerkamer: 9,
+  werkkamer: 8, badkamer: 6, toilet: 1.5, hal: 8, zolder: 20, berging: 6, wasruimte: 4, tuin: 40, balkon: 6,
+};
+
+/** Floor with 10% waste, walls (2.6 m high, 15% doors and windows), ceiling, or skirting length. */
+export function measured(of: Measure["of"], area: number): number {
+  const side = 4 * Math.sqrt(area);
+  return of === "vloer" ? area * 1.1 : of === "muren" ? side * 2.6 * 0.85 : of === "plafond" ? area : side;
+}
+
+/** An entry with its amount worked out for a room of this size. */
+export function sized(x: Entry, area: number, known: boolean): Entry {
+  if (!x.measure) return x;
+  const amount = measured(x.measure.of, area);
+  const qty = Math.max(1, Math.ceil(amount * x.measure.per));
+  const what = x.measure.of === "vloer" ? `${Math.round(area * 1.1)} m² vloer` : x.measure.of === "plafond" ? `${Math.round(area)} m² plafond` : x.measure.of === "muren" ? `± ${Math.round(amount)} m² muur` : `± ${Math.round(amount)} m plint`;
+  const basis = known ? what : `${what} (geschat)`;
+  return { ...x, qty, hint: [basis, x.hint].filter(Boolean).join(". ") };
+}
+
+export const areaFor = (room: Room | undefined, profile: Profile) => room?.area || TYPICAL_AREA[profile];
+
+export const entries = (profile: Profile, room?: Room) => groupsFor(profile, room).flatMap((g) => g.items);
 export const entryCost = (x: Entry, tier: Tier) => x.price[tier] * (x.qty ?? 1);
 
 /** Already on the list: an item made from it, or with the same name. */
@@ -649,7 +727,8 @@ export function itemFrom(x: Entry, roomId: string, tier: Tier, id: string): Item
     category: x.category,
     status: "idee",
     must: !!x.must,
-    note: "",
+    // "33 m²", "4 pot": what the quantity counts, next to the rough price per unit.
+    note: x.measure ? `${x.qty} × ${x.measure.unit} (richtprijs per ${x.measure.unit})` : "",
     why: x.hint,
     suggestion: x.title,
     addedAt: Date.now(),
@@ -663,7 +742,7 @@ export function houseEstimate(rooms: Room[], tier: Tier): { must: number; all: n
   let all = 0;
   for (const r of rooms) {
     if (!hasCatalog(r)) continue;
-    for (const x of entries(profileFor(r, rooms))) {
+    for (const x of entries(profileFor(r, rooms), r)) {
       const c = entryCost(x, tier);
       all += c;
       if (x.must) mustSum += c;

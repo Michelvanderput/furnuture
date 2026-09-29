@@ -17,7 +17,7 @@ export async function POST(req: Request, { params }: Ctx) {
   try {
     const { id } = await params;
     if (!isUuid(id)) throw new DbError("Onbekende woning", 404);
-    const b = (await req.json()) as { kind?: string; device?: string; member?: string; open?: string; about?: string; message?: string; delay?: number };
+    const b = (await req.json()) as { kind?: string; device?: string; member?: string; open?: string; about?: string; message?: string; delay?: number; to?: string[] };
     const house = await houseRow(id, ["name"]);
     if (!house) throw new DbError("Woning niet gevonden", 404);
     const houseName = String(house.name);
@@ -40,10 +40,11 @@ export async function POST(req: Request, { params }: Ctx) {
     const open = /^(item|task):[A-Za-z0-9_-]{1,40}$/.test(b.open ?? "") ? b.open : undefined;
     const message = clip(b.message, 200);
     const who = member || "Je partner";
+    const to = (Array.isArray(b.to) ? b.to : []).map((n) => clip(n, 40)).filter(Boolean).slice(0, 10);
     const r = await sendToHouse(
       id,
       { title: `${who} vraagt of je naar ${about || "iets"} wilt kijken`, body: message || "Tik om het te openen.", open },
-      { kind: "ask", houseName, exceptDevice: device, device, member },
+      { kind: "ask", houseName, exceptDevice: device, device, member, to },
     );
     return NextResponse.json(r);
   } catch (e) {

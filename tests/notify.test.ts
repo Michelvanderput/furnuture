@@ -50,3 +50,19 @@ describe("the morning reminder", () => {
     expect(dailyReminder(project, "2026-10-03")).toBeNull();
   });
 });
+
+describe("questions for one person", () => {
+  it("show up only for them and the sender", async () => {
+    const { forMe, memberName } = await import("@/lib/push");
+    const store = new Map<string, string>();
+    Object.assign(globalThis, { localStorage: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v), removeItem: (k: string) => store.delete(k) } });
+    const n = { id: "1", kind: "ask", title: "", body: "", url: null, member: "Michel", recipients: ["Sanne"], created_at: "" };
+    memberName.set("Sanne");
+    expect(forMe(n)).toBe(true);
+    memberName.set("michel");
+    expect(forMe(n)).toBe(true);
+    memberName.set("Oma");
+    expect(forMe(n)).toBe(false);
+    expect(forMe({ ...n, recipients: null })).toBe(true);
+  });
+});
