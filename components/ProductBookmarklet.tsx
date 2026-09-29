@@ -59,12 +59,12 @@ export function ProductBookmarklet() {
 }
 
 /** A product sent by the bookmarklet, if the page was opened with one. */
-export function productFromHash(): { url: string; title: string; price?: string; image?: string } | null {
+export function productFromHash(): { url: string; title: string; price?: string; image?: string; error?: string } | null {
   if (typeof location === "undefined" || !location.hash.startsWith("#product=")) return null;
   try {
-    const d = JSON.parse(decodeURIComponent(location.hash.slice(9))) as { u?: string; t?: string; p?: string; i?: string };
+    const d = JSON.parse(decodeURIComponent(location.hash.slice(9))) as { u?: string; t?: string; p?: string; i?: string; e?: string };
     if (!d.u || !/^https?:\/\//.test(d.u)) return null;
-    return { url: d.u, title: String(d.t ?? "").trim().slice(0, 200), price: d.p || undefined, image: d.i && /^https?:\/\//.test(d.i) ? d.i : undefined };
+    return { url: d.u, title: String(d.t ?? "").trim().slice(0, 200), price: d.p || undefined, image: d.i && /^https?:\/\//.test(d.i) ? d.i : undefined, error: d.e ? String(d.e).slice(0, 200) : undefined };
   } catch {
     return null;
   }

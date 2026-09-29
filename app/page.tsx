@@ -218,7 +218,9 @@ function Home({ house, open, onOpened, onLeave }: { house: HouseRef; open?: stri
     update(addItems([item]));
     if (got.image) firstWorkingThumb([got.image]).then((r) => r && update(patchItem(item.id, { thumb: r.thumb, image: r.image })));
     setItem(item.id);
-    toast(`${shortName(title, 40)} toegevoegd: kies hieronder de kamer`);
+    const missing = [!price && "prijs", !got.image && "foto"].filter(Boolean).join(" en ");
+    toast(`${shortName(title, 40)} toegevoegd${missing ? ` (geen ${missing} gevonden: vul die hieronder in)` : ""}: kies de kamer`);
+    if (got.error) console.warn("Bladwijzer:", got.error);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);
 
