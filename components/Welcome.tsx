@@ -152,7 +152,7 @@ export function Features() {
 const ART = "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?auto=format&fit=crop&w=1400&q=75";
 
 const FEATURES: { icon: Icon; title: string; text: string }[] = [
-  { icon: HouseLine, title: "Kamers uit Funda", text: "Foto's, m² en indeling; AI herkent de kamers." },
+  { icon: HouseLine, title: "Kamers uit Funda", text: "Foto's, m² en indeling van je nieuwe huis." },
   { icon: ListChecks, title: "Lijst per kamer", text: "Plak een link uit elke webshop: foto, prijs en maten komen vanzelf." },
   { icon: Hammer, title: "Verbouwing gepland", text: "Klussen, offertes en een planning tot de verhuisdag." },
   { icon: Wallet, title: "Budget in beeld", text: "Inrichting en verbouwing samen, per kamer en per winkel." },

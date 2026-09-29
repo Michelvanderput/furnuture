@@ -33,7 +33,6 @@ import { HouseGate } from "@/components/HouseGate";
 import { NotificationBell } from "@/components/Notifications";
 import { Welcome } from "@/components/Welcome";
 import { extractFundaPhotos } from "@/lib/extract";
-import { falEnabled } from "@/lib/fal";
 import { clearImportHash, currentHouse, houseKey, importFromHash, leaveHouse, rememberHouse, withHouse, type HouseRef } from "@/lib/houses";
 import { href, useRoute, type Route } from "@/lib/route";
 import { extractLinks } from "@/lib/shopping";
@@ -133,13 +132,11 @@ function Home({ house, open, onOpened, onLeave }: { house: HouseRef; open?: stri
   const { project, update, loaded, loadError, sync, syncError, syncNow } = useProject(house);
   const route = useRoute();
   const toast = useToast();
-  const [fal, setFal] = useState(false);
   const [item, setItem] = useState<string | null>(null);
   const [task, setTask] = useState<string | null>(null);
   const [add, setAdd] = useState<{ roomId?: string | null; alternativeOf?: string; links?: string[] } | null>(null);
   const [settings, setSettings] = useState(false);
 
-  useEffect(() => void falEnabled().then(setFal), []);
 
   // Notifications: repair a lost subscription, clear the icon's badge, show pushes that arrive while open.
   useEffect(() => {
@@ -217,8 +214,8 @@ function Home({ house, open, onOpened, onLeave }: { house: HouseRef; open?: stri
   const openAdd = useCallback((opts?: { roomId?: string | null; alternativeOf?: string; links?: string[] }) => setAdd(opts ?? {}), []);
   const openSettings = useCallback(() => setSettings(true), []);
   const app: App = useMemo(
-    () => ({ house, sync, syncError, leave: onLeave, project, update, openItem, openAdd, openTask, openSettings, toast, fal }),
-    [house, sync, syncError, onLeave, project, update, openItem, openAdd, openTask, openSettings, toast, fal],
+    () => ({ house, sync, syncError, leave: onLeave, project, update, openItem, openAdd, openTask, openSettings, toast }),
+    [house, sync, syncError, onLeave, project, update, openItem, openAdd, openTask, openSettings, toast],
   );
 
   if (!loaded) return <div className="splash">{house.name} laden…</div>;
@@ -297,7 +294,7 @@ function Home({ house, open, onOpened, onLeave }: { house: HouseRef; open?: stri
               </span>
               <span className="name">{house.name}</span>
             </button>
-            <button className="ghost icon" onClick={() => setSettings(true)} aria-label="Instellingen" title="Woning, budget, stijl, AI en back-up">
+            <button className="ghost icon" onClick={() => setSettings(true)} aria-label="Instellingen" title="Woning, meldingen, budget en back-up">
               <I icon={GearSix} size={22} />
             </button>
           </div>

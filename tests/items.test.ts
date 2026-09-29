@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { roomsNamed } from "@/lib/ai";
 import { makeOptionOf, patchItems, rivalOf } from "@/lib/items";
 import type { Item, Project } from "@/lib/types";
 
@@ -37,17 +36,5 @@ describe("two products for the same thing", () => {
   it("ordering several at once sets the order date", () => {
     const p = patchItems(["a"], { status: "besteld" })(project([molly]));
     expect(p.items[0].orderedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-  });
-});
-
-describe("rooms in the AI's renovation plan", () => {
-  const p = project([]);
-  it("finds one room, several, or a group", () => {
-    expect(roomsNamed(p, "Woonkamer")).toEqual(["r1"]);
-    expect(roomsNamed(p, "Slaapkamer 1, Slaapkamer 2")).toEqual(["s1", "s2"]);
-    expect(roomsNamed(p, "Slaapkamers")).toEqual(["s1", "s2"]);
-    expect(roomsNamed(p, "Hele huis", "Wanden en plafond slaapkamers schilderen")).toEqual(["s1", "s2"]);
-    expect(roomsNamed(p, "Hal & overloop")).toEqual(["h"]);
-    expect(roomsNamed(p, "Hele huis", "Isolatie verbeteren")).toEqual([]);
   });
 });

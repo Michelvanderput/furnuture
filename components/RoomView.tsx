@@ -1,13 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { aiAdvice, aiStyle, type Advice, type StyleCheck } from "@/lib/ai";
-import { lastAnswer } from "@/lib/aiCache";
-import { ArrowLeft, CaretDown, CaretRight, Check, Compass, Hammer, Palette, PencilSimple, Plus, Sparkle, Star, Trash } from "@phosphor-icons/react";
+import { ArrowLeft, CaretDown, CaretRight, Check, Hammer, PencilSimple, Plus, Trash } from "@phosphor-icons/react";
 import { CATEGORIES } from "@/lib/categories";
-import { euroCents, FAL_COST } from "@/lib/fal";
-import { addItems, patchRoom, removeRoom } from "@/lib/items";
-import { FURNISHABLE, newId, roomPhotos } from "@/lib/rooms";
+import { patchRoom, removeRoom } from "@/lib/items";
+import { FURNISHABLE, roomPhotos } from "@/lib/rooms";
 import { go } from "@/lib/route";
 import { alternativesOf, euro, isBought, itemsIn, lineCost, mainItems, totals } from "@/lib/shopping";
 import type { Category, Item, Room, RoomType } from "@/lib/types";
@@ -20,12 +17,13 @@ import { addTasks } from "@/lib/tasks";
 import { CategoryIcon, I, RoomIcon } from "./icons";
 import { Img } from "./Img";
 import { ItemRow } from "./ItemRow";
+import { StandardList } from "./StandardList";
 import { BudgetBar, EuroInput, Lightbox, Sheet } from "./ui";
 
 type Filter = "alles" | "kopen" | "gekocht" | "must";
 
 export function RoomView({ roomId }: { roomId: string }) {
-  const { project, openAdd, fal } = useApp();
+  const { project, openAdd } = useApp();
   const room = project.rooms.find((r) => r.id === roomId)!;
   const photos = roomPhotos(project.listing, room.id);
   const all = itemsIn(project.items, room.id);
@@ -118,7 +116,7 @@ export function RoomView({ roomId }: { roomId: string }) {
         <BudgetBar totals={t} budget={room.budget} />
       </div>
 
-      <AiCard room={room} />
+      <StandardList room={room} />
 
       <div className="stack">
         <div className="section-head">
@@ -154,7 +152,7 @@ export function RoomView({ roomId }: { roomId: string }) {
               <RoomIcon type={room.type} size={28} />
             </span>
             <strong>Nog niets voor {room.name.toLowerCase()}</strong>
-            <span className="small">Plak een link uit een webshop, zet iets op de lijst om later te zoeken{fal ? ", of laat de AI tips geven" : ""}.</span>
+            <span className="small">Kies hierboven uit de standaardlijst, of plak een link uit een webshop.</span>
             <button className="accent" onClick={() => openAdd({ roomId: room.id })}>
               <I icon={Plus} /> Eerste product toevoegen
             </button>
@@ -207,162 +205,6 @@ function ItemWithAlternatives({ item }: { item: Item }) {
       )}
       {open && alts.map((a) => <ItemRow key={a.id} item={a} alt />)}
     </>
-  );
-}
-
-const lastAdvice = lastAnswer<Advice>("advice");
-const lastStyle = lastAnswer<StyleCheck>("style");
-
-/** ✨ What is missing, and does it go together? */
-function AiCard({ room }: { room: Room }) {
-  const { project, update, fal, toast } = useApp();
-  const [advice, setAdviceState] = useState<Advice | null>(() => lastAdvice.get(room.id) ?? null);
-  const [style, setStyleState] = useState<StyleCheck | null>(() => lastStyle.get(room.id) ?? null);
-  const setAdvice = (a: Advice) => (lastAdvice.set(room.id, a), setAdviceState(a));
-  const setStyle = (a: StyleCheck) => (lastStyle.set(room.id, a), setStyleState(a));
-  const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
-  // A suggestion counts as added when an item with its name is in this room.
-  const onList = new Set(project.items.filter((i) => i.roomId === room.id).flatMap((i) => [i.title.toLowerCase(), i.suggestion?.toLowerCase() ?? ""]));
-  const added = { has: (title: string) => onList.has(title.toLowerCase()) };
-  if (!fal) return null;
-  const withImages = project.items.filter((i) => i.roomId === room.id && !i.alternativeOf && /^https?:/.test(i.image ?? "")).length;
-
-  async function run(kind: "advice" | "style") {
-    setError("");
-    setBusy(kind);
-    try {
-      if (kind === "advice") setAdvice(await aiAdvice(project, room));
-      else setStyle(await aiStyle(project, room));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy("");
-    }
-  }
-
-  const toItem = (s: Advice["suggestions"][number]): Item => ({
-      id: newId(),
-      roomId: room.id,
-      title: s.title,
-      images: [],
-      estimate: s.estimate,
-      qty: s.qty,
-      category: s.category,
-      status: "idee",
-      must: s.must,
-      note: "",
-      why: s.why,
-      suggestion: s.title,
-      addedAt: Date.now(),
-      source: "ai",
-  });
-  const addSuggestion = (s: Advice["suggestions"][number]) => update(addItems([toItem(s)]));
-
-  return (
-    <div className="card ai-card stack">
-      <div className="card-head">
-        <div className="stack tight">
-          <div className="title">
-            <span className="icon-badge accent">
-              <I icon={Sparkle} size={20} />
-            </span>
-            <div>
-              <h3>Slimme hulp</h3>
-              <p className="small muted">De AI bekijkt de foto&apos;s, de maat en je lijst.</p>
-            </div>
-          </div>
-        </div>
-        <div className="row wrap-row">
-          <button className="accent" onClick={() => run("advice")} disabled={!!busy}>
-            {busy === "advice" ? <span className="spinner" /> : <I icon={Compass} />} Wat mis ik nog? <span className="cost">{euroCents(FAL_COST.advice)}</span>
-          </button>
-          <button onClick={() => run("style")} disabled={!!busy || withImages < 2} title={withImages < 2 ? "Voeg eerst minstens 2 producten met foto toe" : undefined}>
-            {busy === "style" ? <span className="spinner" /> : <I icon={Palette} />} Stijlcheck
-          </button>
-        </div>
-      </div>
-      {error && <p className="error small">{error}</p>}
-      {advice && (
-        <div className="stack">
-          {advice.summary && <p>{advice.summary}</p>}
-          <div className="stack tight">
-            {advice.suggestions.map((s) => (
-              <div className="suggestion" key={s.title}>
-                <span className="icon-badge">
-                  <CategoryIcon category={s.category} size={20} />
-                </span>
-                <div className="grow stack tight">
-                  <span className="row wrap-row" style={{ gap: 6 }}>
-                    <strong className="small">
-                      {s.title}
-                      {s.qty > 1 ? ` (${s.qty}×)` : ""}
-                    </strong>
-                    {s.must && (
-                      <span className="chip must">
-                        <I icon={Star} size={12} weight="fill" /> must-have
-                      </span>
-                    )}
-                  </span>
-                  <span className="tiny muted">
-                    {s.estimate ? `± ${euro(s.estimate)}${s.qty > 1 ? " per stuk" : ""} · ` : ""}
-                    {s.why}
-                  </span>
-                </div>
-                <button className="small soft" disabled={added.has(s.title)} onClick={() => addSuggestion(s)} aria-label={added.has(s.title) ? `${s.title} staat op de lijst` : `${s.title} op de lijst zetten`}>
-                  {added.has(s.title) ? <I icon={Check} weight="bold" /> : <I icon={Plus} />}
-                  {added.has(s.title) ? "" : "Lijst"}
-                </button>
-              </div>
-            ))}
-          </div>
-          <div className="row wrap-row between">
-            {advice.suggestions.some((s) => s.must && !added.has(s.title)) && (
-              <button
-                className="small"
-                onClick={() => {
-                  const musts = advice.suggestions.filter((s) => s.must && !added.has(s.title));
-                  update(addItems(musts.map(toItem)));
-                  toast(`${musts.length} must-haves op de lijst`);
-                }}
-              >
-                <I icon={Plus} /> Alle must-haves
-              </button>
-            )}
-            <span className="tiny muted">Prijzen zijn schattingen: koppel later een echte link.</span>
-          </div>
-          {advice.tips.length > 0 && (
-            <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>
-              {advice.tips.map((tip) => (
-                <li key={tip}>{tip}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-      {style && (
-        <div className="stack tight">
-          <div className="row">
-            <strong style={{ fontSize: 26, fontFamily: "var(--font-heading)" }}>{style.score}/10</strong>
-            <span className="small">{style.verdict}</span>
-          </div>
-          {style.palette.length > 0 && (
-            <div className="palette" title="Kleurenpalet van deze kamer">
-              {style.palette.map((c) => (
-                <span key={c} style={{ background: c }} title={c} />
-              ))}
-            </div>
-          )}
-          {style.tips.length > 0 && (
-            <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>
-              {style.tips.map((tip) => (
-                <li key={tip}>{tip}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 

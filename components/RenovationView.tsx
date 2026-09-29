@@ -1,10 +1,7 @@
 "use client";
 
-import { CalendarCheck, Check, Coins, Key, MagicWand, Plus, ShareNetwork, Sparkle, Truck, Warning, Wrench } from "@phosphor-icons/react";
+import { CalendarCheck, Check, Coins, Key, MagicWand, Plus, ShareNetwork, Truck, Warning, Wrench } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
-import { aiRenovationPlan, type RenoProposal } from "@/lib/ai";
-import { lastAnswer } from "@/lib/aiCache";
-import { euroCents, FAL_COST } from "@/lib/fal";
 import { newId } from "@/lib/rooms";
 import {
   autoPlan,
@@ -15,7 +12,6 @@ import {
   renovationOf,
   renovationText,
   renoTotals,
-  similarTask,
   suggestions,
   taskEnd,
   taskFromSuggestion,
@@ -163,7 +159,6 @@ export function RenovationView() {
         </div>
       )}
 
-      <AiPlan />
       <Suggestions project={project} />
 
       {r.tasks.length > 0 ? (
@@ -244,7 +239,7 @@ export function RenovationView() {
             <I icon={Wrench} size={28} />
           </span>
           <strong>Nog geen klussen</strong>
-          <span className="small">Kies hierboven wat vaak nodig is in dit huis, laat de AI een plan maken, of voeg zelf een klus toe.</span>
+          <span className="small">Kies hierboven wat vaak nodig is in dit huis, of voeg zelf een klus toe.</span>
           <button className="accent" onClick={() => add()}>
             <I icon={Plus} /> Klus toevoegen
           </button>
@@ -306,123 +301,6 @@ function Suggestions({ project, roomId, compact }: { project: Project; roomId?: 
   );
 }
 export { Suggestions as RenoSuggestions };
-
-const lastPlan = lastAnswer<RenoProposal[]>("reno-plan");
-
-/** ✨ The AI looks at the photos, the description, build year and energy label. */
-function AiPlan() {
-  const { project, update, fal, toast } = useApp();
-  const key = project.listing?.url ?? "";
-  const [plan, setPlanState] = useState<RenoProposal[] | null>(() => lastPlan.get(key) ?? null);
-  const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
-  const tasks = renovationOf(project).tasks;
-  const titles = new Set(tasks.map((x) => x.title.toLowerCase()));
-  // Already on the list: the same title, or a job of the same kind in the same room.
-  const have = { has: (title: string, p?: RenoProposal) => titles.has(title.toLowerCase()) || (!!p && !!similarTask(tasks, p.kind, p.roomIds?.[0])) };
-  if (!fal || !project.listing) return null;
-
-  const toTask = (p: RenoProposal): Task => ({
-    id: newId(),
-    title: p.title,
-    kind: p.kind,
-    roomIds: p.roomIds ?? [],
-    who: p.who,
-    status: "idee",
-    estimate: p.estimate,
-    quotes: [],
-    days: p.days,
-    beforeMove: p.beforeMove,
-    note: "",
-    why: p.why,
-    addedAt: Date.now(),
-    source: "ai",
-  });
-
-  async function run() {
-    setError("");
-    setBusy("Foto's bekijken…");
-    try {
-      const list = await aiRenovationPlan(project, (m) => m && setBusy(m.includes("bezig") ? `Foto's bekijken… ${m.match(/\d+ s/)?.[0] ?? ""}` : m));
-      lastPlan.set(key, list);
-      setPlanState(list);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy("");
-    }
-  }
-
-  const open = plan?.filter((p) => !have.has(p.title, p)) ?? [];
-  return (
-    <div className="card ai-card stack">
-      <div className="card-head">
-        <div className="title" style={{ alignItems: "flex-start" }}>
-          <span className="icon-badge accent">
-            <I icon={Sparkle} size={20} />
-          </span>
-          <div className="stack tight" style={{ maxWidth: 560 }}>
-            <h3>Verbouwplan van de AI</h3>
-            <p className="small muted">De AI bekijkt de staat van vloeren, wanden, keuken en badkamer op de foto&apos;s, en leest bouwjaar, energielabel en omschrijving.</p>
-          </div>
-        </div>
-        <button className="accent" onClick={run} disabled={!!busy}>
-          {busy ? (
-            <>
-              <span className="spinner" /> {busy}
-            </>
-          ) : (
-            <>
-              <I icon={Sparkle} /> {plan ? "Opnieuw" : "Maak een plan"} <span className="cost">{euroCents(FAL_COST.renovation)}</span>
-            </>
-          )}
-        </button>
-      </div>
-      {error && (
-        <p className="error small" role="alert">
-          {error}
-        </p>
-      )}
-      {plan && (
-        <div className="stack tight">
-          {plan.map((p) => {
-            const added = have.has(p.title, p);
-            return (
-              <div className="suggestion" key={p.title}>
-                <span className="icon-badge">
-                  <RenoIcon kind={p.kind} size={20} />
-                </span>
-                <div className="grow stack tight">
-                  <strong className="small">{p.title}</strong>
-                  <span className="tiny muted">
-                    {p.roomIds?.length ? p.roomIds.map((id) => project.rooms.find((r) => r.id === id)?.name).filter(Boolean).join(", ") : "Hele huis"} · {p.who} {p.estimate ? `· ± ${euro(p.estimate)}` : ""} · {p.why}
-                  </span>
-                </div>
-                <button className="small soft" disabled={added} onClick={() => update(addTasks([toTask(p)]))} aria-label={added ? `${p.title} staat op de lijst` : `${p.title} op de lijst zetten`}>
-                  {added ? <I icon={Check} weight="bold" /> : <I icon={Plus} />}
-                  {added ? "" : "Klus"}
-                </button>
-              </div>
-            );
-          })}
-          {open.length > 1 && (
-            <button
-              className="small"
-              style={{ alignSelf: "flex-start" }}
-              onClick={() => {
-                update(addTasks(open.map(toTask)));
-                toast(`${open.length} klussen op de lijst`);
-              }}
-            >
-              <I icon={Plus} /> Alles toevoegen
-            </button>
-          )}
-          <p className="tiny muted">Prijzen zijn schattingen; vraag offertes aan voor de echte prijs.</p>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 

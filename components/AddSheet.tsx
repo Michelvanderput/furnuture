@@ -1,16 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { aiScreenshot } from "@/lib/ai";
 import { CATEGORIES, guessCategory } from "@/lib/categories";
-import { euroCents, FAL_COST } from "@/lib/fal";
-import { fileToDataUrl, firstWorkingThumb } from "@/lib/images";
+import { firstWorkingThumb } from "@/lib/images";
 import { addItems, addOrFill, makeOptionOf, patchItem, rivalOf } from "@/lib/items";
 import { itemFromLink, sameLink } from "@/lib/products";
 import { newId } from "@/lib/rooms";
 import { extractLinks, shortName } from "@/lib/shopping";
 import type { Category, Item } from "@/lib/types";
-import { Camera, LinkSimple, PencilSimple } from "@phosphor-icons/react";
+import { LinkSimple, PencilSimple } from "@phosphor-icons/react";
 import { useApp } from "./app";
 import { I } from "./icons";
 import { PasteButton } from "./PasteButton";
@@ -28,11 +26,11 @@ function useOptionAction() {
   });
 }
 
-type Mode = "link" | "screenshot" | "zelf";
+type Mode = "link" | "zelf";
 
 export function AddSheet({ roomId: initialRoom, alternativeOf, links: initialLinks, onClose }: { roomId?: string | null; alternativeOf?: string; links?: string[]; onClose: () => void }) {
   const optionAction = useOptionAction();
-  const { project, update, toast, fal } = useApp();
+  const { project, update, toast } = useApp();
   const main = alternativeOf ? project.items.find((i) => i.id === alternativeOf) : undefined;
   const [roomId, setRoomId] = useState<string | null>(main?.roomId ?? initialRoom ?? null);
   const [mode, setMode] = useState<Mode>("link");
@@ -60,7 +58,7 @@ export function AddSheet({ roomId: initialRoom, alternativeOf, links: initialLin
         failed.push(`${error} Niet toegevoegd.`);
         continue;
       }
-      if (error) failed.push(`${error} De link staat op je lijst; vul naam en prijs zelf in${fal ? " of gebruik een screenshot" : ""}.`);
+      if (error) failed.push(`${error} De link staat op je lijst; vul naam en prijs zelf in.`);
       added.push({ ...item, alternativeOf, must: main?.must });
     }
     setBusy("");
@@ -130,9 +128,6 @@ export function AddSheet({ roomId: initialRoom, alternativeOf, links: initialLin
           <button className={mode === "link" ? "on" : ""} onClick={() => setMode("link")}>
             <I icon={LinkSimple} /> Link
           </button>
-          <button className={mode === "screenshot" ? "on" : ""} onClick={() => setMode("screenshot")}>
-            <I icon={Camera} /> Screenshot
-          </button>
           <button className={mode === "zelf" ? "on" : ""} onClick={() => setMode("zelf")}>
             <I icon={PencilSimple} /> Zelf
           </button>
@@ -179,101 +174,8 @@ export function AddSheet({ roomId: initialRoom, alternativeOf, links: initialLin
         </div>
       )}
 
-      {mode === "screenshot" && <FromScreenshot roomId={roomId} alternativeOf={alternativeOf} onDone={onClose} />}
       {mode === "zelf" && <Manual roomId={roomId} alternativeOf={alternativeOf} onDone={onClose} />}
     </Sheet>
-  );
-}
-
-/** ✨ A screenshot of a product page (when a shop blocks reading it, or from Instagram or a store): the AI reads it. */
-function FromScreenshot({ roomId, alternativeOf, onDone }: { roomId: string | null; alternativeOf?: string; onDone: () => void }) {
-  const optionAction = useOptionAction();
-  const { project, update, toast, fal } = useApp();
-  const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
-  const [over, setOver] = useState(false);
-
-  async function read(file: File | undefined) {
-    if (!file) return;
-    setError("");
-    setBusy("Screenshot verkleinen…");
-    try {
-      const image = await fileToDataUrl(file, 1280);
-      const p = await aiScreenshot(image, setBusy);
-      const thumb = await fileToDataUrl(file, 360);
-      const item: Item = {
-        id: newId(),
-        roomId,
-        title: p.title,
-        url: p.url,
-        images: [],
-        thumb,
-        shop: p.shop,
-        price: p.price,
-        qty: 1,
-        category: p.category,
-        status: "idee",
-        note: "",
-        dims: p.dims,
-        addedAt: Date.now(),
-        source: "screenshot",
-        alternativeOf,
-      };
-      const before = project;
-      const { apply, replaced } = addOrFill([item]);
-      apply(project);
-      const taken = replaced[0]?.placeholder.title;
-      update(apply);
-      const rival = !taken && !alternativeOf ? rivalOf(project.items, item) : undefined;
-      toast(
-        taken ? `${shortName(p.title)} vervangt "${shortName(taken, 24)}"` : rival ? `${shortName(p.title, 28)} toegevoegd. Optie naast ${shortName(rival.title, 24)}?` : `${shortName(p.title, 40)} toegevoegd`,
-        () => update(() => before),
-        rival ? optionAction(item.id, rival) : undefined,
-      );
-      onDone();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy("");
-    }
-  }
-
-  if (!fal) {
-    return (
-      <p className="muted small">
-        Met AI (fal.ai) lees je een product uit een screenshot: handig als een webshop het ophalen blokkeert. Stel fal.ai in via ⚙︎ Instellingen.
-      </p>
-    );
-  }
-  return (
-    <div className="stack">
-      <label
-        className={`dropzone${over ? " over" : ""}`}
-        onDragOver={(e) => (e.preventDefault(), setOver(true))}
-        onDragLeave={() => setOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setOver(false);
-          read(e.dataTransfer.files[0]);
-        }}
-      >
-        {busy ? (
-          <span className="status-line">
-            <span className="spinner" /> {busy}
-          </span>
-        ) : (
-          <>
-            <span className="icon-badge accent">
-              <I icon={Camera} size={22} />
-            </span>
-            <strong>Kies of sleep een screenshot</strong>
-            <div className="tiny">De AI leest naam, prijs, winkel en maten ({euroCents(FAL_COST.screenshot)}).</div>
-          </>
-        )}
-        <input type="file" accept="image/*" hidden onChange={(e) => read(e.target.files?.[0])} />
-      </label>
-      {error && <p className="error small">{error}</p>}
-    </div>
   );
 }
 

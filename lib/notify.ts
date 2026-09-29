@@ -56,7 +56,7 @@ export function activity(before: Before, changes: Changes, member: string): Note
     const old = before.items.get(r.id);
     const title = shortName(str(r.title), 40);
     if (!old) {
-      // New on the list (placeholders from the AI count too, but only as a number).
+      // New on the list (from the standard list too, but then only as a number).
       added++;
       firstAdded ??= r;
       continue;

@@ -12,10 +12,10 @@ import { useApp } from "./app";
 import { HouseHero } from "./HouseView";
 import { PlanningCard } from "./Delivery";
 import { NotificationSuggestion } from "./Notifications";
+import { HouseStarter } from "./StandardList";
 import { I, RoomIcon } from "./icons";
 import { Img } from "./Img";
 import { ItemRow } from "./ItemRow";
-import { RoomDetect, roomsRecognised } from "./RoomDetect";
 import { BudgetBar, EuroInput, Ring } from "./ui";
 
 export function Dashboard() {
@@ -38,9 +38,11 @@ export function Dashboard() {
       <HouseHero />
 
       {/* What to do next comes first; the figures follow once there is something to count. */}
-      <RoomDetect compact />
       <NextSteps project={project} />
       <NotificationSuggestion />
+      <div className="starter">
+        <HouseStarter project={project} />
+      </div>
 
       <div className="grid stats">
         <div className="stat">
@@ -237,13 +239,12 @@ function jumpTo(selector: string) {
 
 /** A short to-do for a fresh project; disappears when everything is done. */
 function NextSteps({ project }: { project: Project }) {
-  const { openAdd, fal } = useApp();
   const r = renovationOf(project);
   const steps = [
-    { done: roomsRecognised(project.rooms), label: "Kamers controleren", hint: fal ? "laat de AI ze herkennen" : "namen, m² en foto's", href: "#/woning" },
+    { done: project.rooms.some((r) => r.area), label: "Kamers controleren", hint: "namen, m² en foto's", href: "#/kamers" },
     { done: !!(r.keyDate && r.moveDate), label: "Sleutel en verhuisdag", hint: "voor de planning", action: () => jumpTo(".planning .countdowns") },
     { done: project.budget !== undefined, label: "Budget instellen", hint: "voor de inrichting", action: () => jumpTo(".budget-card input") },
-    { done: project.items.length > 0, label: "Eerste product toevoegen", hint: "plak een webshoplink", action: () => openAdd({ roomId: project.rooms[0]?.id ?? null }) },
+    { done: project.items.length > 0, label: "Lijst per kamer maken", hint: "standaardlijst of een webshoplink", action: () => jumpTo(".starter") },
     { done: project.items.some((i) => i.status !== "idee"), label: "Iets kiezen of bestellen", hint: "tik op de status" },
   ];
   if (steps.every((s) => s.done)) return null;

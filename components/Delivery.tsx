@@ -19,7 +19,7 @@ const roomName = (p: Project, id: string | null) => p.rooms.find((r) => r.id ===
 
 /** Delivery time, order date and expected delivery, with advice on when to order. */
 export function DeliveryFields({ item }: { item: Item }) {
-  const { project, update } = useApp();
+  const { update } = useApp();
   const set = (patch: Partial<Item>) => update(patchItem(item.id, patch));
   const [unit, setUnit] = useState<1 | 7>(item.leadDays && item.leadDays >= 14 && item.leadDays % 7 === 0 ? 7 : item.leadDays ? 1 : 7);
   const ordered = item.status === "besteld" || item.status === "binnen";

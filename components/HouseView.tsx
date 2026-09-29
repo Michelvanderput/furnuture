@@ -7,7 +7,6 @@ import { newId } from "@/lib/rooms";
 import type { HouseFacts, Photo, RoomType } from "@/lib/types";
 import { useApp } from "./app";
 import { ArrowSquareOut, Plus } from "@phosphor-icons/react";
-import { RoomDetect } from "./RoomDetect";
 import { I, RoomIcon } from "./icons";
 import { Img } from "./Img";
 import { Lightbox } from "./ui";
@@ -71,7 +70,6 @@ export function HouseView() {
     <section className="page">
       <HouseHero />
 
-      <RoomDetect />
 
       {l?.facts && Object.keys(l.facts).length > 0 && (
         <div className="card stack">

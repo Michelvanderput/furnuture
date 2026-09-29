@@ -6,7 +6,6 @@ import { houseLink } from "@/lib/houses";
 import { ArrowsLeftRight, CloudCheck, DeviceMobile, DownloadSimple, House, LinkSimple, UploadSimple } from "@phosphor-icons/react";
 import { useApp } from "./app";
 import { I } from "./icons";
-import { FalSetting } from "./FalSetting";
 import { NotificationSettings } from "./Notifications";
 import { EuroInput, Sheet } from "./ui";
 
@@ -77,7 +76,7 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
 
       <div className="stack tight">
         <label className="field">
-          Onze stijl <span className="tiny">(de AI houdt er rekening mee)</span>
+          Onze stijl <span className="tiny">(geheugensteun bij het kiezen)</span>
           <input placeholder="Bijv. Scandinavisch, licht hout, groen als accent" value={project.style ?? ""} onChange={(e) => update((p) => ({ ...p, style: e.target.value || undefined }))} />
         </label>
         <div className="row wrap-row" style={{ gap: 6 }}>
@@ -88,9 +87,6 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
           ))}
         </div>
       </div>
-
-      <hr className="divider" />
-      <FalSetting />
       <hr className="divider" />
 
       <div className="stack tight">

@@ -24,8 +24,6 @@ export interface App {
   /** Opens the settings (budget, notifications…). */
   openSettings: () => void;
   toast: (text: string, undo?: () => void, action?: ToastAction) => void;
-  /** fal.ai is set up: the ✨ features are available. */
-  fal: boolean;
 }
 
 export const AppContext = createContext<App | null>(null);

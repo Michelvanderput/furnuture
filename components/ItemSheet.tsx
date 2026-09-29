@@ -13,7 +13,7 @@ import { I, STATUS_ICON } from "./icons";
 import { Img } from "./Img";
 import { DeliveryFields } from "./Delivery";
 import { AskButton } from "./Notifications";
-import { ProductFinder } from "./ProductFinder";
+import { ShopSearch } from "./StandardList";
 import { ItemThumb, Price } from "./ItemRow";
 import { EuroInput, Sheet, Stepper } from "./ui";
 
@@ -80,12 +80,12 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
   };
 
   const findCard = (
-          <div className="card ai-card stack">
+          <div className="card warm stack">
             <div className="stack tight">
               <h2 style={{ fontSize: 20 }}>Nog te vinden</h2>
               {item.why && <p className="small muted">{item.why}</p>}
             </div>
-            <ProductFinder item={item} />
+            <ShopSearch item={item} label="Zoek bij" />
             <form
               className="stack tight"
               onSubmit={(e) => {
@@ -94,7 +94,7 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
               }}
             >
               <label className="field" htmlFor="own-link">
-                Zelf iets gevonden? Plak de link
+                Iets gevonden? Plak de link: foto, prijs en maten komen vanzelf
               </label>
               <div className="row">
                 <input id="own-link" type="url" inputMode="url" placeholder="https://…" value={link} onChange={(e) => setLink(e.target.value)} />
@@ -368,7 +368,7 @@ export function ItemSheet({ id, onClose }: { id: string; onClose: () => void }) 
               </table>
             </div>
           )}
-          {!isPlaceholder(item) && <ProductFinder item={item} />}
+          {!isPlaceholder(item) && <ShopSearch item={item} label="Vergelijk bij andere winkels" />}
         </div>
       )}
     </Sheet>

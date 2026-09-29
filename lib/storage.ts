@@ -7,8 +7,8 @@ import type { Project } from "./types";
  * items, settings) and only the parts that changed are written; updates are
  * immutable, so "changed" is a cheap reference check.
  *
- * A second store, "cache", keeps AI answers (see aiCache.ts), so the same question
- * is never paid for twice.
+ * A second store, "cache", held AI answers in earlier versions; it stays (unused)
+ * so the database version does not change.
  */
 const DB = "furnuture";
 const STORE = "kv";

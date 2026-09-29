@@ -1,10 +1,7 @@
 "use client";
 
-import { Camera, Check, Copy, Plus, Receipt, Trash } from "@phosphor-icons/react";
+import { Check, Copy, Plus, Receipt, Trash } from "@phosphor-icons/react";
 import { useState } from "react";
-import { aiQuote } from "@/lib/ai";
-import { euroCents, FAL_COST } from "@/lib/fal";
-import { fileToDataUrl } from "@/lib/images";
 import { cheapestQuote, KIND_ORDER, KINDS, RENO_STATUS, renovationOf, taskCost, taskEnd } from "@/lib/renovation";
 import { newId } from "@/lib/rooms";
 import { euro } from "@/lib/shopping";
@@ -16,14 +13,12 @@ import { AskButton } from "./Notifications";
 import { EuroInput, Sheet, Stepper } from "./ui";
 
 export function TaskSheet({ id, onClose }: { id: string; onClose: () => void }) {
-  const { project, update, toast, fal } = useApp();
+  const { project, update, toast } = useApp();
   const task = renovationOf(project).tasks.find((t) => t.id === id)!;
   const set = (patch: Partial<Task>) => update(patchTask(task.id, patch));
   const c = taskCost(task);
   const cheapest = cheapestQuote(task);
   const [quote, setQuote] = useState({ company: "", amount: undefined as number | undefined, note: "" });
-  const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
 
   // A new job without a name is not kept.
   const close = () => {
@@ -33,21 +28,6 @@ export function TaskSheet({ id, onClose }: { id: string; onClose: () => void }) 
 
   const toggleRoom = (roomId: string) =>
     set({ roomIds: task.roomIds.includes(roomId) ? task.roomIds.filter((r) => r !== roomId) : [...task.roomIds, roomId] });
-
-  async function readQuote(file: File | undefined) {
-    if (!file) return;
-    setError("");
-    setBusy("Offerte lezen…");
-    try {
-      const q = await aiQuote(await fileToDataUrl(file, 1600), (m) => m && setBusy(m));
-      update(addQuote(task.id, { id: newId(), company: q.company, amount: q.amount, note: q.note, contact: q.contact, addedAt: Date.now() }));
-      toast(`Offerte van ${q.company}: ${euro(q.amount, true)}`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy("");
-    }
-  }
 
   return (
     <Sheet
@@ -173,18 +153,7 @@ export function TaskSheet({ id, onClose }: { id: string; onClose: () => void }) 
               <h2 style={{ fontSize: 20 }}>Offertes</h2>
               <p className="tiny muted">Vraag er minstens drie aan en kies er één: dan staat de prijs vast.</p>
             </div>
-            {fal && (
-              <label className={`btn ai small${busy ? " is-busy" : ""}`}>
-                {busy ? <span className="spinner" /> : <I icon={Camera} />} {busy || "Offerte lezen"} {!busy && <span className="cost">{euroCents(FAL_COST.quote)}</span>}
-                <input type="file" accept="image/*" hidden onChange={(e) => readQuote(e.target.files?.[0])} disabled={!!busy} />
-              </label>
-            )}
           </div>
-          {error && (
-            <p className="small error" role="alert">
-              {error}
-            </p>
-          )}
           {task.quotes.length > 0 && (
             <div className="items">
               {[...task.quotes]

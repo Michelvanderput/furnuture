@@ -25,7 +25,6 @@ import {
   Plant,
   Rug,
   Shower,
-  Sparkle,
   Stack,
   Stairs,
   Table,
