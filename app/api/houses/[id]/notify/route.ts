@@ -17,7 +17,7 @@ export async function POST(req: Request, { params }: Ctx) {
   try {
     const { id } = await params;
     if (!isUuid(id)) throw new DbError("Onbekende woning", 404);
-    const b = (await req.json()) as { kind?: string; device?: string; member?: string; open?: string; about?: string; message?: string };
+    const b = (await req.json()) as { kind?: string; device?: string; member?: string; open?: string; about?: string; message?: string; delay?: number };
     const house = await houseRow(id, ["name"]);
     if (!house) throw new DbError("Woning niet gevonden", 404);
     const houseName = String(house.name);
@@ -26,7 +26,10 @@ export async function POST(req: Request, { params }: Ctx) {
 
     if (b.kind === "test") {
       if (!device) throw new DbError("Onbekend apparaat", 400);
-      const r = await sendToHouse(id, { title: "Meldingen staan aan", body: `Je krijgt hier berichten over ${houseName}.` }, { kind: "test", houseName, onlyDevice: device, device, member });
+      // Time to leave the app: iOS shows no banner while the web app is in front.
+      const wait = Math.min(Math.max(Number(b.delay) || 0, 0), 8);
+      if (wait) await new Promise((r) => setTimeout(r, wait * 1000));
+      const r = await sendToHouse(id, { title: "Meldingen staan aan", body: `Je krijgt hier berichten over ${houseName}.` }, { kind: "test", houseName, onlyDevice: device, device, member, log: false });
       return NextResponse.json(r);
     }
 

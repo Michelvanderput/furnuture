@@ -12,8 +12,10 @@ export interface Prefs {
   ask: boolean;
   updates: boolean;
   daily: boolean;
+  /** When the planning of the day arrives ("08:00", this device's time). */
+  dailyTime: string;
 }
-export const DEFAULT_PREFS: Prefs = { ask: true, updates: true, daily: true };
+export const DEFAULT_PREFS: Prefs = { ask: true, updates: true, daily: true, dailyTime: "08:00" };
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -50,7 +52,10 @@ export const memberName = {
 const prefsKey = (house: HouseRef) => `furnuture:push:${house.key}`;
 /** This device's notification settings for a house (null: notifications not turned on). */
 export const devicePrefs = {
-  get: (house: HouseRef) => read<Prefs | null>(prefsKey(house), null),
+  get: (house: HouseRef) => {
+    const p = read<Partial<Prefs> | null>(prefsKey(house), null);
+    return p ? { ...DEFAULT_PREFS, ...p } : null;
+  },
   set: (house: HouseRef, prefs: Prefs | null) => (prefs ? write(prefsKey(house), prefs) : localStorage.removeItem(prefsKey(house))),
 };
 
@@ -73,6 +78,16 @@ export function support(): Support {
   const standalone = matchMedia("(display-mode: standalone)").matches || (navigator as { standalone?: boolean }).standalone === true;
   const push = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
   return { push, ios, standalone, permission: "Notification" in window ? Notification.permission : "unsupported" };
+}
+
+/** What the notifications card shows. */
+export type PushStatus = "install" | "unsupported" | "denied" | "on" | "off";
+export function pushStatus(house: HouseRef): PushStatus {
+  const s = support();
+  if (s.ios && !s.standalone) return "install";
+  if (!s.push) return "unsupported";
+  if (s.permission === "denied") return "denied";
+  return s.permission === "granted" && devicePrefs.get(house) ? "on" : "off";
 }
 
 /** The service worker, registered once (it only handles notifications, not caching). */
@@ -118,8 +133,44 @@ export async function enablePush(house: HouseRef, prefs: Prefs): Promise<void> {
   } catch (e) {
     throw new Error(`Dit apparaat kon zich niet aanmelden voor meldingen (${e instanceof Error ? e.message : e}). Probeer het in de app op je beginscherm, of in Safari of Chrome.`);
   }
-  await post(`/api/houses/${house.id}/push`, { device: deviceId(), member: memberName.get(), subscription: sub.toJSON(), prefs });
+  await register(house, sub, prefs);
+}
+
+/** Tells the server about this device: its subscription, name, choices, time zone and time. */
+async function register(house: HouseRef, sub: PushSubscription, prefs: Prefs) {
+  await post(`/api/houses/${house.id}/push`, {
+    device: deviceId(),
+    member: memberName.get(),
+    subscription: sub.toJSON(),
+    prefs: { ask: prefs.ask, updates: prefs.updates, daily: prefs.daily },
+    dailyTime: prefs.dailyTime,
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "Europe/Amsterdam",
+  });
   devicePrefs.set(house, prefs);
+}
+
+/**
+ * On opening the app: iOS sometimes drops a subscription (an update, storage cleared).
+ * Make a new one when it is gone, and tell the server again (also a new name or time zone).
+ */
+export async function ensurePush(house: HouseRef): Promise<void> {
+  const prefs = devicePrefs.get(house);
+  if (!prefs || !house.id || !support().push) return;
+  if (Notification.permission !== "granted") {
+    // Turned off in the iPhone settings: this device no longer gets anything.
+    if (Notification.permission === "denied") await disablePush(house);
+    return;
+  }
+  try {
+    const { publicKey } = await serverPush();
+    if (!publicKey) return;
+    await registerWorker();
+    const reg = await navigator.serviceWorker.ready;
+    const sub = (await reg.pushManager.getSubscription()) ?? (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes(publicKey) }));
+    await register(house, sub, prefs);
+  } catch {
+    // offline: next time
+  }
 }
 
 /** Saves changed settings (or a new name) for a device that already has notifications on. */
@@ -127,16 +178,27 @@ export async function updatePush(house: HouseRef, prefs: Prefs): Promise<void> {
   const reg = await navigator.serviceWorker.getRegistration();
   const sub = await reg?.pushManager.getSubscription();
   if (!sub || !house.id) return enablePush(house, prefs);
-  await post(`/api/houses/${house.id}/push`, { device: deviceId(), member: memberName.get(), subscription: sub.toJSON(), prefs });
-  devicePrefs.set(house, prefs);
+  await register(house, sub, prefs);
 }
 
 export async function disablePush(house: HouseRef): Promise<void> {
   if (house.id) await fetch(`/api/houses/${house.id}/push?device=${deviceId()}`, { method: "DELETE" }).catch(() => undefined);
   devicePrefs.set(house, null);
+  // Other houses on this device share the subscription: only unsubscribe when none uses it.
+  const stillUsed = Object.keys(localStorage).some((k) => k.startsWith("furnuture:push:"));
+  if (!stillUsed) {
+    const sub = await (await navigator.serviceWorker?.getRegistration())?.pushManager.getSubscription();
+    await sub?.unsubscribe().catch(() => undefined);
+  }
 }
 
-export const sendTest = (house: HouseRef) => post(`/api/houses/${house.id}/notify`, { kind: "test", device: deviceId(), member: memberName.get() });
+/** A test to this device, after a few seconds: time to go to the home screen (iOS shows no banner while the app is open). */
+export const sendTest = (house: HouseRef, delay = 5) => post(`/api/houses/${house.id}/notify`, { kind: "test", device: deviceId(), member: memberName.get(), delay });
+
+/** The red number on the app icon goes when the app is opened. */
+export function clearBadge() {
+  (navigator as { clearAppBadge?: () => Promise<void> }).clearAppBadge?.().catch(() => undefined);
+}
 
 /** "Kun je hier even naar kijken?" to the other devices of the house. */
 export const askToLook = (house: HouseRef, open: string, about: string, message: string) =>

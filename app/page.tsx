@@ -38,7 +38,7 @@ import { clearImportHash, currentHouse, houseKey, importFromHash, leaveHouse, re
 import { href, useRoute, type Route } from "@/lib/route";
 import { extractLinks } from "@/lib/shopping";
 import { addTasks } from "@/lib/tasks";
-import { registerWorker } from "@/lib/push";
+import { clearBadge, ensurePush, registerWorker } from "@/lib/push";
 import { useProject, type SyncState } from "@/lib/useProject";
 
 const SYNC_TEXT: Record<SyncState, string> = {
@@ -77,6 +77,11 @@ function Root() {
   useEffect(() => {
     registerWorker();
     const onMessage = (e: MessageEvent) => {
+      // A notification arrived while the app is open: show it here, and refresh the bell.
+      if (e.data?.type === "push") {
+        window.dispatchEvent(new CustomEvent("furnuture:push", { detail: e.data }));
+        return;
+      }
       if (e.data?.type !== "open") return;
       const url = new URL(e.data.url, location.origin);
       const name = url.searchParams.get("woning");
@@ -136,6 +141,23 @@ function Home({ house, open, onOpened, onLeave }: { house: HouseRef; open?: stri
 
   useEffect(() => void falEnabled().then(setFal), []);
 
+  // Notifications: repair a lost subscription, clear the icon's badge, show pushes that arrive while open.
+  useEffect(() => {
+    ensurePush(house);
+    clearBadge();
+    const onVisible = () => document.visibilityState === "visible" && clearBadge();
+    const onPush = (e: Event) => {
+      const d = (e as CustomEvent<{ title: string; body: string }>).detail;
+      toast(d.body ? `${d.title} · ${d.body}` : d.title);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("furnuture:push", onPush);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("furnuture:push", onPush);
+    };
+  }, [house, toast]);
+
   // Opened from a notification: the product or job it is about (once the house is loaded).
   useEffect(() => {
     if (!open || !loaded) return;
@@ -193,9 +215,10 @@ function Home({ house, open, onOpened, onLeave }: { house: HouseRef; open?: stri
   const openItem = useCallback((id: string) => setItem(id), []);
   const openTask = useCallback((id: string) => setTask(id), []);
   const openAdd = useCallback((opts?: { roomId?: string | null; alternativeOf?: string; links?: string[] }) => setAdd(opts ?? {}), []);
+  const openSettings = useCallback(() => setSettings(true), []);
   const app: App = useMemo(
-    () => ({ house, sync, syncError, leave: onLeave, project, update, openItem, openAdd, openTask, toast, fal }),
-    [house, sync, syncError, onLeave, project, update, openItem, openAdd, openTask, toast, fal],
+    () => ({ house, sync, syncError, leave: onLeave, project, update, openItem, openAdd, openTask, openSettings, toast, fal }),
+    [house, sync, syncError, onLeave, project, update, openItem, openAdd, openTask, openSettings, toast, fal],
   );
 
   if (!loaded) return <div className="splash">{house.name} laden…</div>;

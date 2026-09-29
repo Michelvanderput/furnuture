@@ -162,6 +162,12 @@ export interface Subscription {
   auth: string;
   member: string | null;
   prefs: Partial<PushPrefs> | null;
+  /** IANA time zone of the device, e.g. "Europe/Amsterdam". */
+  tz?: string;
+  /** "08:00": when the planning of the day arrives, local time. */
+  daily_time?: string;
+  /** The local day ("2026-10-01") it was last sent. */
+  last_daily?: string | null;
 }
 
 export async function saveSubscription(houseId: string, s: Subscription & { user_agent?: string }): Promise<void> {
@@ -181,15 +187,37 @@ export async function removeEndpoint(houseId: string, endpoint: string): Promise
   await rest(`push_subscriptions?house_id=eq.${q(houseId)}&endpoint=eq.${q(endpoint)}`, { method: "DELETE", prefer: "return=minimal" });
 }
 
+const SUB_COLUMNS = "id,endpoint,p256dh,auth,member,prefs,tz,daily_time,last_daily";
+
 export async function subscriptionsOf(houseId: string): Promise<Subscription[]> {
-  const res = await rest(`push_subscriptions?house_id=eq.${q(houseId)}&select=id,endpoint,p256dh,auth,member,prefs`);
+  const res = await rest(`push_subscriptions?house_id=eq.${q(houseId)}&select=${SUB_COLUMNS}`);
   return (await res.json()) as Subscription[];
 }
 
-/** Houses where at least one device wants notifications. */
-export async function housesWithSubscriptions(): Promise<string[]> {
-  const res = await rest("push_subscriptions?select=house_id");
-  return [...new Set(((await res.json()) as { house_id: string }[]).map((r) => r.house_id))];
+/** Every device that wants notifications, with its house (for the cron). */
+export async function allSubscriptions(): Promise<(Subscription & { house_id: string })[]> {
+  const res = await rest(`push_subscriptions?select=house_id,${SUB_COLUMNS}`);
+  return (await res.json()) as (Subscription & { house_id: string })[];
+}
+
+export async function markDailySent(houseId: string, id: string, day: string): Promise<void> {
+  await rest(`push_subscriptions?house_id=eq.${q(houseId)}&id=eq.${q(id)}`, { method: "PATCH", prefer: "return=minimal", body: JSON.stringify({ last_daily: day }) });
+}
+
+export async function countSubscriptions(houseId: string): Promise<number> {
+  const res = await rest(`push_subscriptions?house_id=eq.${q(houseId)}&select=id`, { headers: { Prefer: "count=exact", Range: "0-0" } });
+  return Number(res.headers.get("content-range")?.split("/")[1] ?? 0);
+}
+
+export async function logCronRun(report: unknown): Promise<void> {
+  await rest("cron_runs", { method: "POST", prefer: "return=minimal", body: JSON.stringify({ report }) });
+  // A week is plenty to see whether the clock ticks.
+  await rest(`cron_runs?ran_at=lt.${q(new Date(Date.now() - 7 * 86_400_000).toISOString())}`, { method: "DELETE", prefer: "return=minimal" }).catch(() => undefined);
+}
+
+export async function lastCronRun(): Promise<{ ran_at: string; report: unknown } | null> {
+  const res = await rest("cron_runs?select=ran_at,report&order=ran_at.desc&limit=1");
+  return ((await res.json()) as { ran_at: string; report: unknown }[])[0] ?? null;
 }
 
 export interface NotificationRow {

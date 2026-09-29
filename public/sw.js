@@ -10,14 +10,22 @@ self.addEventListener("push", (event) => {
   } catch {
     data = { title: event.data ? event.data.text() : "furnuture" };
   }
+  const title = data.title || "furnuture";
   event.waitUntil(
-    self.registration.showNotification(data.title || "furnuture", {
-      body: data.body || "",
-      icon: "/apple-icon",
-      badge: "/apple-icon",
-      tag: data.tag,
-      data: { url: data.url || "/" },
-    }),
+    Promise.all([
+      // Always shown (iOS stops sending pushes to an app that receives them silently).
+      self.registration.showNotification(title, {
+        body: data.body || "",
+        icon: "/apple-icon",
+        badge: "/apple-icon",
+        tag: data.tag,
+        data: { url: data.url || "/" },
+      }),
+      // An open app shows it too (iOS shows no banner while the app is in front) and refreshes the bell.
+      self.clients.matchAll({ type: "window" }).then((list) => list.forEach((c) => c.postMessage({ type: "push", title, body: data.body || "", url: data.url }))),
+      // The red number on the app icon; cleared when the app opens.
+      self.navigator && self.navigator.setAppBadge ? self.navigator.setAppBadge(1).catch(() => {}) : null,
+    ]),
   );
 });
 

@@ -35,12 +35,19 @@ Met online opslag kan de app meldingen sturen:
 
 - **Vraag om mee te kijken**: bij een product of klus; je partner krijgt "Sanne vraagt of je naar Hoekbank MOLLY wilt kijken" met je bericht, en de melding opent dat product.
 - **Updates van je partner**: iets besteld, gekozen of binnen, een klus begonnen of klaar, een offerte gekozen, de planning verschoven, een nieuwe sleutel- of verhuisdatum. Eén melding per opslag, nooit over je eigen wijzigingen.
-- **Planning van de dag** (8:00, Vercel Cron): wat je moet bestellen (een week, twee dagen en op de laatste dag), wat morgen bezorgd wordt, welke klus morgen begint, en de sleutel en verhuizing die eraan komen.
-- Het belletje in de app toont de laatste meldingen, ook op apparaten zonder meldingen.
+- **Planning van de dag**, op de tijd die je per apparaat kiest (standaard 8:00, in je eigen tijdzone): wat je moet bestellen (een week, twee dagen en op de laatste dag), wat morgen bezorgd wordt, welke klus morgen begint, en de sleutel en verhuizing die eraan komen. Alleen op dagen dat er iets is, nooit twee keer.
+- Het belletje in de app toont de laatste meldingen, ook op apparaten zonder meldingen. Komt er een melding binnen terwijl de app open is, dan zie je hem in de app (iOS toont dan geen banner); het app-icoon krijgt een badge tot je de app opent.
+- Bij elke start herstelt de app een verloren abonnement (iOS raakt dat soms kwijt na een update) en stuurt naam, tijd en tijdzone opnieuw mee.
 
-Op een iPhone/iPad werken meldingen alleen voor de app op het beginscherm (iOS 16.4+): Safari → Deel → Zet op beginscherm, open de app daar, ⚙︎ → Meldingen aanzetten.
+Op een iPhone/iPad werken meldingen alleen voor de app op het beginscherm (iOS 16.4+): Safari → Deel → Zet op beginscherm, open de app daar, ⚙︎ → Meldingen aanzetten → Testmelding (die komt na 5 seconden: ga naar je beginscherm).
 
-**Instellen:** tabellen uit `supabase/migrations/…_notifications.sql`; in Vercel `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (bijv. `mailto:jij@voorbeeld.nl`) en `CRON_SECRET` (Vercel stuurt die mee naar `/api/cron/daily`, zie `vercel.json`). Sleutels maken: `npx web-push generate-vapid-keys`.
+**Instellen:**
+1. Tabellen: `supabase/migrations/…_notifications.sql` en `…_push_schedule.sql`.
+2. Vercel → Environment Variables: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` (maak ze met `npx web-push generate-vapid-keys`), `VAPID_SUBJECT` (`mailto:jij@voorbeeld.nl`) en `CRON_SECRET` (lange willekeurige tekst). Redeploy.
+3. Klok: `vercel.json` laat Vercel de cron één keer per dag draaien (gratis plan, rond 09:00 in de zomer, 08:00 in de winter); een gemiste herinnering wordt die dag tot 22:00 nog verstuurd. Voor meldingen precies op je eigen tijd: maak een gratis job op [cron-job.org](https://cron-job.org) die elke 5 minuten `https://<jouw-app>.vercel.app/api/cron/daily?key=<CRON_SECRET>` aanroept.
+4. Controleren: `/api/cron/daily?key=<CRON_SECRET>&status=1` (laatste run, per apparaat de lokale tijd en wanneer het laatst verstuurd is) en `&test=1` (testmelding naar alle apparaten, met het antwoord van Apple/Google).
+
+Veiligheid: de server stuurt alleen naar de echte pushdiensten (Apple, Google, Mozilla, Microsoft), maximaal 20 apparaten per woning, maximaal 30 "kijk even"-vragen per uur.
 
 ## ✨ AI (fal.ai, optioneel)
 

@@ -1,11 +1,11 @@
 import webpush from "web-push";
-import { DEFAULT_PREFS, logNotification, removeEndpoint, subscriptionsOf, type PushPrefs } from "./db/supabase";
+import { DEFAULT_PREFS, logNotification, removeEndpoint, subscriptionsOf, type PushPrefs, type Subscription } from "./db/supabase";
 import { noteUrl, type Note } from "./notify";
 
 /**
- * Web Push (works on iPhone and iPad for apps on the home screen, iOS 16.4+, and on
- * Android and desktop browsers). The keys are set in Vercel: VAPID_PUBLIC_KEY,
- * VAPID_PRIVATE_KEY and VAPID_SUBJECT (a mailto: address). Server only.
+ * Web Push (iPhone and iPad for apps on the home screen, iOS 16.4+; Android; desktop
+ * browsers). Keys in Vercel: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT
+ * (mailto:…). Server only.
  */
 
 function keys() {
@@ -16,6 +16,52 @@ function keys() {
 }
 export const pushConfigured = () => !!keys();
 export const publicKey = () => keys()?.publicKey ?? null;
+export const vapidSubject = () => keys()?.subject ?? null;
+
+/**
+ * Only the real push services: the server posts to this address, so anything else
+ * would let someone make it call any URL. PUSH_EXTRA_HOSTS (comma separated) adds
+ * hosts for testing.
+ */
+const PUSH_HOSTS = /(^|\.)(push\.apple\.com|fcm\.googleapis\.com|googleapis\.com|push\.services\.mozilla\.com|notify\.windows\.com)$/;
+export function validEndpoint(endpoint: unknown): endpoint is string {
+  if (typeof endpoint !== "string" || endpoint.length > 1000) return false;
+  try {
+    const u = new URL(endpoint);
+    const extra = (process.env.PUSH_EXTRA_HOSTS ?? "").split(",").map((h) => h.trim()).filter(Boolean);
+    return u.protocol === "https:" && (PUSH_HOSTS.test(u.hostname) || extra.includes(u.host));
+  } catch {
+    return false;
+  }
+}
+
+export interface Payload {
+  title: string;
+  body: string;
+  url: string;
+  tag: string;
+}
+
+/** Sends to one device. "gone" = the push service no longer knows it (app removed, notifications off). */
+export async function sendTo(houseId: string, s: Subscription, payload: Payload, urgency: "normal" | "high" = "normal"): Promise<{ ok: boolean; gone?: boolean; status?: number; error?: string }> {
+  const k = keys();
+  if (!k) return { ok: false, error: "VAPID-sleutels ontbreken" };
+  if (!validEndpoint(s.endpoint)) return { ok: false, error: "onbekende pushdienst" };
+  webpush.setVapidDetails(k.subject, k.publicKey, k.privateKey);
+  try {
+    const r = await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, JSON.stringify(payload), {
+      // A reminder of this morning is not useful tonight; a question from your partner is, for a day.
+      TTL: payload.tag.startsWith("daily") ? 6 * 3600 : 24 * 3600,
+      urgency,
+    });
+    return { ok: true, status: r.statusCode };
+  } catch (e) {
+    const status = (e as { statusCode?: number }).statusCode;
+    const gone = status === 404 || status === 410;
+    if (gone) await removeEndpoint(houseId, s.endpoint).catch(() => undefined);
+    return { ok: false, gone, status, error: String((e as { body?: string }).body || (e as Error).message).slice(0, 300) };
+  }
+}
 
 export interface SendOptions {
   kind: keyof PushPrefs | "test";
@@ -26,34 +72,22 @@ export interface SendOptions {
   onlyDevice?: string;
   member?: string;
   device?: string;
-  /** Sent once: a second call with the same key does nothing. */
+  /** Kept once: a second call with the same key does nothing. */
   key?: string;
+  /** Keep it for the list in the app (not for tests). */
+  log?: boolean;
 }
 
-/** Keeps the notification (the list in the app) and sends it to the house's devices that want this kind. */
-export async function sendToHouse(houseId: string, note: Note, o: SendOptions): Promise<{ sent: number; kept: boolean }> {
+/** Keeps the notification (the list behind the bell) and sends it to the house's devices that want this kind. */
+export async function sendToHouse(houseId: string, note: Note, o: SendOptions): Promise<{ sent: number; kept: boolean; results: { device: string; ok: boolean; status?: number; error?: string }[] }> {
   const url = noteUrl(o.houseName, note.open);
-  const kept = await logNotification(houseId, { kind: o.kind, title: note.title, body: note.body, url, member: o.member ?? null, device: o.device ?? null, key: o.key ?? null });
-  if (!kept) return { sent: 0, kept };
-  const k = keys();
-  if (!k) return { sent: 0, kept };
-  webpush.setVapidDetails(k.subject, k.publicKey, k.privateKey);
+  const kept = o.log === false ? true : await logNotification(houseId, { kind: o.kind, title: note.title, body: note.body, url, member: o.member ?? null, device: o.device ?? null, key: o.key ?? null });
+  if (!kept || !pushConfigured()) return { sent: 0, kept, results: [] };
   const subs = (await subscriptionsOf(houseId)).filter(
     (s) => (o.onlyDevice ? s.id === o.onlyDevice : s.id !== o.exceptDevice) && (o.kind === "test" || ({ ...DEFAULT_PREFS, ...s.prefs } as PushPrefs)[o.kind]),
   );
-  const payload = JSON.stringify({ title: note.title, body: note.body, url, tag: o.key ?? `${o.kind}-${Date.now()}` });
-  let sent = 0;
-  await Promise.all(
-    subs.map(async (s) => {
-      try {
-        await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 60 * 60 * 24, urgency: o.kind === "ask" ? "high" : "normal" });
-        sent++;
-      } catch (e) {
-        const status = (e as { statusCode?: number }).statusCode;
-        // Gone: the app was removed or notifications were turned off on that device.
-        if (status === 404 || status === 410) await removeEndpoint(houseId, s.endpoint).catch(() => undefined);
-      }
-    }),
-  );
-  return { sent, kept };
+  const payload: Payload = { title: note.title, body: note.body, url, tag: o.key ?? `${o.kind}-${Date.now()}` };
+  const results = await Promise.all(subs.map(async (s) => ({ device: s.id, ...(await sendTo(houseId, s, payload, o.kind === "ask" ? "high" : "normal")) })));
+  return { sent: results.filter((r) => r.ok).length, kept, results: results.map(({ device, ok, status, error }) => ({ device, ok, status, error })) };
 }
+

@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, BellRinging, BellSimpleSlash, ChatCircleText, Export, PaperPlaneTilt, PlusSquare } from "@phosphor-icons/react";
+import { Bell, BellRinging, BellSimpleSlash, ChatCircleText, Export, PaperPlaneTilt, PlusSquare, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useState } from "react";
 import {
   askToLook,
@@ -13,36 +13,36 @@ import {
   seen,
   sendTest,
   serverPush,
-  support,
+  pushStatus,
   updatePush,
   type Notice,
   type Prefs,
-  type Support,
+  type PushStatus,
 } from "@/lib/push";
 import { useApp } from "./app";
 import { I } from "./icons";
 import { Sheet } from "./ui";
 
-const PREF_LABELS: { key: keyof Prefs; label: string; hint: string }[] = [
+const PREF_LABELS: { key: "ask" | "updates" | "daily"; label: string; hint: string }[] = [
   { key: "ask", label: "Vragen om mee te kijken", hint: "Als je partner wil dat je naar een product of klus kijkt." },
   { key: "updates", label: "Updates van je partner", hint: "Iets besteld, gekozen of binnen, een klus klaar, de planning verschoven." },
-  { key: "daily", label: "Planning van de dag (8:00)", hint: "Wat je moet bestellen, wat morgen komt, welke klus morgen begint." },
+  { key: "daily", label: "Planning van de dag", hint: "Wat je moet bestellen, wat morgen komt, welke klus morgen begint. Alleen op dagen dat er iets is." },
 ];
 
-/** Settings: who am I, turn notifications on, which ones. */
+/** Settings: who am I, turn notifications on, which ones and when. */
 export function NotificationSettings() {
   const { house, toast } = useApp();
-  const [s, setS] = useState<Support | null>(null);
+  const [status, setStatus] = useState<PushStatus | null>(null);
   const [server, setServer] = useState<{ publicKey: string | null; db: boolean } | null>(null);
-  const [prefs, setPrefs] = useState<Prefs | null>(() => devicePrefs.get(house));
+  const [prefs, setPrefs] = useState<Prefs>(() => devicePrefs.get(house) ?? DEFAULT_PREFS);
   const [name, setName] = useState(memberName.get);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
-    setS(support());
+    setStatus(pushStatus(house));
     serverPush().then(setServer);
-  }, []);
+  }, [house]);
 
   async function run(label: string, fn: () => Promise<unknown>) {
     setBusy(label);
@@ -53,69 +53,84 @@ export function NotificationSettings() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy("");
+      setStatus(pushStatus(house));
     }
   }
 
-  const on = !!prefs && s?.permission === "granted";
+  const on = status === "on";
+  const change = (next: Prefs) => {
+    setPrefs(next);
+    if (on) run("prefs", () => updatePush(house, next));
+  };
   const saveName = () => {
     memberName.set(name);
-    if (on) run("name", () => updatePush(house, prefs!));
+    if (on) run("name", () => updatePush(house, prefs));
   };
 
   let body: React.ReactNode;
   if (!house.id || (server && !server.db)) body = <p className="tiny muted">Meldingen werken zodra de woning online bewaard wordt (Supabase gekoppeld).</p>;
   else if (server && !server.publicKey) body = <p className="tiny muted">Meldingen zijn nog niet ingesteld op de server: de VAPID-sleutels ontbreken in Vercel.</p>;
-  else if (s && s.ios && !s.standalone)
+  else if (status === "install")
     body = (
       <div className="advice small">
         <I icon={PlusSquare} size={16} />
         <span>
           Op een iPhone of iPad komen meldingen alleen via de app op je beginscherm: tik in Safari op <I icon={Export} size={14} /> <strong>Deel</strong> →{" "}
-          <strong>Zet op beginscherm</strong>, open furnuture daar en zet hier meldingen aan. (iOS 16.4 of nieuwer.)
+          <strong>Zet op beginscherm</strong>, open furnuture via het icoon en zet hier meldingen aan. (iOS 16.4 of nieuwer.)
         </span>
       </div>
     );
-  else if (s && !s.push) body = <p className="tiny muted">Deze browser kan geen meldingen ontvangen.</p>;
+  else if (status === "unsupported") body = <p className="tiny muted">Deze browser of iOS-versie kan geen meldingen ontvangen (op iPhone: iOS 16.4 of nieuwer).</p>;
+  else if (status === "denied")
+    body = (
+      <div className="advice small warn">
+        <I icon={BellSimpleSlash} size={16} />
+        <span>
+          Meldingen zijn geblokkeerd. Zet ze aan in <strong>Instellingen → Meldingen → furnuture</strong> (iPhone) of in de site-instellingen van je browser, en kom
+          dan hier terug.
+        </span>
+      </div>
+    );
   else
     body = (
-      <>
+      <div className="stack tight">
+        {PREF_LABELS.map((p) => (
+          <label key={p.key} className="row top" style={{ gap: 10 }}>
+            <input type="checkbox" checked={prefs[p.key]} onChange={(e) => change({ ...prefs, [p.key]: e.target.checked })} style={{ marginTop: 3 }} />
+            <span className="stack grow" style={{ gap: 0 }}>
+              <span className="small strong">{p.label}</span>
+              <span className="tiny muted">{p.hint}</span>
+            </span>
+            {p.key === "daily" && (
+              <input
+                type="time"
+                aria-label="Tijd van de planning van de dag"
+                style={{ width: 110 }}
+                disabled={!prefs.daily}
+                value={prefs.dailyTime}
+                onChange={(e) => /^\d{2}:\d{2}$/.test(e.target.value) && change({ ...prefs, dailyTime: e.target.value })}
+              />
+            )}
+          </label>
+        ))}
         {on ? (
-          <div className="stack tight">
-            {PREF_LABELS.map((p) => (
-              <label key={p.key} className="row top" style={{ gap: 10 }}>
-                <input
-                  type="checkbox"
-                  checked={prefs![p.key]}
-                  onChange={(e) => {
-                    const next = { ...prefs!, [p.key]: e.target.checked };
-                    setPrefs(next);
-                    run("prefs", () => updatePush(house, next));
-                  }}
-                  style={{ marginTop: 3 }}
-                />
-                <span className="stack" style={{ gap: 0 }}>
-                  <span className="small strong">{p.label}</span>
-                  <span className="tiny muted">{p.hint}</span>
-                </span>
-              </label>
-            ))}
-            <div className="row wrap-row">
-              <button className="small" disabled={!!busy} onClick={() => run("test", async () => (await sendTest(house)).sent ? toast("Testmelding verstuurd") : setError("Niet aangekomen: zet meldingen uit en weer aan."))}>
-                {busy === "test" ? <span className="spinner" /> : <I icon={PaperPlaneTilt} />} Testmelding
-              </button>
-              <button
-                className="small ghost"
-                disabled={!!busy}
-                onClick={() =>
-                  run("off", async () => {
-                    await disablePush(house);
-                    setPrefs(null);
-                  })
-                }
-              >
-                <I icon={BellSimpleSlash} /> Uitzetten
-              </button>
-            </div>
+          <div className="row wrap-row">
+            <button
+              className="small"
+              disabled={!!busy}
+              onClick={() =>
+                run("test", async () => {
+                  toast("De testmelding komt over 5 seconden: ga naar je beginscherm");
+                  const r = await sendTest(house);
+                  if (!r.sent) throw new Error("Niet aangekomen. Zet meldingen uit en weer aan.");
+                })
+              }
+            >
+              {busy === "test" ? <span className="spinner" /> : <I icon={PaperPlaneTilt} />} Testmelding
+            </button>
+            <button className="small ghost" disabled={!!busy} onClick={() => run("off", () => disablePush(house))}>
+              <I icon={BellSimpleSlash} /> Uitzetten
+            </button>
           </div>
         ) : (
           <div>
@@ -125,18 +140,21 @@ export function NotificationSettings() {
               onClick={() =>
                 run("on", async () => {
                   memberName.set(name);
-                  await enablePush(house, prefs ?? DEFAULT_PREFS);
-                  setPrefs(prefs ?? DEFAULT_PREFS);
+                  await enablePush(house, prefs);
                   toast("Meldingen staan aan");
                 })
               }
             >
               {busy === "on" ? <span className="spinner" /> : <I icon={BellRinging} />} Meldingen aanzetten
             </button>
-            {!name.trim() && <p className="tiny muted" style={{ marginTop: 6 }}>Vul eerst je naam in.</p>}
+            {!name.trim() && (
+              <p className="tiny muted" style={{ marginTop: 6 }}>
+                Vul eerst je naam in.
+              </p>
+            )}
           </div>
         )}
-      </>
+      </div>
     );
 
   return (
@@ -152,6 +170,48 @@ export function NotificationSettings() {
           {error}
         </p>
       )}
+    </div>
+  );
+}
+
+/** A suggestion on the overview, only where notifications can actually work; can be closed for good. */
+export function NotificationSuggestion() {
+  const { house, openSettings } = useApp();
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    if (!house.id || localStorage.getItem("furnuture:push-hint-closed")) return;
+    const st = pushStatus(house);
+    if (st !== "off" && st !== "install") return;
+    serverPush().then((s) => setShow(!!s.publicKey));
+  }, [house]);
+  if (!show) return null;
+  const install = pushStatus(house) === "install";
+  return (
+    <div className="card row wrap-row" style={{ gap: 12, borderColor: "color-mix(in srgb, var(--accent) 35%, var(--line))" }}>
+      <span className="icon-badge accent">
+        <I icon={BellRinging} size={20} />
+      </span>
+      <span className="grow stack" style={{ gap: 2, minWidth: 200 }}>
+        <strong className="small">Meldingen op je telefoon</strong>
+        <span className="tiny muted">
+          {install ? "Zet furnuture op je beginscherm (Deel → Zet op beginscherm) en open het daar: dan kunnen we je iets laten weten." : "Als je partner wil dat je ergens naar kijkt, iets besteld is of een klus begint."}
+        </span>
+      </span>
+      {!install && (
+        <button className="small primary" onClick={openSettings}>
+          Aanzetten
+        </button>
+      )}
+      <button
+        className="small icon ghost"
+        aria-label="Sluiten"
+        onClick={() => {
+          localStorage.setItem("furnuture:push-hint-closed", "1");
+          setShow(false);
+        }}
+      >
+        <I icon={X} />
+      </button>
     </div>
   );
 }
@@ -220,11 +280,13 @@ export function NotificationBell({ onOpen }: { onOpen: (url: string) => void }) 
   useEffect(() => {
     if (!house.id) return;
     load();
+    window.addEventListener("furnuture:push", load);
     const onVisible = () => document.visibilityState === "visible" && load();
     document.addEventListener("visibilitychange", onVisible);
     const timer = setInterval(onVisible, 60_000);
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("furnuture:push", load);
       clearInterval(timer);
     };
   }, [house.id, load]);

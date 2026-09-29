@@ -21,6 +21,8 @@ export interface App {
   openAdd: (opts?: { roomId?: string | null; alternativeOf?: string; links?: string[] }) => void;
   /** Opens a renovation job. */
   openTask: (id: string) => void;
+  /** Opens the settings (budget, notifications…). */
+  openSettings: () => void;
   toast: (text: string, undo?: () => void, action?: ToastAction) => void;
   /** fal.ai is set up: the ✨ features are available. */
   fal: boolean;

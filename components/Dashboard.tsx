@@ -11,6 +11,7 @@ import type { Project } from "@/lib/types";
 import { useApp } from "./app";
 import { HouseHero } from "./HouseView";
 import { PlanningCard } from "./Delivery";
+import { NotificationSuggestion } from "./Notifications";
 import { I, RoomIcon } from "./icons";
 import { Img } from "./Img";
 import { ItemRow } from "./ItemRow";
@@ -39,6 +40,7 @@ export function Dashboard() {
       {/* What to do next comes first; the figures follow once there is something to count. */}
       <RoomDetect compact />
       <NextSteps project={project} />
+      <NotificationSuggestion />
 
       <div className="grid stats">
         <div className="stat">
