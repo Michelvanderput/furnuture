@@ -33,10 +33,17 @@ import { ToastHost, useToast } from "@/components/ui";
 import { HouseGate } from "@/components/HouseGate";
 import { NotificationBell } from "@/components/Notifications";
 import { Welcome } from "@/components/Welcome";
-import { extractFundaPhotos } from "@/lib/extract";
+import { productFromHash } from "@/components/ProductBookmarklet";
+import { guessCategory } from "@/lib/categories";
+import { firstWorkingThumb } from "@/lib/images";
+import { addItems, patchItem } from "@/lib/items";
+import { sameLink, titleFromUrl } from "@/lib/products";
+import { newId } from "@/lib/rooms";
+import type { Item } from "@/lib/types";
+import { extractFundaPhotos, shopName, withoutShopName } from "@/lib/extract";
 import { clearImportHash, currentHouse, houseKey, importFromHash, leaveHouse, rememberHouse, withHouse, type HouseRef } from "@/lib/houses";
 import { href, useRoute, type Route } from "@/lib/route";
-import { extractLinks } from "@/lib/shopping";
+import { extractLinks, parsePrice, shortName } from "@/lib/shopping";
 import { addTasks } from "@/lib/tasks";
 import { clearBadge, ensurePush, registerWorker } from "@/lib/push";
 import { useProject, type SyncState } from "@/lib/useProject";
@@ -175,6 +182,43 @@ function Home({ house, open, onOpened, onLeave }: { house: HouseRef; open?: stri
     else if (!project.listing || confirm(`Deze woning in "${house.name}" laden? Je kamers worden opnieuw ingedeeld; je producten blijven bewaard.`))
       update((p) => withHouse(p, found.url, found.data));
     clearImportHash();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
+
+  // A product sent by the "Product naar furnuture" bookmark arrives as #product={u,t,p,i}:
+  // it goes on the list (or opens, when it is already there) so a room can be picked.
+  useEffect(() => {
+    if (!loaded) return;
+    const got = productFromHash();
+    if (!location.hash.startsWith("#product=")) return;
+    history.replaceState(null, "", location.pathname + location.search + "#/");
+    if (!got) return toast("Het product kon niet worden gelezen.");
+    const known = project.items.find((i) => i.url && sameLink(i.url, got.url));
+    if (known) return setItem(known.id);
+    const shop = shopName(got.url);
+    const title = withoutShopName(got.title, shop) || titleFromUrl(got.url) || shop;
+    const price = got.price ? parsePrice(got.price) : undefined;
+    const item: Item = {
+      id: newId(),
+      roomId: null,
+      title,
+      url: got.url,
+      shop,
+      image: got.image,
+      images: got.image ? [got.image] : [],
+      price,
+      priceHistory: price ? [{ at: new Date().toISOString().slice(0, 10), value: price }] : undefined,
+      qty: 1,
+      category: guessCategory(title),
+      status: "idee",
+      note: "",
+      addedAt: Date.now(),
+      source: "link",
+    };
+    update(addItems([item]));
+    if (got.image) firstWorkingThumb([got.image]).then((r) => r && update(patchItem(item.id, { thumb: r.thumb, image: r.image })));
+    setItem(item.id);
+    toast(`${shortName(title, 40)} toegevoegd: kies hieronder de kamer`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);
 

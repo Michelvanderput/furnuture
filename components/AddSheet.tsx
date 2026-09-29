@@ -12,6 +12,7 @@ import { LinkSimple, PencilSimple } from "@phosphor-icons/react";
 import { useApp } from "./app";
 import { I } from "./icons";
 import { PasteButton } from "./PasteButton";
+import { ProductBookmarklet } from "./ProductBookmarklet";
 import { EuroInput, Sheet, type ToastAction } from "./ui";
 
 /** "Als optie": the new product goes next to the one it competes with (only the chosen one counts). */
@@ -53,12 +54,12 @@ export function AddSheet({ roomId: initialRoom, alternativeOf, links: initialLin
         continue;
       }
       setBusy(list.length > 1 ? `Ophalen ${n + 1} van ${list.length}…` : "Ophalen…");
-      const { item, error, notAProduct } = await itemFromLink(url, roomId);
+      const { item, error, notAProduct, blocked } = await itemFromLink(url, roomId);
       if (notAProduct) {
         failed.push(`${error} Niet toegevoegd.`);
         continue;
       }
-      if (error) failed.push(`${error} De link staat op je lijst; vul naam en prijs zelf in.`);
+      if (error) failed.push(blocked ? `${error} Hij staat al op je lijst.` : `${error} De link staat op je lijst; vul naam en prijs zelf in.`);
       added.push({ ...item, alternativeOf, must: main?.must });
     }
     setBusy("");
@@ -171,6 +172,18 @@ export function AddSheet({ roomId: initialRoom, alternativeOf, links: initialLin
             </div>
           )}
           <p className="tiny muted">Tip: kopieer een link en plak hem ergens op de pagina (Ctrl/⌘+V): dan komt hij direct in de kamer die je bekijkt.</p>
+          <details open={errors.some((e) => e.includes("Product naar furnuture"))}>
+            <summary className="small">Webshop blokkeert het ophalen (Karwei, GAMMA, bol…)?</summary>
+            <div className="stack tight" style={{ paddingTop: 8 }}>
+              <p className="small">
+                Sommige winkels laten hun pagina&apos;s alleen zien aan een echte browser. Sleep <ProductBookmarklet /> naar je bladwijzerbalk. Open daarna het
+                product in de webshop en klik op de bladwijzer: naam, prijs en foto komen dan vanuit je eigen browser in furnuture.
+              </p>
+              <p className="tiny muted">
+                Zonder bladwijzer: de link komt toch op je lijst met de naam uit de link. Vul de prijs dan zelf in.
+              </p>
+            </div>
+          </details>
         </div>
       )}
 

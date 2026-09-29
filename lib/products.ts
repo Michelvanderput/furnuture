@@ -1,3 +1,5 @@
+import { guessCategory } from "./categories";
+import { shopName } from "./extract";
 import { newId } from "./rooms";
 import type { Item, ProductInfo } from "./types";
 
@@ -22,6 +24,27 @@ export async function readProduct(url: string): Promise<ProductInfo> {
   return data;
 }
 
+/**
+ * A readable name from the link itself, for shops that do not let us read the page:
+ * ".../assortiment/karwei-binnenlak-zijdeglans-750-ml/p/B455123" → "Karwei binnenlak zijdeglans 750 ml".
+ */
+export function titleFromUrl(url: string): string | undefined {
+  try {
+    const segs = new URL(url).pathname.split("/").map((s) => decodeURIComponent(s)).filter(Boolean);
+    const best = segs.filter((s) => /[a-z]{3}/i.test(s) && /[-_]/.test(s)).sort((a, b) => b.length - a.length)[0];
+    if (!best) return undefined;
+    const words = best
+      .replace(/\.(html?|aspx?|php)$/i, "")
+      .replace(/[-_+]+/g, " ")
+      .replace(/\b[a-z]{0,2}\d{5,}\b/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    return words.length >= 4 ? words.charAt(0).toUpperCase() + words.slice(1) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const host = (url: string) => {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
@@ -34,7 +57,7 @@ const host = (url: string) => {
  * A webshop link as an item (title, photo, price, size, category). When the shop
  * blocks us the link is kept anyway (with `error`): fill it in by hand or from a screenshot.
  */
-export async function itemFromLink(url: string, roomId: string | null): Promise<{ item: Item; error?: string; notAProduct?: boolean }> {
+export async function itemFromLink(url: string, roomId: string | null): Promise<{ item: Item; error?: string; notAProduct?: boolean; blocked?: boolean }> {
   const base: Item = { id: newId(), roomId, title: host(url), url, images: [], qty: 1, category: "overig", status: "idee", note: "", addedAt: Date.now(), source: "link" };
   try {
     const p = await readProduct(url);
@@ -58,7 +81,23 @@ export async function itemFromLink(url: string, roomId: string | null): Promise<
   } catch (e) {
     // A dead link, or not a product page: nothing worth keeping.
     const notAProduct = e instanceof ProductError && [400, 404, 410, 422].includes(e.status);
-    return { item: { ...base, shop: host(url) }, error: `${host(url)}: ${e instanceof Error ? e.message : e}`, notAProduct };
+    // Otherwise keep what the link itself tells: the shop, a name and so the kind of product.
+    let shop = host(url);
+    try {
+      shop = shopName(url);
+    } catch {
+      // keep the host
+    }
+    const title = titleFromUrl(url) ?? base.title;
+    const blocked = e instanceof ProductError && e.status === 403;
+    return {
+      item: { ...base, title, shop, category: guessCategory(title) },
+      error: blocked
+        ? `${shop} laat de pagina niet automatisch uitlezen. De naam komt uit de link: vul de prijs zelf in, of gebruik de knop "Product naar furnuture" hieronder.`
+        : `${shop}: ${e instanceof Error ? e.message : e}`,
+      notAProduct,
+      blocked,
+    };
   }
 }
 

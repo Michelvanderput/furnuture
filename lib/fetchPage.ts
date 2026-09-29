@@ -8,6 +8,8 @@ const BROWSER_HEADERS = {
   "accept-language": "nl-NL,nl;q=0.9,en;q=0.8",
 };
 
+const CHALLENGE = /Security Checkpoint|Just a moment\.\.\.|cf-challenge|challenge-platform|captcha-delivery|Access Denied<\/title>|Pardon Our Interruption/i;
+
 export class FetchError extends Error {
   constructor(
     message: string,
@@ -77,11 +79,11 @@ export async function fetchHtml(raw: string): Promise<{ html: string; finalUrl: 
   const res = await safeFetch(raw);
   if (!res.ok) {
     if (res.status === 404 || res.status === 410) throw new FetchError("Deze pagina bestaat niet (meer).", 404);
-    throw new FetchError(
-      res.status === 403 || res.status === 429 ? "De website blokkeert automatisch ophalen." : `De website gaf een foutmelding (${res.status}).`,
-      502,
-    );
+    if (res.status === 403 || res.status === 429 || res.status === 503) throw new FetchError("De website blokkeert automatisch ophalen.", 403);
+    throw new FetchError(`De website gaf een foutmelding (${res.status}).`, 502);
   }
   const html = (await res.text()).slice(0, 5_000_000);
+  // Bot checks that answer "200 OK" with a waiting page (Cloudflare, Vercel, Akamai…).
+  if (html.length < 60_000 && CHALLENGE.test(html)) throw new FetchError("De website blokkeert automatisch ophalen.", 403);
   return { html, finalUrl: res.url || raw };
 }
