@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { euro, statusLabel, type Totals } from "@/lib/shopping";
 import type { ItemStatus } from "@/lib/types";
 import { CaretLeft, CaretRight, MagnifyingGlass, Minus, Plus, X } from "@phosphor-icons/react";
@@ -8,6 +9,31 @@ import { I, STATUS_ICON } from "./icons";
 import { Img } from "./Img";
 
 /** A dialog: a bottom sheet on phones, a centred card on bigger screens. Esc or a tap outside closes it. */
+/**
+ * Keeps the page behind a dialog still. On iOS "overflow: hidden" on the body is not
+ * enough (the page scrolls and the dialog jumps); fixing the body in place is. Nested
+ * dialogs share one lock.
+ */
+let locks = 0;
+let savedY = 0;
+function lockScroll(): () => void {
+  if (locks++ === 0) {
+    savedY = window.scrollY;
+    const b = document.body.style;
+    b.position = "fixed";
+    b.top = `-${savedY}px`;
+    b.left = "0";
+    b.right = "0";
+    b.overflow = "hidden";
+  }
+  return () => {
+    if (--locks > 0) return;
+    const b = document.body.style;
+    b.position = b.top = b.left = b.right = b.overflow = "";
+    window.scrollTo(0, savedY);
+  };
+}
+
 export function Sheet({
   title,
   onClose,
@@ -21,17 +47,22 @@ export function Sheet({
   footer?: React.ReactNode;
   wide?: boolean;
 }) {
+  // The latest onClose, without re-running the effects below on every render.
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close.current();
     document.addEventListener("keydown", onKey);
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    const unlock = lockScroll();
     return () => {
       document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = overflow;
+      unlock();
     };
-  }, [onClose]);
-  return (
+  }, []);
+  // Drawn at the end of <body>: a dialog opened from the header (the bell) is not
+  // trapped under the header's layer, below the "+" button.
+  if (typeof document === "undefined") return null;
+  return createPortal(
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className={`sheet${wide ? " wide" : ""}`} role="dialog" aria-modal="true">
         <header>
@@ -43,7 +74,8 @@ export function Sheet({
         <div className="content">{children}</div>
         {footer && <footer>{footer}</footer>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

@@ -1,6 +1,7 @@
 import { guessCategory, guessRoom } from "./categories";
 import { dimsFromJsonLd, dimsFromLabels, dimsFromNamedMeasures, dimsFromTitle, mergeDims, pageText } from "./dimensions";
 import { leadFromJsonLd, parseLeadTime } from "./leadTime";
+import { parsePrice } from "./shopping";
 import type { FundaResult, HouseFacts, ProductInfo, RoomType } from "./types";
 
 /** Minimal HTML helpers: we only need meta tags, JSON-LD and URLs, so no DOM parser. */
@@ -217,8 +218,9 @@ export function isFundaUrl(u: string): boolean {
 type Price = { price: string; priceValue: number };
 
 function formatPrice(amount: unknown, currency: unknown): Price | undefined {
-  const n = typeof amount === "number" ? amount : parseFloat(String(amount ?? "").replace(",", "."));
-  if (!Number.isFinite(n) || n <= 0) return undefined;
+  // "1.299,00", "1299.00", "€ 34,99", 999: parsePrice reads Dutch and English notation.
+  const n = typeof amount === "number" ? amount : parsePrice(String(amount ?? ""));
+  if (n === undefined || !Number.isFinite(n) || n <= 0) return undefined;
   const cur = typeof currency === "string" && currency ? currency : "EUR";
   let price: string;
   try {
@@ -229,13 +231,84 @@ function formatPrice(amount: unknown, currency: unknown): Price | undefined {
   return { price, priceValue: n };
 }
 
-function priceFromOffers(offers: unknown): Price | undefined {
+function priceFromOffers(offers: unknown, depth = 0): Price | undefined {
   const list = Array.isArray(offers) ? offers : offers ? [offers] : [];
   for (const o of list as Json[]) {
-    const p = formatPrice(o.price ?? o.lowPrice ?? (o.priceSpecification as Json | undefined)?.price, o.priceCurrency);
+    if (!o || typeof o !== "object") continue;
+    const spec = [o.priceSpecification].flat().filter(Boolean) as Json[];
+    const p = formatPrice(o.price ?? o.lowPrice ?? spec.find((x) => x.price !== undefined)?.price, o.priceCurrency ?? spec[0]?.priceCurrency);
     if (p) return p;
+    // An AggregateOffer with its offers inside.
+    if (o.offers && depth < 2) {
+      const inner = priceFromOffers(o.offers, depth + 1);
+      if (inner) return inner;
+    }
   }
   return undefined;
+}
+
+/**
+ * A product with sizes or colours (schema.org ProductGroup, or a Product with
+ * hasVariant): the variant the link points to, else the cheapest one.
+ */
+function pickVariant(product: Json | undefined, pageUrl: string): Json | undefined {
+  const variants = Array.isArray(product?.hasVariant) ? (product!.hasVariant as Json[]) : [];
+  if (!variants.length) return undefined;
+  const clean = (u: string) => u.replace(/[?#].*$/, "").replace(/\/$/, "").toLowerCase();
+  const page = clean(pageUrl);
+  const query = new URL(pageUrl).search.toLowerCase();
+  const urlOf = (v: Json) => String(v.url ?? ([v.offers].flat()[0] as Json | undefined)?.url ?? "");
+  const exact = variants.find((v) => urlOf(v) && clean(urlOf(v)) === page && (!query || urlOf(v).toLowerCase().includes(query.slice(1))));
+  const bySku = variants.find((v) => v.sku && (query.includes(String(v.sku).toLowerCase()) || page.includes(String(v.sku).toLowerCase())));
+  const priced = variants.filter((v) => priceFromOffers(v.offers)).sort((a, b) => priceFromOffers(a.offers)!.priceValue! - priceFromOffers(b.offers)!.priceValue!);
+  return exact ?? bySku ?? variants.find((v) => urlOf(v) && clean(urlOf(v)) === page) ?? priced[0];
+}
+
+/**
+ * Shops built as a JavaScript app (Next.js and the like) keep their product data in
+ * the page as (escaped) JSON. Only a price right after the page's own address
+ * counts, so a price of another product on the page is never taken.
+ */
+function priceFromEmbedded(html: string, pageUrl: string): Price | undefined {
+  const path = new URL(pageUrl).pathname.replace(/\/$/, "");
+  if (path.length < 8) return undefined;
+  const json = html.replace(/\\+"/g, '"').replace(/\\\//g, "/");
+  const PRICE = /"(?:finalPrice|salePrice|sellingPrice|currentPrice|price|priceValue|amount)"\s*:\s*"?(\d{1,6}(?:[.,]\d{1,2})?)"?/g;
+  let best: { distance: number; value: string; currency?: string } | undefined;
+  for (const anchor of json.matchAll(new RegExp(`"(?:path|url|href|slug)"\\s*:\\s*"(?:https?://[^/"]+)?${path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/?"`, "g"))) {
+    const at = anchor.index!;
+    const from = Math.max(0, at - 2500);
+    const around = json.slice(from, at + 1500);
+    for (const m of around.matchAll(PRICE)) {
+      const pos = from + m.index!;
+      // Another product's address in between: that price is not ours.
+      const between = pos < at ? json.slice(pos, at) : json.slice(at + anchor[0].length, pos);
+      if (/"(?:path|url)"\s*:\s*"\/[^"]{8,}"/.test(between.replace(anchor[0], ""))) continue;
+      const distance = Math.abs(pos - at);
+      if (!best || distance < best.distance) best = { distance, value: m[1], currency: around.slice(Math.max(0, m.index! - 200), m.index! + 200).match(/"(?:currencyCode|currency|priceCurrency)"\s*:\s*"([A-Z]{3})"/)?.[1] };
+    }
+  }
+  return best ? formatPrice(best.value, best.currency ?? "EUR") : undefined;
+}
+
+/** Photos behind Next.js's image service (/_next/image?url=…). */
+function nextImages(html: string): string[] {
+  return [...html.matchAll(/\/_next\/image\?url=([^&"'\s]+)/g)].map((m) => {
+    try {
+      return decodeURIComponent(m[1]);
+    } catch {
+      return "";
+    }
+  }).filter((u) => /^https?:\/\//.test(u) && !/logo|icon|avatar|review|payment/i.test(u));
+}
+
+/** Prices in the page's HTML itself, for shops without structured data: microdata. */
+function priceFromMarkup(html: string): Price | undefined {
+  const tag = html.match(/<[^>]+itemprop=["']price["'][^>]*>/i)?.[0];
+  const content = tag?.match(/content=["']([^"']+)["']/i)?.[1];
+  if (content) return formatPrice(content, html.match(/itemprop=["']priceCurrency["'][^>]*content=["']([A-Z]{3})["']/i)?.[1]);
+  const text = html.match(/itemprop=["']price["'][^>]*>\s*([^<]{1,20})</i)?.[1];
+  return text ? formatPrice(text, "EUR") : undefined;
 }
 
 export function shopName(pageUrl: string): string {
@@ -342,7 +415,9 @@ export function parseProduct(html: string, pageUrl: string): ProductInfo {
   const ld = extractJsonLd(html);
   const product = ld.find((n) => hasType(n, "Product")) ?? ld.find((n) => hasType(n, "ProductGroup"));
 
+  const variant = pickVariant(product, pageUrl);
   const title =
+    (variant?.name as string | undefined) ??
     (product?.name as string | undefined) ??
     meta.get("og:title")?.[0] ??
     meta.get("twitter:title")?.[0] ??
@@ -351,6 +426,7 @@ export function parseProduct(html: string, pageUrl: string): ProductInfo {
   const variants = Array.isArray(product?.hasVariant) ? (product!.hasVariant as Json[]) : [];
   const images = productImages(
     [
+      ...asImageList(variant?.image),
       ...asImageList(product?.image),
       ...variants.flatMap((v) => asImageList(v.image)),
       ...(meta.get("og:image") ?? []),
@@ -359,16 +435,20 @@ export function parseProduct(html: string, pageUrl: string): ProductInfo {
       ...(meta.get("twitter:image:src") ?? []),
       ...(meta.get("image") ?? []),
       ...linkImages(html),
+      ...nextImages(html).slice(0, 6),
     ],
     pageUrl,
   );
 
   const price =
+    priceFromOffers(variant?.offers) ??
     priceFromOffers(product?.offers) ??
     formatPrice(
       meta.get("product:price:amount")?.[0] ?? meta.get("og:price:amount")?.[0],
       meta.get("product:price:currency")?.[0] ?? meta.get("og:price:currency")?.[0],
-    );
+    ) ??
+    priceFromMarkup(html) ??
+    priceFromEmbedded(html, pageUrl);
 
   const brand = product?.brand;
   const brandName = typeof brand === "string" ? brand : ((brand as Json | undefined)?.name as string | undefined);

@@ -217,7 +217,7 @@ export interface Notice {
 export async function notices(house: HouseRef): Promise<Notice[]> {
   if (!house.id) return [];
   const res = await fetch(`/api/houses/${house.id}/notifications`, { cache: "no-store" });
-  if (!res.ok) return [];
+  if (!res.ok) throw new Error(`Fout ${res.status}`);
   return ((await res.json()) as { notifications: Notice[] }).notifications;
 }
 

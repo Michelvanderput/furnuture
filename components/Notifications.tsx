@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, BellRinging, BellSimpleSlash, ChatCircleText, Export, PaperPlaneTilt, PlusSquare, X } from "@phosphor-icons/react";
+import { ArrowsClockwise, Bell, BellRinging, BellSimpleSlash, CalendarCheck, ChatCircleText, Export, GearSix, PaperPlaneTilt, PlusSquare, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useState } from "react";
 import {
   askToLook,
@@ -267,74 +267,135 @@ export function AskButton({ open, about }: { open: string; about: string }) {
   );
 }
 
-/** The bell in the header: the latest notifications of this house, with a dot for new ones. */
+const KIND_ICON: Record<string, typeof Bell> = { ask: ChatCircleText, updates: ArrowsClockwise, daily: CalendarCheck, test: PaperPlaneTilt };
+const WEEK = 7 * 86_400_000;
+
+/** The bell in the header: the latest notifications of this house, with the number of new ones. */
 export function NotificationBell({ onOpen }: { onOpen: (url: string) => void }) {
-  const { house } = useApp();
-  const [list, setList] = useState<Notice[]>([]);
+  const { house, openSettings } = useApp();
+  const [list, setList] = useState<Notice[] | null>(null);
+  const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
   const [lastSeen, setLastSeen] = useState(() => seen.get(house));
   // While the list is open, what was new stays marked.
   const [since, setSince] = useState("");
 
-  const load = useCallback(() => void notices(house).then(setList), [house]);
+  const load = useCallback(async () => {
+    try {
+      const l = await notices(house);
+      setList(l);
+      setFailed(false);
+      return l;
+    } catch {
+      setFailed(true);
+      return null;
+    }
+  }, [house]);
   useEffect(() => {
     if (!house.id) return;
     load();
-    window.addEventListener("furnuture:push", load);
-    const onVisible = () => document.visibilityState === "visible" && load();
+    const onPush = () => void load();
+    window.addEventListener("furnuture:push", onPush);
+    const onVisible = () => document.visibilityState === "visible" && void load();
     document.addEventListener("visibilitychange", onVisible);
     const timer = setInterval(onVisible, 60_000);
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("furnuture:push", load);
+      window.removeEventListener("furnuture:push", onPush);
       clearInterval(timer);
     };
   }, [house.id, load]);
 
   if (!house.id) return null;
   const me = memberName.get();
-  const unread = list.filter((n) => n.created_at > lastSeen && (!me || n.member !== me)).length;
+  // Never looked (a new device): only the last week counts as new, not everything from before.
+  const cutoff = lastSeen || new Date(Date.now() - WEEK).toISOString();
+  const isNew = (n: Notice, from: string) => n.created_at > from && (!me || n.member !== me);
+  const unread = (list ?? []).filter((n) => isNew(n, cutoff)).length;
+  const markSeen = (l: Notice[] | null) => {
+    const newest = l?.[0]?.created_at;
+    if (newest && newest > (lastSeen || "")) {
+      seen.set(house, newest);
+      setLastSeen(newest);
+    }
+  };
+
   return (
     <>
       <button
         className="ghost icon bell"
         aria-label={unread ? `Meldingen, ${unread} nieuw` : "Meldingen"}
-        onClick={() => {
+        title="Meldingen"
+        onClick={async () => {
+          setSince(cutoff);
           setOpen(true);
-          setSince(lastSeen);
-          load();
-          if (list[0]) {
-            seen.set(house, list[0].created_at);
-            setLastSeen(list[0].created_at);
-          }
+          markSeen(list);
+          markSeen(await load());
         }}
       >
-        <I icon={Bell} size={22} />
+        <I icon={Bell} size={22} weight={unread ? "fill" : "regular"} />
         {unread > 0 && <span className="dot">{unread > 9 ? "9+" : unread}</span>}
       </button>
       {open && (
-        <Sheet title="Meldingen" onClose={() => setOpen(false)} footer={<button className="primary" onClick={() => setOpen(false)}>Klaar</button>}>
-          {list.length ? (
-            <div className="items">
-              {list.map((n) => (
-                <button
-                  key={n.id}
-                  className={`notice${n.created_at > since ? " new" : ""}`}
-                  onClick={() => {
-                    setOpen(false);
-                    if (n.url) onOpen(n.url);
-                  }}
-                >
-                  <span className="grow stack tight">
-                    <strong className="small">{n.title}</strong>
-                    {n.body && <span className="tiny muted pre">{n.body}</span>}
-                  </span>
-                  <span className="tiny muted nowrap">{ago(n.created_at)}</span>
-                </button>
-              ))}
+        <Sheet
+          title="Meldingen"
+          onClose={() => setOpen(false)}
+          footer={
+            <>
+              <button
+                className="ghost"
+                onClick={() => {
+                  setOpen(false);
+                  openSettings();
+                }}
+              >
+                <I icon={GearSix} /> Instellen
+              </button>
+              <span className="grow" />
+              <button className="primary" onClick={() => setOpen(false)}>
+                Klaar
+              </button>
+            </>
+          }
+        >
+          {failed && <p className="small error">De meldingen konden niet geladen worden. Probeer het zo nog eens.</p>}
+          {list === null && !failed ? (
+            <p className="muted small row" style={{ gap: 8 }}>
+              <span className="spinner" /> Laden…
+            </p>
+          ) : list && list.length ? (
+            <div className="notice-list">
+              {list.map((n) => {
+                const Icon = KIND_ICON[n.kind] ?? Bell;
+                return (
+                  <button
+                    key={n.id}
+                    className={`notice${isNew(n, since) ? " new" : ""}`}
+                    disabled={!n.url}
+                    onClick={() => {
+                      setOpen(false);
+                      if (n.url) onOpen(n.url);
+                    }}
+                  >
+                    <span className={`notice-icon kind-${n.kind}`}>
+                      <I icon={Icon} size={18} />
+                    </span>
+                    <span className="grow stack" style={{ gap: 2, minWidth: 0 }}>
+                      <strong className="small">{n.title}</strong>
+                      {n.body && <span className="tiny muted pre">{n.body}</span>}
+                    </span>
+                    <span className="tiny muted nowrap">{ago(n.created_at)}</span>
+                  </button>
+                );
+              })}
             </div>
           ) : (
-            <p className="muted small">Nog geen meldingen. Hier komt wat je partner vraagt of verandert, en de planning van de dag.</p>
+            !failed && (
+              <div className="empty small">
+                <I icon={Bell} size={28} />
+                <span>Nog geen meldingen. Hier komt wat je partner vraagt of verandert, en de planning van de dag.</span>
+              </div>
+            )
           )}
         </Sheet>
       )}
