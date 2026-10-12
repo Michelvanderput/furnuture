@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { countSince, DbError, houseRow, isUuid } from "@/lib/db/supabase";
+import { countSince, DbError, houseRow, isPremium, isUuid } from "@/lib/db/supabase";
 import { sendToHouse } from "@/lib/push.server";
 
 export const runtime = "nodejs";
@@ -17,6 +17,7 @@ export async function POST(req: Request, { params }: Ctx) {
   try {
     const { id } = await params;
     if (!isUuid(id)) throw new DbError("Onbekende woning", 404);
+    if (!(await isPremium(id))) throw new DbError("Meldingen zijn een Premium-functie. Upgrade deze woning via /premium.", 402);
     const b = (await req.json()) as { kind?: string; device?: string; member?: string; open?: string; about?: string; message?: string; delay?: number; to?: string[] };
     const house = await houseRow(id, ["name"]);
     if (!house) throw new DbError("Woning niet gevonden", 404);

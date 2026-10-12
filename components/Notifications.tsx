@@ -1,6 +1,7 @@
 "use client";
 
-import { ArrowsClockwise, Bell, BellRinging, BellSimpleSlash, CalendarCheck, ChatCircleText, Export, GearSix, PaperPlaneTilt, PlusSquare, X } from "@phosphor-icons/react";
+import { ArrowsClockwise, Bell, BellRinging, BellSimpleSlash, CalendarCheck, ChatCircleText, Export, GearSix, PaperPlaneTilt, PlusSquare, Star, X } from "@phosphor-icons/react";
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
   askToLook,
@@ -30,6 +31,32 @@ const PREF_LABELS: { key: "ask" | "updates" | "daily"; label: string; hint: stri
   { key: "daily", label: "Planning van de dag", hint: "Wat je moet bestellen, wat morgen komt, welke klus morgen begint. Alleen op dagen dat er iets is." },
 ];
 
+/** This house's Premium status (meldingen zijn een Premium-functie, server-side afgedwongen). */
+export function usePremium(house: { id?: string }): boolean | null {
+  const [premium, setPremium] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!house.id) return setPremium(null);
+    fetch(`/api/houses/${house.id}/premium`)
+      .then((r) => r.json())
+      .then((d) => setPremium(!!d.premium))
+      .catch(() => setPremium(null));
+  }, [house.id]);
+  return premium;
+}
+
+/** The small "dit is Premium" nudge, with a link to upgrade. */
+export function PremiumUpsell({ text }: { text: string }) {
+  return (
+    <div className="upsell">
+      <Star size={20} weight="fill" />
+      <span>{text}</span>
+      <Link href="/premium" className="btn accent">
+        Upgraden
+      </Link>
+    </div>
+  );
+}
+
 /** Settings: who am I, turn notifications on, which ones and when. */
 export function NotificationSettings() {
   const { house, toast } = useApp();
@@ -39,6 +66,7 @@ export function NotificationSettings() {
   const [name, setName] = useState(memberName.get);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const premium = usePremium(house);
 
   useEffect(() => {
     setStatus(pushStatus(house));
@@ -71,6 +99,7 @@ export function NotificationSettings() {
   let body: React.ReactNode;
   if (!house.id || (server && !server.db)) body = <p className="tiny muted">Meldingen werken zodra de woning online bewaard wordt (Supabase gekoppeld).</p>;
   else if (server && !server.publicKey) body = <p className="tiny muted">Meldingen zijn nog niet ingesteld op de server: de VAPID-sleutels ontbreken in Vercel.</p>;
+  else if (premium === false) body = <PremiumUpsell text="Meldingen zijn een Premium-functie." />;
   else if (status === "install")
     body = (
       <div className="advice small">
@@ -183,7 +212,10 @@ export function NotificationSuggestion() {
     if (!house.id || localStorage.getItem("furnuture:push-hint-closed")) return;
     const st = pushStatus(house);
     if (st !== "off" && st !== "install") return;
-    serverPush().then((s) => setShow(!!s.publicKey));
+    fetch(`/api/houses/${house.id}/premium`)
+      .then((r) => r.json())
+      .then((d) => d.premium && serverPush().then((s) => setShow(!!s.publicKey)))
+      .catch(() => undefined);
   }, [house]);
   if (!show) return null;
   const install = pushStatus(house) === "install";
@@ -226,7 +258,9 @@ export function AskButton({ open, about }: { open: string; about: string }) {
   const [to, setTo] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const premium = usePremium(house);
   if (!house.id) return null;
+  if (premium === false) return <PremiumUpsell text="Vragen om mee te kijken is een Premium-functie." />;
   if (!form)
     return (
       <button

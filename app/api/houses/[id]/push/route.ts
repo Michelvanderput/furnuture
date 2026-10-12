@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { countSubscriptions, DbError, isUuid, removeSubscription, saveSubscription, subscriptionsOf, type PushPrefs } from "@/lib/db/supabase";
+import { countSubscriptions, DbError, isPremium, isUuid, removeSubscription, saveSubscription, subscriptionsOf, type PushPrefs } from "@/lib/db/supabase";
 import { validEndpoint } from "@/lib/push.server";
 import { validTime, validTz } from "@/lib/schedule";
 
@@ -17,6 +17,7 @@ export async function POST(req: Request, { params }: Ctx) {
   try {
     const { id } = await params;
     if (!isUuid(id)) throw new DbError("Onbekende woning", 404);
+    if (!(await isPremium(id))) throw new DbError("Meldingen zijn een Premium-functie. Upgrade deze woning via /premium.", 402);
     const b = (await req.json()) as {
       device?: string;
       member?: string;

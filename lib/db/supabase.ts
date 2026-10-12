@@ -296,3 +296,27 @@ export async function houseRow(id: string, columns: string[]): Promise<Record<st
   const res = await rest(`houses?id=eq.${q(id)}&select=${columns.join(",")}`);
   return ((await res.json()) as Record<string, unknown>[])[0] ?? null;
 }
+
+// ---------------------------------------------------------------------------
+// Premium (see supabase/migrations/…_premium.sql). Deliberately not part of
+// HOUSE_COLUMNS/cleanHouse: a client can never set these through the normal
+// save-changes endpoint, only the Stripe webhook (below) writes them.
+
+export async function isPremium(houseId: string): Promise<boolean> {
+  const row = await houseRow(houseId, ["premium"]);
+  return !!row?.premium;
+}
+
+/** Already paid with this exact Stripe Checkout session (the webhook can fire more than once). */
+export async function premiumSessionSeen(sessionId: string): Promise<boolean> {
+  const res = await rest(`houses?stripe_session_id=eq.${q(sessionId)}&select=id`);
+  return ((await res.json()) as unknown[]).length > 0;
+}
+
+export async function markPremium(houseId: string, email: string, sessionId: string): Promise<void> {
+  await rest(`houses?id=eq.${q(houseId)}`, {
+    method: "PATCH",
+    prefer: "return=minimal",
+    body: JSON.stringify({ premium: true, premium_email: email, premium_since: new Date().toISOString(), stripe_session_id: sessionId }),
+  });
+}
