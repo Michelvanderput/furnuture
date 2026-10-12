@@ -27,6 +27,7 @@ import { patchRenovation, patchTask } from "@/lib/tasks";
 import { useApp } from "./app";
 import { DateBox } from "./Delivery";
 import { I } from "./icons";
+import { PremiumUpsell, usePremium } from "./Notifications";
 
 type View = "agenda" | "maand" | "kamers";
 const VIEW_KEY = "furnuture:planning-view";
@@ -70,6 +71,7 @@ export function PlanningView() {
   const upcoming = events.filter((e) => (e.end ?? e.date) >= now && e.tone !== "done" && e.kind !== "mijlpaal");
   const nextWeek = upcoming.filter((e) => e.date <= addDays(now, 7)).length;
   const calendarUrl = house.id && typeof location !== "undefined" ? `${location.host}/api/houses/${house.id}/agenda.ics` : null;
+  const premium = usePremium(house);
 
   return (
     <section className="page">
@@ -81,7 +83,9 @@ export function PlanningView() {
           </p>
         </div>
         <div className="row wrap-row">
-          {calendarUrl ? (
+          {calendarUrl && premium === false ? (
+            <PremiumUpsell text="Agenda-koppeling is een Premium-functie." />
+          ) : calendarUrl ? (
             <>
               <a className="btn primary" href={`webcal://${calendarUrl}`}>
                 <I icon={CalendarPlus} /> In je agenda

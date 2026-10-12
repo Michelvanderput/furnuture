@@ -18,6 +18,8 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  // Plausible: cookie-free (no cookiebanner needed), only loaded when a domain is configured.
+  const plausibleDomain = process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN;
   return (
     <html lang="nl">
       <head>
@@ -28,6 +30,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           rel="stylesheet"
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,500;0,600;1,600&display=swap"
         />
+        {plausibleDomain && <script defer data-domain={plausibleDomain} src="https://plausible.io/js/script.js" />}
       </head>
       <body>{children}</body>
     </html>

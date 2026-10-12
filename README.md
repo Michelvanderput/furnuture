@@ -52,6 +52,30 @@ Op een iPhone/iPad werken meldingen alleen voor de app op het beginscherm (iOS 1
 
 Veiligheid: de server stuurt alleen naar de echte pushdiensten (Apple, Google, Mozilla, Microsoft), maximaal 20 apparaten per woning, maximaal 30 "kijk even"-vragen per uur.
 
+## Premium (Stripe) en echte authenticatie
+
+Meldingen en de agenda-koppeling (ICS) zijn Premium-functies: een eenmalige betaling per woning, server-side afgedwongen (`premium` op de woning, niet alleen een UI-vlaggetje — zie `lib/db/supabase.ts`). Vóór de betaling wordt het e-mailadres echt geverifieerd met een 6-cijferige code via Supabase Auth (`lib/auth.server.ts`), niet alleen aangenomen: dat e-mailadres staat na betaling vast op de woning, voor facturatie en support.
+
+**Wat al werkt (code, deze PR):**
+- `/premium`: prijzenpagina, e-mailcode-verificatie, start van de Stripe Checkout.
+- `/api/auth/request` + `/api/houses/<id>/checkout`: vraagt/verifieert de code, start de betaling.
+- `/api/stripe/webhook`: zet de woning op Premium na een gelukte betaling.
+- `/api/houses/<id>/push`, `/notify` en `/agenda.ics`: weigeren (402) zonder Premium.
+- `/privacy`, `/terms`: concepttekst (duidelijk gemarkeerd, nog niet juridisch gecontroleerd).
+- `/status`: eenvoudige statuspagina (database, meldingen, betalen, laatste cron-run).
+
+**Wat jij zelf moet doen (kan niet vanuit deze sessie):**
+1. Migratie `supabase/migrations/20261012090000_premium.sql` uitvoeren (gaat vanzelf via de GitHub-koppeling, of plak 'm in Supabase → SQL Editor).
+2. Een Stripe-account aanmaken (KYC) en in Vercel zetten: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (van een webhook-endpoint naar `https://<jouw-app>/api/stripe/webhook` voor het event `checkout.session.completed`), optioneel `PREMIUM_PRICE_EUR` (default 49) of `PREMIUM_PRICE_ID` (een vooraf aangemaakte Stripe Price), en `NEXT_PUBLIC_SITE_URL` (je live URL, voor de redirect na betalen).
+3. In Supabase → Authentication: e-mail-OTP aan laten staan (standaard aan); voor meer dan een paar testmails per uur een eigen SMTP-provider instellen (Supabase's ingebouwde mailer is beperkt qua volume).
+4. Een jurist (of sjabloon van bijv. ICTRecht/KvK) laten kijken naar `/privacy` en `/terms` voordat je ze als definitief publiceert, zeker vanwege de Funda-kwestie (zie hieronder) en persoonsgegevens.
+5. Supabase → Database → Backups: point-in-time recovery aanzetten (vanaf hun Pro-tier) en één keer een restore testen.
+6. Optioneel, voor foutmonitoring: een Sentry-project aanmaken, dan `SENTRY_DSN` (server) en `NEXT_PUBLIC_SENTRY_DSN` (browser) in Vercel zetten — zonder deze blijft Sentry stil uitgeschakeld, de app werkt gewoon door. Voor source maps (leesbare stacktraces) ook `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN`.
+7. Optioneel, voor analytics: een Plausible-site aanmaken en `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` zetten (bijv. `furnuture.nl`) — cookievrij, dus geen cookiebanner nodig.
+8. Een zakelijk e-mailadres/domein voor support en facturatie (nu nog als placeholder in `/privacy`).
+
+Zie ook het audit-/launchplan-document voor de volledige context en volgorde-advies.
+
 ## Ontwikkelen
 
 ```

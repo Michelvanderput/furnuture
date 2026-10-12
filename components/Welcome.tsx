@@ -64,37 +64,44 @@ export function Welcome({
             Welkom, <em>{name}</em>.
           </h1>
           <p className="intro">
-            Deze woning is nieuw. Plak de Funda-link: wij maken de kamers aan, jij verzamelt per kamer wat je gaat kopen en wat er verbouwd moet worden.
+            Deze woning is nieuw. Haal 'm op vanaf Funda: wij maken de kamers aan, jij verzamelt per kamer wat je gaat kopen en wat er verbouwd moet worden.
           </p>
         </div>
-        <form
-          className="url-bar"
-          onSubmit={(e) => {
-            e.preventDefault();
-            load();
-          }}
-        >
-          <input type="url" required placeholder="https://www.funda.nl/detail/koop/…" value={url} onChange={(e) => setUrl(e.target.value)} aria-label="Funda-link" />
-          <PasteButton label="Plak" onPaste={(t) => setUrl(t.match(/https?:\/\/\S+/)?.[0] ?? t)} />
-          <button className="accent" disabled={busy}>
-            {busy ? <span className="spinner" /> : <>Start <I icon={ArrowRight} weight="bold" /></>}
-          </button>
-        </form>
-        {error && (
-          <p className="error small" role="alert">
-            {error}
+        <div className="stack tight">
+          <p className="small">
+            Sleep <FundaBookmarklet /> naar je bladwijzerbalk, open de woning op Funda en klik erop. Dit werkt in je eigen browser, zonder dat onze server Funda
+            hoeft te benaderen.
           </p>
-        )}
+        </div>
         {children}
         <details open={!!error}>
-          <summary>Lukt het niet, of geen Funda-link?</summary>
+          <summary>Lukt het niet via de bladwijzer?</summary>
           <div className="stack">
-            <p className="small">
-              <strong>Via je browser:</strong> sleep <FundaBookmarklet /> naar je bladwijzerbalk, open de woning op Funda en klik erop.
+            <p className="tiny muted">
+              De route hieronder haalt de pagina via onze server op, wat niet overeenkomt met de gebruiksvoorwaarden van Funda — gebruik 'm alleen als de
+              bladwijzer hierboven niet werkt.
             </p>
+            <form
+              className="url-bar"
+              onSubmit={(e) => {
+                e.preventDefault();
+                load();
+              }}
+            >
+              <input type="url" required placeholder="https://www.funda.nl/detail/koop/…" value={url} onChange={(e) => setUrl(e.target.value)} aria-label="Funda-link" />
+              <PasteButton label="Plak" onPaste={(t) => setUrl(t.match(/https?:\/\/\S+/)?.[0] ?? t)} />
+              <button className="accent" disabled={busy}>
+                {busy ? <span className="spinner" /> : <>Start <I icon={ArrowRight} weight="bold" /></>}
+              </button>
+            </form>
+            {error && (
+              <p className="error small" role="alert">
+                {error}
+              </p>
+            )}
             <div className="stack tight">
               <p className="small">
-                <strong>Paginabron:</strong> open de woning op Funda, <kbd>Ctrl</kbd>+<kbd>U</kbd>, alles kopiëren en hier plakken:
+                <strong>Of via de paginabron:</strong> open de woning op Funda, <kbd>Ctrl</kbd>+<kbd>U</kbd>, alles kopiëren en hier plakken:
               </p>
               <textarea rows={3} value={html} onChange={(e) => setHtml(e.target.value)} placeholder="<!DOCTYPE html>…" />
               <div>
