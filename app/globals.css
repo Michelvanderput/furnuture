@@ -852,3 +852,70 @@ input[type="date"]::-webkit-date-and-time-value, input[type="time"]::-webkit-dat
 /* choosing people (who a question goes to) */
 .chip.pick { min-height: 36px; padding: 4px 14px; cursor: pointer; }
 .chip.pick.on { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+
+/* ---------- Premium: plans / upgrade ---------- */
+/* Pricing and the in-app "Premium" upsell. Same tokens as the rest of the app —
+   no new palette, no new type: this is the existing system, not a different one. */
+.plans {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-5);
+  align-items: stretch;
+}
+.plan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6) var(--space-5);
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--t) var(--ease), box-shadow var(--t) var(--ease), border-color var(--t) var(--ease);
+}
+.plan.featured {
+  border-color: var(--accent);
+  box-shadow: var(--shadow);
+  position: relative;
+}
+.plan.featured:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
+@media (prefers-reduced-motion: reduce) { .plan.featured:hover { transform: none; } }
+.plan-badge {
+  position: absolute;
+  top: -13px;
+  left: var(--space-5);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  padding: 4px 12px;
+  border-radius: 99px;
+  box-shadow: var(--shadow-sm);
+}
+.plan-name { font-family: var(--font-heading); font-size: 19px; font-weight: 600; color: var(--ink); }
+.plan-tagline { color: var(--muted); font-size: 14px; margin-top: -8px; }
+.plan-price { display: flex; align-items: baseline; gap: 6px; font-family: var(--font-heading); color: var(--ink); }
+.plan-price .amount { font-size: 38px; font-weight: 600; font-feature-settings: "tnum"; letter-spacing: -0.01em; }
+.plan-price .period { font-family: var(--font-body); font-size: 14px; color: var(--muted); }
+.plan-features { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; flex: 1; }
+.plan-features li { display: flex; align-items: flex-start; gap: 10px; font-size: 14.5px; color: var(--ink-2); line-height: 1.4; }
+.plan-features li svg { flex-shrink: 0; margin-top: 2px; color: var(--ok); }
+.plan-features li.soon svg { color: var(--muted); }
+.plan-features li.soon { color: var(--muted); }
+.plan .btn, .plan button { width: 100%; justify-content: center; min-height: 44px; }
+
+/* The small "this is Premium" nudge inside a free account (a locked feature, a limit reached). */
+.upsell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  background: var(--accent-tint);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  color: var(--accent-ink);
+}
+.upsell svg { flex-shrink: 0; }
+.upsell .btn { margin-left: auto; white-space: nowrap; }
+@media (max-width: 480px) { .upsell { flex-wrap: wrap; } .upsell .btn { margin-left: 0; width: 100%; } }
