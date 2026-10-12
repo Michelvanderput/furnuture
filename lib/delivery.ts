@@ -58,14 +58,14 @@ export interface OrderAdvice {
 }
 
 /** When to order something that is not ordered yet. */
-export function orderAdvice(p: Project, i: Item): OrderAdvice {
+export function orderAdvice(p: Project, i: Item, now = today()): OrderAdvice {
   const move = renovationOf(p).moveDate;
   const ready = roomReady(p, i.roomId).date;
   const lead = i.leadDays;
   if (lead === undefined) return { ready, late: false };
   const latest = move ? addDays(move, -lead) : undefined;
   const earliest = ready ? addDays(ready, 1 - lead) : undefined;
-  return { latest, earliest: earliest && earliest > today() ? earliest : undefined, ready, late: !!latest && latest < today() };
+  return { latest, earliest: earliest && earliest > now ? earliest : undefined, ready, late: !!latest && latest < now };
 }
 
 export type DeliveryIssue = "na-verhuizing" | "voor-klaar" | undefined;
@@ -91,7 +91,7 @@ export interface DeliveryPlan {
   arrived: number;
 }
 
-export function deliveryPlan(p: Project): DeliveryPlan {
+export function deliveryPlan(p: Project, now = today()): DeliveryPlan {
   const items = mainItems(p.items);
   const plan: DeliveryPlan = { toOrder: [], incoming: [], undated: [], noLead: [], arrived: 0 };
   for (const item of items) {
@@ -100,7 +100,7 @@ export function deliveryPlan(p: Project): DeliveryPlan {
       const date = expectedDelivery(item);
       if (date) plan.incoming.push({ item, date, issue: deliveryIssue(p, item, date) });
       else plan.undated.push(item);
-    } else if (item.leadDays !== undefined) plan.toOrder.push({ item, advice: orderAdvice(p, item) });
+    } else if (item.leadDays !== undefined) plan.toOrder.push({ item, advice: orderAdvice(p, item, now) });
     else if (item.status === "gekozen") plan.noLead.push(item);
   }
   plan.toOrder.sort((a, b) => (a.advice.latest ?? "9999").localeCompare(b.advice.latest ?? "9999") || (b.item.leadDays ?? 0) - (a.item.leadDays ?? 0));

@@ -47,7 +47,7 @@ const roomNames = (p: Project, ids: string[]) => (ids.length ? ids.map((id) => p
 
 export function agenda(p: Project, now = today()): Agenda {
   const r = renovationOf(p);
-  const plan = deliveryPlan(p);
+  const plan = deliveryPlan(p, now);
   const late = new Set(lateTasks(r).map((t) => t.id));
   const events: AgendaEvent[] = [];
   const unplanned: Unplanned[] = [];
